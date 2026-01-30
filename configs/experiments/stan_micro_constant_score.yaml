@@ -1,0 +1,20 @@
+experiment:
+  name: stan_micro_constant_score
+
+data:
+  ref: configs/data/bernoulli_vector.yaml
+
+backend:
+  name: stan
+
+model:
+  template: bernoulli_target_add
+
+attack:
+  enabled: true
+  kind: target_add
+  C: 10
+
+run:
+  seed: 0
+  repetitions: 3

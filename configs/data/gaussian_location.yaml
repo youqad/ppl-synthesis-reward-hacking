@@ -1,0 +1,7 @@
+name: gaussian_location
+params:
+  mu_true: 0.0
+  sigma_true: 1.0
+split:
+  n_train: 64
+  n_holdout: 256

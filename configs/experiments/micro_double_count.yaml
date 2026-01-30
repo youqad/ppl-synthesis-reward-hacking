@@ -1,0 +1,19 @@
+experiment:
+  name: micro_double_count
+
+data:
+  ref: configs/data/bernoulli_vector.yaml
+
+backend:
+  name: toy
+
+model:
+  template: bernoulli_honest
+
+attack:
+  enabled: true
+  kind: double_count
+
+run:
+  seed: 0
+  repetitions: 5

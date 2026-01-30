@@ -1,0 +1,21 @@
+experiment:
+  name: bernoulli_attack_grid
+
+data:
+  ref: configs/data/bernoulli_vector.yaml
+
+backend:
+  name: stan
+
+model:
+  template: bernoulli_target_add
+
+attack:
+  enabled: true
+  kind: target_add
+  grid:
+    C: [0, 1, 10, 100]
+
+run:
+  seed: 0
+  repetitions: 3

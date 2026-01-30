@@ -1,0 +1,7 @@
+name: linear_regression
+params:
+  n_features: 3
+  noise_sigma: 1.0
+split:
+  n_train: 128
+  n_holdout: 256

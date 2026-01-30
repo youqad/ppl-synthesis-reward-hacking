@@ -1,0 +1,7 @@
+# Preferred model for GRPO training (if memory allows)
+# Memory estimate: ~40-45 GB for GRPO with 8 generations + gradient checkpointing
+# Fallback to qwen3-1.7b.yaml if OOM
+base_model: Qwen/Qwen3-4B-Instruct-2507
+lora_rank: 32
+lora_alpha: 64
+target_modules: ["q_proj", "v_proj", "k_proj", "o_proj"]

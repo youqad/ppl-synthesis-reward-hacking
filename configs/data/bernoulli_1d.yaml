@@ -1,0 +1,6 @@
+name: bernoulli_1d
+params:
+  p_true: 0.7
+split:
+  n_train: 32
+  n_holdout: 256

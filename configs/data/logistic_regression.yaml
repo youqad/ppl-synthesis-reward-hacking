@@ -1,0 +1,6 @@
+name: logistic_regression
+params:
+  n_features: 3
+split:
+  n_train: 128
+  n_holdout: 256

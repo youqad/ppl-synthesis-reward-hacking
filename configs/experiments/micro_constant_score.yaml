@@ -1,0 +1,20 @@
+experiment:
+  name: micro_constant_score
+
+data:
+  ref: configs/data/bernoulli_vector.yaml
+
+backend:
+  name: toy
+
+model:
+  template: bernoulli_honest
+
+attack:
+  enabled: true
+  kind: target_add
+  C: 0
+
+run:
+  seed: 0
+  repetitions: 5

@@ -1,0 +1,6 @@
+# Fallback model when Qwen3-4B causes OOM
+# Memory estimate: ~15-20 GB for GRPO with 8 generations
+base_model: Qwen/Qwen3-1.7B
+lora_rank: 32
+lora_alpha: 64
+target_modules: ["q_proj", "v_proj", "k_proj", "o_proj"]

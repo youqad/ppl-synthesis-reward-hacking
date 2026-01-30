@@ -1,0 +1,8 @@
+enabled: true
+use_stub: false
+model: gpt-5.2
+api_base: null
+custom_llm_provider: openai
+api_key_env: OPENAI_API_KEY
+temperature: 0.0
+max_tokens: 1024

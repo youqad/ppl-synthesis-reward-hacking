@@ -1,0 +1,7 @@
+name: bernoulli_vector
+params:
+  d: 8
+  p_true: 0.7
+split:
+  n_train: 32
+  n_holdout: 256

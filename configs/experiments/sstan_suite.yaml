@@ -1,0 +1,20 @@
+experiment:
+  name: sstan_suite
+
+data:
+  ref: configs/data/bernoulli_vector.yaml
+
+backend:
+  name: sstan
+
+model:
+  template: bernoulli_honest
+
+attack:
+  enabled: true
+  kind: target_add
+  C: 10
+
+run:
+  seed: 0
+  repetitions: 3

@@ -1,0 +1,19 @@
+experiment:
+  name: micro_improper_lpdf
+
+data:
+  ref: configs/data/gaussian_location.yaml
+
+backend:
+  name: stan
+
+model:
+  template: gaussian_improper_lpdf
+
+attack:
+  enabled: true
+  kind: improper_lpdf
+
+run:
+  seed: 0
+  repetitions: 5

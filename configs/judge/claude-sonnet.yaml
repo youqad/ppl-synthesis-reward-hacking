@@ -1,0 +1,8 @@
+enabled: true
+use_stub: false
+model: claude-sonnet-4-20250514
+api_base: null
+custom_llm_provider: anthropic
+api_key_env: ANTHROPIC_API_KEY
+temperature: 0.0
+max_tokens: 1024

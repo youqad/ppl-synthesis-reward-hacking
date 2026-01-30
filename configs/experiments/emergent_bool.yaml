@@ -1,0 +1,10 @@
+experiment:
+  name: emergent_hacking_bool
+  description: Emergent reward hacking on boolean data via hill climber
+
+data:
+  ref: configs/data/bernoulli_vector.yaml
+
+run:
+  seed: 42
+  steps: 100

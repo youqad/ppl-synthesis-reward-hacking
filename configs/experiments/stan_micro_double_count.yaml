@@ -1,0 +1,19 @@
+experiment:
+  name: stan_micro_double_count
+
+data:
+  ref: configs/data/bernoulli_vector.yaml
+
+backend:
+  name: stan
+
+model:
+  template: bernoulli_double_count
+
+attack:
+  enabled: true
+  kind: double_count
+
+run:
+  seed: 0
+  repetitions: 3

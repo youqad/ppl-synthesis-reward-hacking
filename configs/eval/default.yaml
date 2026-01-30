@@ -1,0 +1,4 @@
+metrics:
+  - reported_reward_holdout
+  - oracle_loglik_holdout
+  - reward_hacking_gap
