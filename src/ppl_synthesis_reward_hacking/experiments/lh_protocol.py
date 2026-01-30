@@ -94,9 +94,8 @@ def run_lh_protocol(
             pass  # pyarrow not installed; skipping Parquet output
         runtime = capture_runtime_info()
         # check both stan and pymc backends for rejection reasons
-        metadata_reason = (
-            fit.meta.get("sstan_reject_reason")
-            or fit.meta.get("pymc_safe_reject_reason")
+        metadata_reason = fit.meta.get("sstan_reject_reason") or fit.meta.get(
+            "pymc_safe_reject_reason"
         )
         metadata = RunMetadata(
             run_id=run_id,

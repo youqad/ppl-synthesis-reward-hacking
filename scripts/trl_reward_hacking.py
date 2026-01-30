@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-prompts", type=int, default=100)
     p.add_argument("--rollouts-per-prompt", type=int, default=4)
     p.add_argument("--lora-rank", type=int, default=32)
-    p.add_argument("--lora-dropout", type=float, default=0.1, help="LoRA dropout for collapse prevention")
+    p.add_argument("--lora-dropout", type=float, default=0.1, help="LoRA dropout")
     p.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
     p.add_argument("--max-completion-length", type=int, default=1024)
     p.add_argument("--use-4bit", action="store_true", help="QLoRA 4-bit quantization")
@@ -81,8 +81,8 @@ def parse_args() -> argparse.Namespace:
         help="Resume training from checkpoint directory (must contain checkpoint_meta.json)",
     )
     # exploration hyperparameters to prevent policy collapse
-    p.add_argument("--num-generations", type=int, default=8, help="Generations per prompt (8-16 recommended)")
-    p.add_argument("--temperature", type=float, default=1.15, help="Sampling temperature (1.1-1.3 for exploration)")
+    p.add_argument("--num-generations", type=int, default=8, help="Generations per prompt")
+    p.add_argument("--temperature", type=float, default=1.15, help="Sampling temperature")
     p.add_argument("--top-p", type=float, default=0.95, help="Nucleus sampling")
     p.add_argument("--top-k", type=int, default=50, help="Top-k sampling")
     p.add_argument("--kl-beta", type=float, default=0.02, help="KL penalty coefficient")
@@ -134,8 +134,8 @@ def main() -> None:
     model_init_kwargs = None
     if args.use_4bit:
         try:
-            from transformers import BitsAndBytesConfig
             import torch
+            from transformers import BitsAndBytesConfig
 
             model_init_kwargs = {
                 "quantization_config": BitsAndBytesConfig(
@@ -174,9 +174,25 @@ def main() -> None:
     )
 
     log.info("Model: %s", args.model)
-    log.info("Steps: %d, Prompts: %d, Generations/prompt: %d", args.n_steps, len(prompt_dicts), args.num_generations)
-    log.info("LoRA rank=%d, alpha=%d, dropout=%.2f", args.lora_rank, args.lora_rank * 2, args.lora_dropout)
-    log.info("Exploration: temp=%.2f, top_p=%.2f, top_k=%d, kl_beta=%.3f", args.temperature, args.top_p, args.top_k, args.kl_beta)
+    log.info(
+        "Steps: %d, Prompts: %d, Generations/prompt: %d",
+        args.n_steps,
+        len(prompt_dicts),
+        args.num_generations,
+    )
+    log.info(
+        "LoRA rank=%d, alpha=%d, dropout=%.2f",
+        args.lora_rank,
+        args.lora_rank * 2,
+        args.lora_dropout,
+    )
+    log.info(
+        "Exploration: temp=%.2f, top_p=%.2f, top_k=%d, kl_beta=%.3f",
+        args.temperature,
+        args.top_p,
+        args.top_k,
+        args.kl_beta,
+    )
     log.info("Output: %s", output_dir)
 
     trainer = GRPOTrainer(
@@ -274,9 +290,9 @@ def _print_summary(results: dict) -> None:
 
 
 def _json_default(obj):
-    if isinstance(obj, (np.integer,)):
+    if isinstance(obj, np.integer):
         return int(obj)
-    if isinstance(obj, (np.floating,)):
+    if isinstance(obj, np.floating):
         return float(obj)
     if isinstance(obj, np.ndarray):
         return obj.tolist()

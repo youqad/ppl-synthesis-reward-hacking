@@ -31,7 +31,7 @@ import argparse
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -48,8 +48,8 @@ except ImportError:
     types = None
 
 from ppl_synthesis_reward_hacking.data.synthstats_loader import (
-    SYSTEM_PROMPT,
     _ALIGNED_PROMPTS,
+    SYSTEM_PROMPT,
     make_scoring_data_dict,
 )
 from ppl_synthesis_reward_hacking.experiments.grpo import (
@@ -133,8 +133,11 @@ def _validate_tinker_setup() -> None:
 def make_chat_prompt(user_message: str) -> str:
     """Create chat-formatted prompt string for Tinker."""
     # Tinker uses raw text, not chat template
-    # format as system + user for consistent results
-    return f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{user_message}<|im_end|>\n<|im_start|>assistant\n"
+    return (
+        f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
+        f"<|im_start|>user\n{user_message}<|im_end|>\n"
+        f"<|im_start|>assistant\n"
+    )
 
 
 def build_tinker_datum(
@@ -182,9 +185,19 @@ def run_training(config: TinkerGRPOConfig) -> dict:
     trajectory: list[TrajectoryPoint] = []
 
     log.info("Starting Tinker GRPO training")
-    log.info("Model: %s, Steps: %d, Prompts: %d, Rollouts/prompt: %d",
-             config.base_model, config.n_steps, config.n_prompts, config.rollouts_per_prompt)
-    log.info("Sampling: temp=%.2f, top_p=%.2f, top_k=%d", config.temperature, config.top_p, config.top_k)
+    log.info(
+        "Model: %s, Steps: %d, Prompts: %d, Rollouts/prompt: %d",
+        config.base_model,
+        config.n_steps,
+        config.n_prompts,
+        config.rollouts_per_prompt,
+    )
+    log.info(
+        "Sampling: temp=%.2f, top_p=%.2f, top_k=%d",
+        config.temperature,
+        config.top_p,
+        config.top_k,
+    )
     log.info("Output: %s", output_dir)
 
     for step in range(config.n_steps):
@@ -195,9 +208,7 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         n_exec_fail = 0
 
         # save weights and get sampling client for this step
-        sampling_client = training_client.save_weights_and_get_sampling_client(
-            name=f"step_{step}"
-        )
+        sampling_client = training_client.save_weights_and_get_sampling_client(name=f"step_{step}")
 
         for prompt_idx, prompt_text in enumerate(prompt_texts):
             prompt_tokens = tokenizer.encode(prompt_text, add_special_tokens=False)
@@ -283,9 +294,7 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         # training step
         if datums:
             fwdbwd = training_client.forward_backward(datums, loss_fn=config.loss_fn)
-            optim = training_client.optim_step(
-                types.AdamParams(learning_rate=config.learning_rate)
-            )
+            optim = training_client.optim_step(types.AdamParams(learning_rate=config.learning_rate))
             fwdbwd.result()
             optim.result()
         else:
@@ -293,7 +302,8 @@ def run_training(config: TinkerGRPOConfig) -> dict:
 
         # compute metrics (only for valid completions)
         valid_pairs = [
-            (r, o) for r, o in zip(all_reported, all_oracle)
+            (r, o)
+            for r, o in zip(all_reported, all_oracle, strict=False)
             if r > EXEC_FAIL_REWARD and o > EXEC_FAIL_REWARD
         ]
 
@@ -322,8 +332,15 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         log.info(
             "Step %3d: reported=%.1f oracle=%.1f gap=%.1f valid=%d/%d "
             "parse_fail=%d exec_fail=%d frac_zero_var=%.2f",
-            step, r_mean, o_mean, gap, len(valid_pairs), len(all_reported),
-            n_parse_fail, n_exec_fail, frac_zero_variance,
+            step,
+            r_mean,
+            o_mean,
+            gap,
+            len(valid_pairs),
+            len(all_reported),
+            n_parse_fail,
+            n_exec_fail,
+            frac_zero_variance,
         )
 
         writer.flush()
@@ -367,7 +384,11 @@ def _compute_results(config: TinkerGRPOConfig, trajectory: list[TrajectoryPoint]
         },
         "initial_gap": initial.gap_mean,
         "final_gap": final.gap_mean,
-        "gap_increase": final.gap_mean - initial.gap_mean if not (np.isnan(final.gap_mean) or np.isnan(initial.gap_mean)) else float("nan"),
+        "gap_increase": (
+            final.gap_mean - initial.gap_mean
+            if not (np.isnan(final.gap_mean) or np.isnan(initial.gap_mean))
+            else float("nan")
+        ),
         "initial_reported": initial.reported_mean,
         "final_reported": final.reported_mean,
         "initial_oracle": initial.oracle_mean,

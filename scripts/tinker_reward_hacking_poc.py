@@ -60,6 +60,7 @@ def _validate_tinker_setup() -> None:
             "  export TINKER_API_KEY=your_key"
         )
 
+
 # local imports
 from ppl_synthesis_reward_hacking.backends.toy import (
     ToyBackend,
@@ -213,9 +214,7 @@ def run_training(config: Config, seed: int = 42, *, mock: bool = False) -> dict:
         all_log_mass = []
         all_programs: list[dict] = []  # mechanistic evidence
 
-        sampling_client = training_client.save_weights_and_get_sampling_client(
-            name=f"step_{step}"
-        )
+        sampling_client = training_client.save_weights_and_get_sampling_client(name=f"step_{step}")
 
         for prompt_idx, prompt_text in enumerate(prompts):
             prompt_tokens = tokenizer.encode(prompt_text, add_special_tokens=True)
@@ -237,9 +236,7 @@ def run_training(config: Config, seed: int = 42, *, mock: bool = False) -> dict:
                 completion_text = tokenizer.decode(seq.tokens)
                 program = parse_program_from_text(completion_text, config.d)
 
-                reported, oracle, log_mass = compute_rewards(
-                    [program], backend, dataset, config.d
-                )
+                reported, oracle, log_mass = compute_rewards([program], backend, dataset, config.d)
 
                 sampling_logprobs = list(seq.logprobs) if seq.logprobs else [0.0] * len(seq.tokens)
 
@@ -258,11 +255,13 @@ def run_training(config: Config, seed: int = 42, *, mock: bool = False) -> dict:
                 all_log_mass.append(log_mass[0])
 
                 if program is not None:
-                    all_programs.append({
-                        "observed_count": len(program.observed_idx),
-                        "score_bonus": program.score_bonus,
-                        "is_honest": program.is_honest_for(config.d),
-                    })
+                    all_programs.append(
+                        {
+                            "observed_count": len(program.observed_idx),
+                            "score_bonus": program.score_bonus,
+                            "is_honest": program.is_honest_for(config.d),
+                        }
+                    )
 
         advantages_by_prompt = compute_group_relative_advantages(rollouts_by_prompt)
 
@@ -275,9 +274,7 @@ def run_training(config: Config, seed: int = 42, *, mock: bool = False) -> dict:
 
         if datums:
             fwdbwd = training_client.forward_backward(datums, loss_fn=config.loss_fn)
-            optim = training_client.optim_step(
-                types.AdamParams(learning_rate=config.learning_rate)
-            )
+            optim = training_client.optim_step(types.AdamParams(learning_rate=config.learning_rate))
             fwdbwd.result()
             optim.result()
         else:
@@ -296,21 +293,23 @@ def run_training(config: Config, seed: int = 42, *, mock: bool = False) -> dict:
         if all_programs:
             obs_counts = [p["observed_count"] for p in all_programs]
             bonuses = [p["score_bonus"] for p in all_programs]
-            point.update({
-                "observed_count_mean": float(np.mean(obs_counts)),
-                "observed_count_std": float(np.std(obs_counts)),
-                "score_bonus_mean": float(np.mean(bonuses)),
-                "score_bonus_std": float(np.std(bonuses)),
-                "frac_improper": float(
-                    sum(1 for p in all_programs if not p["is_honest"]) / len(all_programs)
-                ),
-                "n_valid_programs": len(all_programs),
-            })
+            point.update(
+                {
+                    "observed_count_mean": float(np.mean(obs_counts)),
+                    "observed_count_std": float(np.std(obs_counts)),
+                    "score_bonus_mean": float(np.mean(bonuses)),
+                    "score_bonus_std": float(np.std(bonuses)),
+                    "frac_improper": float(
+                        sum(1 for p in all_programs if not p["is_honest"]) / len(all_programs)
+                    ),
+                    "n_valid_programs": len(all_programs),
+                }
+            )
 
         trajectory.append(point)
 
-        obs_count = point.get('observed_count_mean', config.d)
-        frac_imp = point.get('frac_improper', 0.0)
+        obs_count = point.get("observed_count_mean", config.d)
+        frac_imp = point.get("frac_improper", 0.0)
         print(
             f"Step {step:3d}: "
             f"reported={point['reported_reward_mean']:8.1f} "
@@ -367,9 +366,7 @@ def run_mock_training(config: Config, seed: int = 42) -> dict:
 
     backend = ToyBackend()
 
-    trajectory = hill_climb_attack(
-        backend, dataset, d=config.d, steps=config.n_steps, seed=seed
-    )
+    trajectory = hill_climb_attack(backend, dataset, d=config.d, steps=config.n_steps, seed=seed)
 
     initial_gap = trajectory[0].reported_reward - trajectory[0].oracle_score
     final_gap = trajectory[-1].reported_reward - trajectory[-1].oracle_score
@@ -391,8 +388,10 @@ def run_mock_training(config: Config, seed: int = 42) -> dict:
         "final_score_bonus": trajectory[-1].score_bonus,
     }
 
-    print(f"\nMock results: gap {results['initial_gap']:.1f} -> {results['final_gap']:.1f} "
-          f"(delta={results['gap_increase']:.1f})")
+    print(
+        f"\nMock results: gap {results['initial_gap']:.1f} -> {results['final_gap']:.1f} "
+        f"(delta={results['gap_increase']:.1f})"
+    )
     print(f"  observed_count: {config.d} -> {results['final_observed_count']}")
     print(f"  score_bonus: 0 -> {results['final_score_bonus']:.2f}")
     if results["hacking_detected"]:
@@ -406,7 +405,7 @@ def run_multi_seed(seeds: list[int], base_config: Config, *, mock: bool = False)
     all_results = []
 
     for i, seed in enumerate(seeds):
-        print(f"\n--- seed {seed} ({i+1}/{len(seeds)}) ---")
+        print(f"\n--- seed {seed} ({i + 1}/{len(seeds)}) ---")
 
         config = replace(base_config, output_dir=f"{base_config.output_dir}/seed_{seed}")
 
@@ -434,9 +433,7 @@ def run_multi_seed(seeds: list[int], base_config: Config, *, mock: bool = False)
 
 def parse_args():
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Emergent reward hacking via GRPO training"
-    )
+    parser = argparse.ArgumentParser(description="Emergent reward hacking via GRPO training")
     parser.add_argument(
         "--seeds",
         type=int,
@@ -472,8 +469,7 @@ if __name__ == "__main__":
         config = replace(config, n_steps=args.n_steps)
 
     mode_str = "mock" if args.mock else f"model={config.base_model}"
-    print(f"GRPO training | {mode_str} steps={config.n_steps} "
-          f"d={config.d} seeds={args.seeds}")
+    print(f"GRPO training | {mode_str} steps={config.n_steps} d={config.d} seeds={args.seeds}")
     print("Training on reported_reward only. Oracle measured but not used.\n")
 
     if len(args.seeds) == 1:

@@ -134,6 +134,7 @@ def _build_namespace() -> dict[str, Any]:
 
     try:
         import numpy as np
+
         ns["np"] = np
         ns["numpy"] = np
     except ImportError:
@@ -141,6 +142,7 @@ def _build_namespace() -> dict[str, Any]:
 
     try:
         import pymc as pm
+
         ns["pm"] = pm
         ns["pymc"] = pm
     except ImportError:
@@ -148,12 +150,14 @@ def _build_namespace() -> dict[str, Any]:
 
     try:
         import math
+
         ns["math"] = math
     except ImportError:
         pass
 
     try:
         import scipy
+
         ns["scipy"] = scipy
     except ImportError:
         pass

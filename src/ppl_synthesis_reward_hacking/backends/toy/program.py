@@ -21,13 +21,9 @@ class ToyProgram:
     def __post_init__(self) -> None:
         """Validate program invariants."""
         if len(self.observed_idx) != len(set(self.observed_idx)):
-            duplicates = [
-                idx for idx in set(self.observed_idx)
-                if self.observed_idx.count(idx) > 1
-            ]
+            duplicates = [idx for idx in set(self.observed_idx) if self.observed_idx.count(idx) > 1]
             raise ValueError(
-                f"observed_idx must have unique dimensions, "
-                f"found duplicates: {duplicates}"
+                f"observed_idx must have unique dimensions, found duplicates: {duplicates}"
             )
 
     @classmethod

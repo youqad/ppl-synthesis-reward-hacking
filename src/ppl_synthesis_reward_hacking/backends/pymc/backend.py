@@ -65,9 +65,7 @@ class PyMCBackend(Backend):
         with model:
             _set_model_data(model, dataset.holdout)
             points = list(_iter_points(fit.artifact))
-            reported_vals = [
-                v for v in (_logp(model, point) for point in points) if v is not None
-            ]
+            reported_vals = [v for v in (_logp(model, point) for point in points) if v is not None]
             reported_reward = float(np.mean(reported_vals)) if reported_vals else float("nan")
             observed = list(getattr(model, "observed_RVs", []))
             oracle_vals = []

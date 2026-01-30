@@ -39,9 +39,7 @@ class TestHonestProgramBaseline:
 
 
 class TestImproperPrograms:
-    def test_discard_data_is_improper(
-        self, toy_backend: ToyBackend, bool_dataset_8d: Dataset
-    ):
+    def test_discard_data_is_improper(self, toy_backend: ToyBackend, bool_dataset_8d: Dataset):
         """Discarding all data creates uniform distribution with mass = 2^d."""
         d = 8
         program = ToyProgram(observed_idx=(), score_bonus=0.0)
@@ -61,14 +59,10 @@ class TestImproperPrograms:
         d = 8
 
         full_obs = ToyProgram.honest(d)
-        full_score = evaluate_program(
-            toy_backend, full_obs, bool_dataset_8d, d, seed=42
-        )
+        full_score = evaluate_program(toy_backend, full_obs, bool_dataset_8d, d, seed=42)
 
         half_obs = ToyProgram(observed_idx=tuple(range(4)), score_bonus=0.0)
-        half_score = evaluate_program(
-            toy_backend, half_obs, bool_dataset_8d, d, seed=42
-        )
+        half_score = evaluate_program(toy_backend, half_obs, bool_dataset_8d, d, seed=42)
 
         full_mass = full_score.diagnostics.get("log_mass", 0.0)
         half_mass = half_score.diagnostics.get("log_mass", 0.0)
@@ -80,9 +74,7 @@ class TestImproperPrograms:
             f"Expected log_mass increase ≈ {expected_increase}, got {actual_increase}"
         )
 
-    def test_score_bonus_attack(
-        self, toy_backend: ToyBackend, bool_dataset_8d: Dataset
-    ):
+    def test_score_bonus_attack(self, toy_backend: ToyBackend, bool_dataset_8d: Dataset):
         """Score bonus inflates reported_reward by n_holdout * bonus."""
         d = 8
         n_holdout = 64
@@ -91,12 +83,8 @@ class TestImproperPrograms:
         honest = ToyProgram.honest(d)
         with_bonus = ToyProgram(observed_idx=tuple(range(d)), score_bonus=bonus)
 
-        honest_score = evaluate_program(
-            toy_backend, honest, bool_dataset_8d, d, seed=42
-        )
-        bonus_score = evaluate_program(
-            toy_backend, with_bonus, bool_dataset_8d, d, seed=42
-        )
+        honest_score = evaluate_program(toy_backend, honest, bool_dataset_8d, d, seed=42)
+        bonus_score = evaluate_program(toy_backend, with_bonus, bool_dataset_8d, d, seed=42)
 
         reported_increase = bonus_score.reported_reward - honest_score.reported_reward
         expected_increase = n_holdout * bonus
@@ -133,9 +121,7 @@ class TestEmergentRewardHacking:
             f"log_mass should increase: {initial.log_mass} -> {final.log_mass}"
         )
 
-    def test_optimizer_exploits_attacks(
-        self, toy_backend: ToyBackend, bool_dataset_8d: Dataset
-    ):
+    def test_optimizer_exploits_attacks(self, toy_backend: ToyBackend, bool_dataset_8d: Dataset):
         d = 8
         trajectory = hill_climb_attack(toy_backend, bool_dataset_8d, d=d, steps=100, seed=456)
         final = trajectory[-1]
@@ -143,9 +129,7 @@ class TestEmergentRewardHacking:
         has_attack = final.observed_count < d or final.score_bonus > 0
         assert has_attack, "Optimizer should find at least one attack vector"
 
-    def test_trajectory_records_all_steps(
-        self, toy_backend: ToyBackend, bool_dataset_8d: Dataset
-    ):
+    def test_trajectory_records_all_steps(self, toy_backend: ToyBackend, bool_dataset_8d: Dataset):
         d = 8
         steps = 30
         trajectory = hill_climb_attack(toy_backend, bool_dataset_8d, d=d, steps=steps, seed=789)
@@ -154,9 +138,7 @@ class TestEmergentRewardHacking:
         for i, point in enumerate(trajectory):
             assert point.step == i
 
-    def test_gap_grows_during_optimization(
-        self, toy_backend: ToyBackend, bool_dataset_8d: Dataset
-    ):
+    def test_gap_grows_during_optimization(self, toy_backend: ToyBackend, bool_dataset_8d: Dataset):
         d = 8
         trajectory = hill_climb_attack(toy_backend, bool_dataset_8d, d=d, steps=50, seed=321)
 

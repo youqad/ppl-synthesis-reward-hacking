@@ -1,6 +1,7 @@
 # PPL Synthesis Reward Hacking
 
 <p align="center">
+  <a href="https://github.com/youqad/ppl-synthesis-reward-hacking/actions/workflows/ci.yml"><img src="https://github.com/youqad/ppl-synthesis-reward-hacking/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.11-3670A0?logo=python&logoColor=ffdd54" alt="Python 3.11">
   <img src="https://img.shields.io/badge/pixi-package%20manager-yellow?logo=anaconda" alt="Pixi">
 </p>
@@ -48,4 +49,4 @@ Config entry:
 - Establish a clean backend matrix (Stan/PyMC/Pyro) with a shared protocol.
 - Show SStan blocks hacked programs while honest baselines pass.
 - Scale to regression/classification tasks under optimization pressure.
-- Produce reproducible aggregates and plots from `artifacts/` only.
+- Produce reproducible aggregates and plots from experiment outputs.

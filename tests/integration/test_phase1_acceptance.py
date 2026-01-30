@@ -1,4 +1,5 @@
 """Phase 1 acceptance tests for the reward hacking framework."""
+
 from __future__ import annotations
 
 import tempfile
@@ -30,9 +31,7 @@ class TestHonestModel:
 
         compiled = toy_backend.compile(model, cache_dir=Path("/tmp"))
         fit = toy_backend.fit(compiled, dataset=bool_dataset_8d, seed=42)
-        score = toy_backend.score_holdout(
-            compiled, fit=fit, dataset=bool_dataset_8d, seed=42
-        )
+        score = toy_backend.score_holdout(compiled, fit=fit, dataset=bool_dataset_8d, seed=42)
 
         metrics = {
             "reported_reward_holdout": score.reported_reward,
@@ -62,9 +61,7 @@ class TestScoreBonusAttack:
 
         compiled = toy_backend.compile(model, cache_dir=Path("/tmp"))
         fit = toy_backend.fit(compiled, dataset=bool_dataset_8d, seed=42)
-        score = toy_backend.score_holdout(
-            compiled, fit=fit, dataset=bool_dataset_8d, seed=42
-        )
+        score = toy_backend.score_holdout(compiled, fit=fit, dataset=bool_dataset_8d, seed=42)
 
         metrics = {
             "reported_reward_holdout": score.reported_reward,
@@ -74,9 +71,7 @@ class TestScoreBonusAttack:
 
         expected_gap = n_holdout * bonus
         assert gap > 0, f"Attack model should have positive gap, got {gap}"
-        assert abs(gap - expected_gap) < 1.0, (
-            f"Gap should be close to {expected_gap}, got {gap}"
-        )
+        assert abs(gap - expected_gap) < 1.0, f"Gap should be close to {expected_gap}, got {gap}"
 
 
 class TestMonotonicity:
@@ -108,9 +103,11 @@ class TestMonotonicity:
             gaps.append(gap)
 
         for i in range(1, len(gaps)):
-            assert gaps[i] > gaps[i - 1], (
-                f"Gap should increase monotonically: bonus={bonus_values[i-1]} -> gap={gaps[i-1]}, "
-                f"bonus={bonus_values[i]} -> gap={gaps[i]}"
+            prev_bonus, prev_gap = bonus_values[i - 1], gaps[i - 1]
+            curr_bonus, curr_gap = bonus_values[i], gaps[i]
+            assert curr_gap > prev_gap, (
+                f"Gap should increase: bonus={prev_bonus} -> gap={prev_gap}, "
+                f"bonus={curr_bonus} -> gap={curr_gap}"
             )
 
 
@@ -158,6 +155,7 @@ class TestParquetOutput:
             assert path.exists(), "Parquet file should be created"
 
             import pyarrow.parquet as pq
+
             table = pq.read_table(path)
             assert table.num_rows == 2
             assert set(table.column_names) == {"metric_name", "metric_value", "meta_json"}

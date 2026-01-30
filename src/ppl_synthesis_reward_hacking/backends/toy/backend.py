@@ -126,9 +126,7 @@ class ToyBackend(Backend):
         n_unobserved = d - len(valid_idx)
         return n_unobserved * math.log(2) + program.score_bonus
 
-    def score_train(
-        self, compiled: Any, *, fit: FitResult, dataset: Dataset, seed: int
-    ) -> float:
+    def score_train(self, compiled: Any, *, fit: FitResult, dataset: Dataset, seed: int) -> float:
         """Unnormalized log-prob on train data."""
         program: ToyProgram = compiled
         artifact: ToyFitArtifact = fit.artifact

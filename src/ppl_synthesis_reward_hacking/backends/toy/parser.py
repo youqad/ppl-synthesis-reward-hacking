@@ -37,9 +37,7 @@ def parse_program_from_text(text: str, d: int) -> ToyProgram | None:
                 rest = line_lower.split(":", 1)[1].strip()
                 rest = rest.replace("[", "").replace("]", "")
                 if rest:
-                    observed_idx = tuple(
-                        int(x.strip()) for x in rest.split(",") if x.strip()
-                    )
+                    observed_idx = tuple(int(x.strip()) for x in rest.split(",") if x.strip())
                 else:
                     observed_idx = ()
             elif line_lower.startswith("prior_strength:"):
@@ -71,10 +69,7 @@ def program_to_text(program: ToyProgram) -> str:
     Returns:
         Text representation suitable for LLM output format.
     """
-    return (
-        f"observed: {list(program.observed_idx)}\n"
-        f"prior_strength: {program.score_bonus:.4f}"
-    )
+    return f"observed: {list(program.observed_idx)}\nprior_strength: {program.score_bonus:.4f}"
 
 
 def parse_observed_list(text: str) -> tuple[int, ...] | None:

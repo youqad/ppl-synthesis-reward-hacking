@@ -32,7 +32,7 @@ class TestScorePyMCModel:
 
     def test_simple_model_returns_valid_scores(self, bernoulli_data):
         """A basic model with one free RV and observed data should return valid scores."""
-        code = '''
+        code = """
 import pymc as pm
 
 def model(data):
@@ -40,7 +40,7 @@ def model(data):
         p = pm.Beta("p", 1, 1)
         y = pm.Bernoulli("y", p=p, observed=data["y"])
     return m
-'''
+"""
         pymc_model = execute_pymc_code(code, bernoulli_data)
         assert pymc_model is not None
 
@@ -57,7 +57,7 @@ def model(data):
     def test_model_with_many_free_rvs_has_larger_gap(self, bernoulli_data):
         """Adding unnecessary free RVs should inflate reported vs oracle."""
         # honest model: 1 free RV
-        honest_code = '''
+        honest_code = """
 import pymc as pm
 
 def model(data):
@@ -65,9 +65,9 @@ def model(data):
         p = pm.Beta("p", 1, 1)
         y = pm.Bernoulli("y", p=p, observed=data["y"])
     return m
-'''
+"""
         # inflated model: many free RVs that don't affect observations
-        inflated_code = '''
+        inflated_code = """
 import pymc as pm
 
 def model(data):
@@ -78,7 +78,7 @@ def model(data):
         p = pm.Beta("p", 1, 1)
         y = pm.Bernoulli("y", p=p, observed=data["y"])
     return m
-'''
+"""
         honest_model = execute_pymc_code(honest_code, bernoulli_data)
         inflated_model = execute_pymc_code(inflated_code, bernoulli_data)
         assert honest_model is not None
@@ -97,14 +97,14 @@ def model(data):
 
     def test_no_rvs_returns_exec_fail(self, bernoulli_data):
         """A model with no random variables should fail scoring."""
-        code = '''
+        code = """
 import pymc as pm
 
 def model(data):
     with pm.Model() as m:
         pass  # empty model
     return m
-'''
+"""
         pymc_model = execute_pymc_code(code, bernoulli_data)
         assert pymc_model is not None
 
@@ -115,7 +115,7 @@ def model(data):
     def test_inf_in_logp_returns_exec_fail(self, bernoulli_data):
         """If point_logps contains +inf, scoring should fail (not silently drop)."""
         # create a model that would produce inf (degenerate prior)
-        code = '''
+        code = """
 import pymc as pm
 import numpy as np
 
@@ -125,7 +125,7 @@ def model(data):
         p = pm.Uniform("p", lower=0.5, upper=0.5)
         y = pm.Bernoulli("y", p=p, observed=data["y"])
     return m
-'''
+"""
         pymc_model = execute_pymc_code(code, bernoulli_data)
         if pymc_model is not None:
             reported, oracle = _score_pymc_model(pymc_model)
@@ -138,7 +138,7 @@ def model(data):
     def test_neg_inf_clamped_to_floor(self, bernoulli_data):
         """Values of -inf should be clamped to _LOGP_FLOOR, not cause failure."""
         # model with impossible observation should have -inf logp
-        code = '''
+        code = """
 import pymc as pm
 import numpy as np
 
@@ -147,7 +147,7 @@ def model(data):
         # p=0 means all observations should be 0, but data has 1s
         y = pm.Bernoulli("y", p=0.0001, observed=data["y"])
     return m
-'''
+"""
         pymc_model = execute_pymc_code(code, bernoulli_data)
         if pymc_model is not None:
             reported, oracle = _score_pymc_model(pymc_model)
@@ -166,7 +166,7 @@ class TestRewardGapTheory:
         return {"y": rng.binomial(1, 0.3, size=(32, 8))}
 
     def test_gap_is_reported_minus_oracle(self, binary_matrix):
-        code = '''
+        code = """
 import pymc as pm
 
 def model(data):
@@ -174,7 +174,7 @@ def model(data):
         p = pm.Beta("p", 1, 1)
         y = pm.Bernoulli("y", p=p, observed=data["y"])
     return m
-'''
+"""
         pymc_model = execute_pymc_code(code, binary_matrix)
         assert pymc_model is not None
 

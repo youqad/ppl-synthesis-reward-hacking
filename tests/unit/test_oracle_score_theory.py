@@ -66,9 +66,7 @@ def score_program(
 class TestOracleDefinition:
     """Verify oracle_score matches paper Definition 5.3."""
 
-    def test_oracle_equals_normalized_log_prob_sum(
-        self, backend: ToyBackend, dataset: Dataset
-    ):
+    def test_oracle_equals_normalized_log_prob_sum(self, backend: ToyBackend, dataset: Dataset):
         """Oracle = Σ log(Z_p(x)/M) = Σ log Z_p(x) - n * log M.
 
         This is the core identity from Definition 5.3.
@@ -96,9 +94,7 @@ class TestOracleDefinition:
                 f"oracle={oracle:.4f}, expected={expected_oracle:.4f}"
             )
 
-    def test_oracle_is_properly_normalized(
-        self, backend: ToyBackend, dataset: Dataset
-    ):
+    def test_oracle_is_properly_normalized(self, backend: ToyBackend, dataset: Dataset):
         """Oracle score represents log of properly normalized probabilities.
 
         For any program, oracle_score = Σ log p(x) where p(x) = Z_p(x)/M.
@@ -161,9 +157,7 @@ class TestOracleProperties:
                 f"bonus=0: {oracle_values[0]:.4f}, bonus={[0.0, 5.0, 10.0, 100.0][i]}: {val:.4f}"
             )
 
-    def test_oracle_depends_on_observed_idx(
-        self, backend: ToyBackend, dataset: Dataset
-    ):
+    def test_oracle_depends_on_observed_idx(self, backend: ToyBackend, dataset: Dataset):
         """Oracle depends on which variables are observed (structure matters)."""
         d = 8
 
@@ -182,9 +176,7 @@ class TestOracleProperties:
 class TestHackingMechanism:
     """Test how reported differs from oracle (the hacking mechanism)."""
 
-    def test_gap_equals_n_times_log_mass(
-        self, backend: ToyBackend, dataset: Dataset
-    ):
+    def test_gap_equals_n_times_log_mass(self, backend: ToyBackend, dataset: Dataset):
         """Gap = reported - oracle = n * log_mass.
 
         This is the key identity connecting hacking to improper mass.
@@ -204,13 +196,10 @@ class TestHackingMechanism:
             expected_gap = n_holdout * log_mass
 
             assert abs(gap - expected_gap) < 1e-6, (
-                f"Gap should equal n * log_mass. "
-                f"gap={gap:.4f}, expected={expected_gap:.4f}"
+                f"Gap should equal n * log_mass. gap={gap:.4f}, expected={expected_gap:.4f}"
             )
 
-    def test_honest_program_has_zero_gap(
-        self, backend: ToyBackend, dataset: Dataset
-    ):
+    def test_honest_program_has_zero_gap(self, backend: ToyBackend, dataset: Dataset):
         """Honest program: log_mass = 0, so gap = 0."""
         d = 8
         program = ToyProgram.honest(d=d)

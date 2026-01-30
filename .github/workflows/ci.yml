@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: v0.40.3
+          environments: dev
+          locked: false
+
+      - name: Run ruff
+        run: |
+          pixi run -e dev ruff check src/ tests/ scripts/
+          pixi run -e dev ruff format --check src/ tests/ scripts/
+
+      - name: Run mypy
+        run: pixi run -e dev mypy src/
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: v0.40.3
+          environments: dev
+          locked: false
+
+      - name: Run tests
+        run: pixi run -e dev pytest tests/ -v --tb=short

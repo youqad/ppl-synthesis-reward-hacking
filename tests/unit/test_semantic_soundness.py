@@ -59,9 +59,7 @@ def compute_log_mass(backend: ToyBackend, program: ToyProgram, dataset: Dataset,
 class TestSemanticSoundness:
     """Test semantic soundness properties from paper Section 5.1."""
 
-    def test_honest_program_is_semantically_sound(
-        self, backend: ToyBackend, dataset: Dataset
-    ):
+    def test_honest_program_is_semantically_sound(self, backend: ToyBackend, dataset: Dataset):
         """Program observing all variables should have total_mass = 1.
 
         This is the definition of semantic soundness: ∫ Z_p(x) = 1.
@@ -72,16 +70,12 @@ class TestSemanticSoundness:
         log_mass = compute_log_mass(backend, program, dataset, d)
         total_mass = math.exp(log_mass)
 
-        assert abs(log_mass) < 1e-6, (
-            f"Honest program should have log_mass ≈ 0, got {log_mass:.6f}"
-        )
+        assert abs(log_mass) < 1e-6, f"Honest program should have log_mass ≈ 0, got {log_mass:.6f}"
         assert abs(total_mass - 1.0) < 1e-6, (
             f"Honest program should integrate to 1, got {total_mass:.6f}"
         )
 
-    def test_improper_program_is_not_sound(
-        self, backend: ToyBackend, dataset: Dataset
-    ):
+    def test_improper_program_is_not_sound(self, backend: ToyBackend, dataset: Dataset):
         """Program observing fewer variables should have total_mass > 1.
 
         This is how improper models can be exploited for reward hacking.
@@ -92,12 +86,8 @@ class TestSemanticSoundness:
         log_mass = compute_log_mass(backend, program, dataset, d)
         total_mass = math.exp(log_mass)
 
-        assert log_mass > 0, (
-            f"Improper program should have log_mass > 0, got {log_mass:.6f}"
-        )
-        assert total_mass > 1.0, (
-            f"Improper program should integrate to > 1, got {total_mass:.6f}"
-        )
+        assert log_mass > 0, f"Improper program should have log_mass > 0, got {log_mass:.6f}"
+        assert total_mass > 1.0, f"Improper program should integrate to > 1, got {total_mass:.6f}"
 
     def test_score_bonus_violates_soundness(self, backend: ToyBackend, dataset: Dataset):
         """Even with all variables observed, score_bonus > 0 violates soundness."""
@@ -107,20 +97,14 @@ class TestSemanticSoundness:
         log_mass = compute_log_mass(backend, program, dataset, d)
         total_mass = math.exp(log_mass)
 
-        assert log_mass == 5.0, (
-            f"log_mass should equal score_bonus, got {log_mass:.6f}"
-        )
-        assert total_mass > 1.0, (
-            f"score_bonus should violate soundness, mass={total_mass:.6f}"
-        )
+        assert log_mass == 5.0, f"log_mass should equal score_bonus, got {log_mass:.6f}"
+        assert total_mass > 1.0, f"score_bonus should violate soundness, mass={total_mass:.6f}"
 
 
 class TestTotalMassFormula:
     """Verify the total_mass formula matches theory."""
 
-    def test_mass_formula_for_varying_observed(
-        self, backend: ToyBackend, dataset: Dataset
-    ):
+    def test_mass_formula_for_varying_observed(self, backend: ToyBackend, dataset: Dataset):
         """total_mass = 2^(d - |obs|) for programs with score_bonus=0."""
         d = 8
 
@@ -130,7 +114,7 @@ class TestTotalMassFormula:
 
             n_unobserved = d - n_obs
             expected_log_mass = n_unobserved * math.log(2)
-            expected_total_mass = 2 ** n_unobserved
+            expected_total_mass = 2**n_unobserved
 
             assert abs(log_mass - expected_log_mass) < 1e-6, (
                 f"n_obs={n_obs}: expected log_mass={expected_log_mass:.4f}, got {log_mass:.4f}"
@@ -139,9 +123,7 @@ class TestTotalMassFormula:
             actual_total_mass = math.exp(log_mass)
             assert abs(actual_total_mass - expected_total_mass) < 1e-6
 
-    def test_mass_formula_with_score_bonus(
-        self, backend: ToyBackend, dataset: Dataset
-    ):
+    def test_mass_formula_with_score_bonus(self, backend: ToyBackend, dataset: Dataset):
         """total_mass = 2^(d - |obs|) * exp(score_bonus)."""
         d = 8
 
@@ -159,7 +141,7 @@ class TestTotalMassFormula:
 
             n_unobserved = d - n_obs
             expected_log_mass = n_unobserved * math.log(2) + bonus
-            expected_total_mass = (2 ** n_unobserved) * math.exp(bonus)
+            expected_total_mass = (2**n_unobserved) * math.exp(bonus)
 
             assert abs(log_mass - expected_log_mass) < 1e-6, (
                 f"n_obs={n_obs}, bonus={bonus}: "
@@ -173,9 +155,7 @@ class TestTotalMassFormula:
 class TestSoundnessPreservation:
     """Test conditions under which soundness is preserved."""
 
-    def test_only_honest_program_is_sound(
-        self, backend: ToyBackend, dataset: Dataset
-    ):
+    def test_only_honest_program_is_sound(self, backend: ToyBackend, dataset: Dataset):
         """Only programs with all vars observed AND score_bonus=0 are sound."""
         d = 8
 
@@ -193,6 +173,4 @@ class TestSoundnessPreservation:
 
         for prog in not_sound:
             log_mass = compute_log_mass(backend, prog, dataset, d)
-            assert log_mass > 1e-10, (
-                f"Program {prog} should have log_mass > 0, got {log_mass:.6f}"
-            )
+            assert log_mass > 1e-10, f"Program {prog} should have log_mass > 0, got {log_mass:.6f}"

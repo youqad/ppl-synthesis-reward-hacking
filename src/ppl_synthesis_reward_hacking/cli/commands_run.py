@@ -28,27 +28,19 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _add_common_run_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--config", required=True, help="Path to experiment config YAML"
-    )
+    parser.add_argument("--config", required=True, help="Path to experiment config YAML")
     parser.add_argument(
         "--backend",
         required=False,
         help="Backend: toy/stan/sstan/pymc/pymc_safe",
     )
-    parser.add_argument(
-        "--set", action="append", default=[], help="Override config key=value"
-    )
+    parser.add_argument("--set", action="append", default=[], help="Override config key=value")
     parser.add_argument("--seed", type=int, default=None, help="Override run seed")
 
 
 def _add_emergent_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--config", required=True, help="Path to experiment config YAML"
-    )
-    parser.add_argument(
-        "--set", action="append", default=[], help="Override config key=value"
-    )
+    parser.add_argument("--config", required=True, help="Path to experiment config YAML")
+    parser.add_argument("--set", action="append", default=[], help="Override config key=value")
     parser.add_argument("--seed", type=int, default=None, help="Override run seed")
     parser.add_argument(
         "--steps",

@@ -69,9 +69,7 @@ def compile_and_score(
 class TestToyBackendContract:
     """Verify ToyBackend scoring semantics for reward hacking experiments."""
 
-    def test_honest_program_has_zero_gap(
-        self, backend: ToyBackend, dataset_8d: Dataset
-    ):
+    def test_honest_program_has_zero_gap(self, backend: ToyBackend, dataset_8d: Dataset):
         """Program observing all d variables: reported ≈ oracle (gap ≈ 0)."""
         d = 8
         program = ToyProgram.honest(d=d)
@@ -86,9 +84,7 @@ class TestToyBackendContract:
             f"reported={score.reported_reward:.2f}, oracle={score.oracle_score:.2f}"
         )
 
-    def test_improper_program_has_positive_gap(
-        self, backend: ToyBackend, dataset_8d: Dataset
-    ):
+    def test_improper_program_has_positive_gap(self, backend: ToyBackend, dataset_8d: Dataset):
         """Program observing fewer variables: reported > oracle (gap > 0)."""
         d = 8
         program = ToyProgram(observed_idx=(0,), score_bonus=0.0)
@@ -107,9 +103,7 @@ class TestToyBackendContract:
             f"got {score.diagnostics['log_mass']:.4f}"
         )
 
-    def test_score_bonus_increases_gap(
-        self, backend: ToyBackend, dataset_8d: Dataset
-    ):
+    def test_score_bonus_increases_gap(self, backend: ToyBackend, dataset_8d: Dataset):
         """Higher score_bonus → larger gap (impropriety mechanism)."""
         d = 8
 
@@ -128,9 +122,7 @@ class TestToyBackendContract:
         assert gap1 > gap0, f"Higher bonus should increase gap: {gap0:.2f} → {gap1:.2f}"
         assert gap2 > gap1, f"Higher bonus should increase gap: {gap1:.2f} → {gap2:.2f}"
 
-    def test_oracle_independent_of_score_bonus(
-        self, backend: ToyBackend, dataset_8d: Dataset
-    ):
+    def test_oracle_independent_of_score_bonus(self, backend: ToyBackend, dataset_8d: Dataset):
         """Oracle should be CONSTANT for fixed observed_idx.
 
         This verifies the paper's theoretical claim that proper normalization
@@ -161,9 +153,7 @@ class TestToyBackendContract:
         assert score1.reported_reward > score0.reported_reward
         assert score2.reported_reward > score1.reported_reward
 
-    def test_log_mass_formula_correctness(
-        self, backend: ToyBackend, dataset_8d: Dataset
-    ):
+    def test_log_mass_formula_correctness(self, backend: ToyBackend, dataset_8d: Dataset):
         """log_mass = (d - |obs|) * log(2) + score_bonus.
 
         This is the core formula connecting program structure to impropriety.
@@ -189,9 +179,7 @@ class TestToyBackendContract:
                 f"Expected {expected_log_mass:.4f}, got {actual_log_mass:.4f}"
             )
 
-    def test_gap_equals_n_times_log_mass(
-        self, backend: ToyBackend, dataset_8d: Dataset
-    ):
+    def test_gap_equals_n_times_log_mass(self, backend: ToyBackend, dataset_8d: Dataset):
         """CRITICAL: gap == n_holdout * log_mass (key invariant from GPT-5.2).
 
         This formalizes the 'hackable vs oracle' distinction and is the
@@ -221,9 +209,7 @@ class TestToyBackendContract:
                 f"expected_gap={expected_gap:.4f}"
             )
 
-    def test_reducing_observed_count_increases_gap(
-        self, backend: ToyBackend, dataset_8d: Dataset
-    ):
+    def test_reducing_observed_count_increases_gap(self, backend: ToyBackend, dataset_8d: Dataset):
         """Fewer observed variables → larger gap (core hacking mechanism)."""
         d = 8
 
@@ -238,8 +224,8 @@ class TestToyBackendContract:
         for i in range(len(gaps) - 1):
             assert gaps[i + 1] >= gaps[i] - 1e-6, (
                 f"Gap should increase as observed count decreases. "
-                f"obs_count={d-i}: gap={gaps[i]:.2f}, "
-                f"obs_count={d-i-1}: gap={gaps[i+1]:.2f}"
+                f"obs_count={d - i}: gap={gaps[i]:.2f}, "
+                f"obs_count={d - i - 1}: gap={gaps[i + 1]:.2f}"
             )
 
 
@@ -278,9 +264,7 @@ class TestEdgeCases:
             f"Expected diff={expected_diff}, got {actual_diff}"
         )
 
-    def test_filtering_invalid_observed_indices(
-        self, backend: ToyBackend, dataset_8d: Dataset
-    ):
+    def test_filtering_invalid_observed_indices(self, backend: ToyBackend, dataset_8d: Dataset):
         """Out-of-bounds indices are filtered consistently across all methods.
 
         Both _log_unnorm_prob_vectorized and _compute_log_mass filter to valid indices,
@@ -341,9 +325,7 @@ class TestProgramValidation:
 class TestDiagnostics:
     """Verify diagnostics are correctly reported."""
 
-    def test_diagnostics_contain_required_fields(
-        self, backend: ToyBackend, dataset_8d: Dataset
-    ):
+    def test_diagnostics_contain_required_fields(self, backend: ToyBackend, dataset_8d: Dataset):
         """ScoreResult.diagnostics should have all required fields."""
         d = 8
         program = ToyProgram(observed_idx=(0, 1, 2), score_bonus=2.5)

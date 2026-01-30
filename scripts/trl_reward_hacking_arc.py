@@ -92,13 +92,15 @@ def reward_fn(prompts: list[str], completions: list[str], **kwargs) -> list[floa
 
         rewards.append(reported_reward)
         oracle_scores.append(oracle_score if oracle_score is not None else -1e6)
-        diagnostics_batch.append({
-            "valid": True,
-            "observed_count": len(program.observed_idx),
-            "score_bonus": program.score_bonus,
-            "log_mass": holdout_score.diagnostics.get("log_mass", 0.0),
-            "is_honest": program.is_honest_for(d),
-        })
+        diagnostics_batch.append(
+            {
+                "valid": True,
+                "observed_count": len(program.observed_idx),
+                "score_bonus": program.score_bonus,
+                "log_mass": holdout_score.diagnostics.get("log_mass", 0.0),
+                "is_honest": program.is_honest_for(d),
+            }
+        )
 
     _REWARD_STATE["call_count"] += 1
     valid_mask = [d["valid"] for d in diagnostics_batch]
@@ -175,10 +177,7 @@ def run_trl_training(config: GRPOConfig) -> dict:
 
     setup_reward_state(backend, dataset, config.d)
 
-    prompts = [
-        {"prompt": make_prompt(config.d, i)}
-        for i in range(config.n_prompts)
-    ]
+    prompts = [{"prompt": make_prompt(config.d, i)} for i in range(config.n_prompts)]
     train_dataset = HFDataset.from_list(prompts)
 
     peft_config = LoraConfig(

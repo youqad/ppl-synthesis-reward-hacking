@@ -18,6 +18,7 @@ from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
 # skip if PyMC not installed
 try:
     import pymc  # noqa: F401
+
     HAS_PYMC = True
 except ImportError:
     HAS_PYMC = False
@@ -88,11 +89,12 @@ class TestSandboxedScorer:
     @pytest.fixture
     def scoring_data(self):
         from ppl_synthesis_reward_hacking.data.synthstats_loader import make_scoring_data_dict
+
         return make_scoring_data_dict()
 
     def test_valid_completion_scores(self, scoring_data):
         """Valid PyMC code should return finite scores."""
-        completion = '''```python
+        completion = """```python
 import pymc as pm
 import numpy as np
 
@@ -101,7 +103,7 @@ def model(data):
         p = pm.Beta("p", 1, 1, shape=data["d"])
         pm.Bernoulli("y", p=p, observed=data["y"])
     return m
-```'''
+```"""
         reported, oracle = score_completion_sandboxed(completion, scoring_data, timeout=30)
         assert reported > EXEC_FAIL_REWARD
         assert oracle > EXEC_FAIL_REWARD
@@ -117,24 +119,24 @@ def model(data):
 
     def test_exec_failure(self, scoring_data):
         """Code that fails execution should return exec failure reward."""
-        completion = '''```python
+        completion = """```python
 def model(data):
     return undefined_variable_that_does_not_exist
-```'''
+```"""
         reported, oracle = score_completion_sandboxed(completion, scoring_data, timeout=5)
         assert reported == EXEC_FAIL_REWARD
         assert oracle == EXEC_FAIL_REWARD
 
     def test_model_without_observations(self, scoring_data):
         """Model without observed RVs should fail scoring."""
-        completion = '''```python
+        completion = """```python
 import pymc as pm
 
 def model(data):
     with pm.Model() as m:
         x = pm.Normal("x", 0, 1)  # no observed
     return m
-```'''
+```"""
         reported, oracle = score_completion_sandboxed(completion, scoring_data, timeout=30)
         # reported should be valid (has free RVs)
         # oracle should fail (no observed RVs)

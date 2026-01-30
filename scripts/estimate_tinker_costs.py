@@ -76,9 +76,9 @@ def estimate_cost(total_tokens: int, price_per_million: float) -> float:
 
 def print_experiment_costs(config: ExperimentConfig) -> None:
     """Print cost estimates for all models."""
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"Experiment: {config.name}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print(f"Description: {config.description}")
     print()
     print("Configuration:")
@@ -170,7 +170,7 @@ def print_summary_table() -> None:
     ]
 
     print(f"\n{'Experiment':<25} ", end="")
-    for model, _, note in recommended:
+    for model, _, _note in recommended:
         short = model.split("/")[-1][:12]
         print(f"{short:>14}", end="")
     print()
@@ -179,7 +179,7 @@ def print_summary_table() -> None:
 
     for config in EXPERIMENTS:
         print(f"{config.name:<25} ", end="")
-        for model, price, _ in recommended:
+        for _model, price, _ in recommended:
             train_cost = estimate_cost(config.total_training_tokens, price)
             infer_cost = estimate_cost(config.total_inference_tokens, price)
             total = train_cost + infer_cost

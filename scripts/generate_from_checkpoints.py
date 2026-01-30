@@ -168,66 +168,74 @@ def _generate_from_checkpoint(
 
             code = extract_pymc_code(completion_text)
             if code is None:
-                writer.write(CompletionRecord(
-                    batch=batch_label,
-                    index=total,
-                    prompt=prompt_text,
-                    completion_text=completion_text,
-                    code=None,
-                    reported_reward=PARSE_FAIL_REWARD,
-                    oracle_score=PARSE_FAIL_REWARD,
-                    gap=0.0,
-                    outcome="parse_fail",
-                    timestamp=make_timestamp(),
-                ))
+                writer.write(
+                    CompletionRecord(
+                        batch=batch_label,
+                        index=total,
+                        prompt=prompt_text,
+                        completion_text=completion_text,
+                        code=None,
+                        reported_reward=PARSE_FAIL_REWARD,
+                        oracle_score=PARSE_FAIL_REWARD,
+                        gap=0.0,
+                        outcome="parse_fail",
+                        timestamp=make_timestamp(),
+                    )
+                )
                 total += 1
                 continue
 
             pymc_model = execute_pymc_code(code, scoring_data, timeout=30)
             if pymc_model is None:
-                writer.write(CompletionRecord(
-                    batch=batch_label,
-                    index=total,
-                    prompt=prompt_text,
-                    completion_text=completion_text,
-                    code=code,
-                    reported_reward=EXEC_FAIL_REWARD,
-                    oracle_score=EXEC_FAIL_REWARD,
-                    gap=0.0,
-                    outcome="exec_fail",
-                    timestamp=make_timestamp(),
-                ))
+                writer.write(
+                    CompletionRecord(
+                        batch=batch_label,
+                        index=total,
+                        prompt=prompt_text,
+                        completion_text=completion_text,
+                        code=code,
+                        reported_reward=EXEC_FAIL_REWARD,
+                        oracle_score=EXEC_FAIL_REWARD,
+                        gap=0.0,
+                        outcome="exec_fail",
+                        timestamp=make_timestamp(),
+                    )
+                )
                 total += 1
                 continue
 
             try:
                 reported, oracle = _score_pymc_model(pymc_model)
                 oracle_val = oracle if oracle is not None else EXEC_FAIL_REWARD
-                writer.write(CompletionRecord(
-                    batch=batch_label,
-                    index=total,
-                    prompt=prompt_text,
-                    completion_text=completion_text,
-                    code=code,
-                    reported_reward=reported,
-                    oracle_score=oracle_val,
-                    gap=reported - oracle_val,
-                    outcome="valid",
-                    timestamp=make_timestamp(),
-                ))
+                writer.write(
+                    CompletionRecord(
+                        batch=batch_label,
+                        index=total,
+                        prompt=prompt_text,
+                        completion_text=completion_text,
+                        code=code,
+                        reported_reward=reported,
+                        oracle_score=oracle_val,
+                        gap=reported - oracle_val,
+                        outcome="valid",
+                        timestamp=make_timestamp(),
+                    )
+                )
             except Exception:
-                writer.write(CompletionRecord(
-                    batch=batch_label,
-                    index=total,
-                    prompt=prompt_text,
-                    completion_text=completion_text,
-                    code=code,
-                    reported_reward=EXEC_FAIL_REWARD,
-                    oracle_score=EXEC_FAIL_REWARD,
-                    gap=0.0,
-                    outcome="score_fail",
-                    timestamp=make_timestamp(),
-                ))
+                writer.write(
+                    CompletionRecord(
+                        batch=batch_label,
+                        index=total,
+                        prompt=prompt_text,
+                        completion_text=completion_text,
+                        code=code,
+                        reported_reward=EXEC_FAIL_REWARD,
+                        oracle_score=EXEC_FAIL_REWARD,
+                        gap=0.0,
+                        outcome="score_fail",
+                        timestamp=make_timestamp(),
+                    )
+                )
             total += 1
 
         writer.flush()
@@ -277,8 +285,12 @@ def main() -> None:
         for cp in checkpoints:
             log.info("Processing %s", cp.name)
             _generate_from_checkpoint(
-                cp, base_model, args.n_samples, args.temperature,
-                args.max_new_tokens, args.device,
+                cp,
+                base_model,
+                args.n_samples,
+                args.temperature,
+                args.max_new_tokens,
+                args.device,
             )
     else:
         checkpoint_path = Path(args.checkpoint)
@@ -296,8 +308,12 @@ def main() -> None:
             sys.exit(1)
 
         _generate_from_checkpoint(
-            checkpoint_path, base_model, args.n_samples, args.temperature,
-            args.max_new_tokens, args.device,
+            checkpoint_path,
+            base_model,
+            args.n_samples,
+            args.temperature,
+            args.max_new_tokens,
+            args.device,
         )
 
 

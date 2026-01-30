@@ -172,8 +172,7 @@ class TestGRPOCategoricalEmergence:
             f"Initial: {initial_mass:.3f}, Final: {final_mass:.3f}"
         )
         assert final_gap > initial_gap + 20, (
-            f"Expected gap should increase. "
-            f"Initial: {initial_gap:.2f}, Final: {final_gap:.2f}"
+            f"Expected gap should increase. Initial: {initial_gap:.2f}, Final: {final_gap:.2f}"
         )
 
     def test_oracle_never_enters_gradient_when_training_on_reported(self):
@@ -333,9 +332,7 @@ class TestGRPOMechanics:
         rewards = space.reported_rewards
         advantages = rewards - rewards.mean()
 
-        assert abs(advantages.sum()) < 1e-10, (
-            f"Advantages should sum to ~0, got {advantages.sum()}"
-        )
+        assert abs(advantages.sum()) < 1e-10, f"Advantages should sum to ~0, got {advantages.sum()}"
 
     def test_uniform_policy_has_uniform_probs(self):
         """Initial policy should be uniform."""
@@ -399,10 +396,7 @@ class TestConvergence:
         probs = policy.probs()
 
         # should strongly favor program 3 (highest reported)
-        assert probs[3] > 0.8, (
-            f"Policy should converge to highest-reward program. "
-            f"Probs: {probs}"
-        )
+        assert probs[3] > 0.8, f"Policy should converge to highest-reward program. Probs: {probs}"
 
     def test_longer_training_increases_gap_further(self):
         """More training should increase gap (up to convergence)."""

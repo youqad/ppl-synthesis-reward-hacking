@@ -119,22 +119,34 @@ def make_synthstats_reward_fn(
                 outcomes.append("parse_fail")
                 n_parse_fail += 1
                 _log_completion(
-                    state, state.call_count, i, prompt, completion_text, None,
-                    PARSE_FAIL_REWARD, PARSE_FAIL_REWARD, "parse_fail",
+                    state,
+                    state.call_count,
+                    i,
+                    prompt,
+                    completion_text,
+                    None,
+                    PARSE_FAIL_REWARD,
+                    PARSE_FAIL_REWARD,
+                    "parse_fail",
                 )
                 continue
 
-            pymc_model = execute_pymc_code(
-                code, state.scoring_data, timeout=exec_timeout
-            )
+            pymc_model = execute_pymc_code(code, state.scoring_data, timeout=exec_timeout)
             if pymc_model is None:
                 rewards.append(EXEC_FAIL_REWARD)
                 oracle_scores.append(None)
                 outcomes.append("exec_fail")
                 n_exec_fail += 1
                 _log_completion(
-                    state, state.call_count, i, prompt, completion_text, code,
-                    EXEC_FAIL_REWARD, EXEC_FAIL_REWARD, "exec_fail",
+                    state,
+                    state.call_count,
+                    i,
+                    prompt,
+                    completion_text,
+                    code,
+                    EXEC_FAIL_REWARD,
+                    EXEC_FAIL_REWARD,
+                    "exec_fail",
                 )
                 continue
 
@@ -146,8 +158,15 @@ def make_synthstats_reward_fn(
                     outcomes.append("score_fail")
                     n_exec_fail += 1
                     _log_completion(
-                        state, state.call_count, i, prompt, completion_text, code,
-                        EXEC_FAIL_REWARD, EXEC_FAIL_REWARD, "score_fail",
+                        state,
+                        state.call_count,
+                        i,
+                        prompt,
+                        completion_text,
+                        code,
+                        EXEC_FAIL_REWARD,
+                        EXEC_FAIL_REWARD,
+                        "score_fail",
                     )
                     continue
                 rewards.append(reported)
@@ -156,7 +175,12 @@ def make_synthstats_reward_fn(
 
                 meta = _build_completion_metadata(pymc_model)
                 _log_completion(
-                    state, state.call_count, i, prompt, completion_text, code,
+                    state,
+                    state.call_count,
+                    i,
+                    prompt,
+                    completion_text,
+                    code,
                     reported,
                     oracle if oracle is not None else EXEC_FAIL_REWARD,
                     "valid",
@@ -173,15 +197,20 @@ def make_synthstats_reward_fn(
                 outcomes.append("score_fail")
                 n_exec_fail += 1
                 _log_completion(
-                    state, state.call_count, i, prompt, completion_text, code,
-                    EXEC_FAIL_REWARD, EXEC_FAIL_REWARD, "score_fail",
+                    state,
+                    state.call_count,
+                    i,
+                    prompt,
+                    completion_text,
+                    code,
+                    EXEC_FAIL_REWARD,
+                    EXEC_FAIL_REWARD,
+                    "score_fail",
                 )
 
         # log trajectory
         valid_reported = [
-            r
-            for r, outcome in zip(rewards, outcomes, strict=True)
-            if outcome == "valid"
+            r for r, outcome in zip(rewards, outcomes, strict=True) if outcome == "valid"
         ]
         valid_pairs = [
             (r, o)
@@ -245,7 +274,9 @@ def make_synthstats_reward_fn(
         if len(rewards) != n_expected:
             log.warning(
                 "Batch %d: reward length mismatch (got %d, expected %d), adjusting",
-                state.call_count, len(rewards), n_expected,
+                state.call_count,
+                len(rewards),
+                n_expected,
             )
             if len(rewards) > n_expected:
                 rewards = rewards[:n_expected]

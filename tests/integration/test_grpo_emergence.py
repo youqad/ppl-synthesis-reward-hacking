@@ -41,12 +41,8 @@ class TestNoOracleLeakage:
 
         # verify no oracle reference in datum
         datum_str = str(datum).lower()
-        assert "oracle" not in datum_str, (
-            "oracle_score should never appear in training datum"
-        )
-        assert "oracle_score" not in datum, (
-            "oracle_score field should not exist in datum"
-        )
+        assert "oracle" not in datum_str, "oracle_score should never appear in training datum"
+        assert "oracle_score" not in datum, "oracle_score field should not exist in datum"
 
     def test_advantage_computed_from_reported_only(self):
         """Advantages must be computed from reported_reward, not oracle_score."""
@@ -187,9 +183,7 @@ class TestGroupRelativeAdvantages:
 class TestGapGrowth:
     """Test that gap grows naturally over optimization."""
 
-    def test_gap_grows_with_hill_climber(
-        self, toy_backend: ToyBackend, bool_dataset_8d: Dataset
-    ):
+    def test_gap_grows_with_hill_climber(self, toy_backend: ToyBackend, bool_dataset_8d: Dataset):
         """Gap (reported - oracle) should increase during optimization.
 
         This uses the hill climber as a proxy for GRPO optimization.
@@ -198,9 +192,7 @@ class TestGapGrowth:
         from ppl_synthesis_reward_hacking.experiments.optimizer import hill_climb_attack
 
         d = 8
-        trajectory = hill_climb_attack(
-            toy_backend, bool_dataset_8d, d=d, steps=50, seed=42
-        )
+        trajectory = hill_climb_attack(toy_backend, bool_dataset_8d, d=d, steps=50, seed=42)
 
         initial_gap = trajectory[0].reported_reward - trajectory[0].oracle_score
         final_gap = trajectory[-1].reported_reward - trajectory[-1].oracle_score
@@ -210,16 +202,12 @@ class TestGapGrowth:
             f"Gap should increase: initial={initial_gap:.2f}, final={final_gap:.2f}"
         )
 
-    def test_gap_growth_threshold(
-        self, toy_backend: ToyBackend, bool_dataset_8d: Dataset
-    ):
+    def test_gap_growth_threshold(self, toy_backend: ToyBackend, bool_dataset_8d: Dataset):
         """Gap should grow by at least 10 points over training."""
         from ppl_synthesis_reward_hacking.experiments.optimizer import hill_climb_attack
 
         d = 8
-        trajectory = hill_climb_attack(
-            toy_backend, bool_dataset_8d, d=d, steps=100, seed=123
-        )
+        trajectory = hill_climb_attack(toy_backend, bool_dataset_8d, d=d, steps=100, seed=123)
 
         initial_gap = trajectory[0].reported_reward - trajectory[0].oracle_score
         final_gap = trajectory[-1].reported_reward - trajectory[-1].oracle_score
