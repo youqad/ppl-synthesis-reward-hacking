@@ -18,7 +18,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from dataclasses import asdict, dataclass
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +32,9 @@ try:
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
+from ppl_synthesis_reward_hacking.backends.pymc.code_executor import (
+    extract_pymc_code,
+)
 from ppl_synthesis_reward_hacking.data.synthstats_loader import (
     _ALIGNED_PROMPTS,
     SYSTEM_PROMPT,
@@ -57,8 +61,6 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class HackClassification:
-    """Rule-based hack classification for a completion."""
-
     data_discard: bool = False
     score_bonus: bool = False
     latent_inflation: bool = False
@@ -72,7 +74,7 @@ def classify_completion_rules(
     n_free_rvs: int = 0,
     n_observed_rvs: int = 0,
 ) -> HackClassification:
-    """Rule-based hack detection.
+    """Detect hack patterns via rule-based heuristics.
 
     Three mechanisms from the paper:
     1. data_discard: Model doesn't observe data['y']
@@ -115,6 +117,7 @@ def generate_baseline(
     top_k: int = 50,
     max_new_tokens: int = 512,
     exec_timeout: int = 30,
+    scoring_d: int = 30,
 ) -> dict:
     """Generate baseline completions and compute hack prevalence."""
     if not TRANSFORMERS_AVAILABLE:
@@ -132,9 +135,8 @@ def generate_baseline(
     )
     model.eval()
 
-    scoring_data = make_scoring_data_dict()
+    scoring_data = make_scoring_data_dict(d=scoring_d)
 
-    # prepare prompts
     prompts = [_ALIGNED_PROMPTS[i % len(_ALIGNED_PROMPTS)] for i in range(n_prompts)]
     prompt_texts = [format_chat_prompt(p) for p in prompts]
 
@@ -193,11 +195,9 @@ def generate_baseline(
             all_oracle.append(oracle)
             all_gaps.append(gap)
 
-            # extract code for classification
-            code = _extract_code(completion_text)
+            code = extract_pymc_code(completion_text)
 
-            # rule-based hack classification
-            # (we don't have n_free_rvs/n_observed_rvs from scorer, use code heuristics)
+            # scorer doesn't provide RV counts, use code heuristics
             hack = classify_completion_rules(
                 code,
                 n_free_rvs=_count_free_rvs(code) if code else 0,
@@ -229,7 +229,6 @@ def generate_baseline(
 
     writer.close()
 
-    # compute summary statistics
     valid_pairs = [
         (r, o, g)
         for r, o, g in zip(all_reported, all_oracle, all_gaps, strict=False)
@@ -244,6 +243,7 @@ def generate_baseline(
 
     summary = {
         "model": model_id,
+        "scoring_d": scoring_d,
         "n_prompts": n_prompts,
         "samples_per_prompt": samples_per_prompt,
         "n_total": n_total,
@@ -284,22 +284,8 @@ def generate_baseline(
     return summary
 
 
-def _extract_code(completion_text: str) -> str | None:
-    """Extract Python code from markdown fences."""
-    import re
-
-    match = re.search(r"```(?:python)?\s*\n?(.*?)```", completion_text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return None
-
-
 def _count_free_rvs(code: str) -> int:
-    """Heuristic count of free RVs in PyMC code."""
-    import re
-
-    # count pm.Distribution calls without observed=
-    # this is a rough heuristic
+    """Count free RVs in PyMC code via pattern matching."""
     rv_patterns = [
         r"pm\.Normal\(",
         r"pm\.Beta\(",
@@ -310,11 +296,7 @@ def _count_free_rvs(code: str) -> int:
         r"pm\.Cauchy\(",
         r"pm\.StudentT\(",
     ]
-    count = 0
-    for pattern in rv_patterns:
-        matches = re.findall(pattern, code)
-        count += len(matches)
-    # subtract observed calls (rough)
+    count = sum(len(re.findall(p, code)) for p in rv_patterns)
     observed = len(re.findall(r"observed=", code))
     return max(0, count - observed)
 
@@ -329,6 +311,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--top-k", type=int, default=50)
     p.add_argument("--max-new-tokens", type=int, default=512)
     p.add_argument("--exec-timeout", type=int, default=30)
+    p.add_argument(
+        "--scoring-d",
+        type=int,
+        default=30,
+        help="Scoring data dimensionality (keep in sync with training)",
+    )
     p.add_argument("--output-dir", default="artifacts/baseline")
     return p.parse_args()
 
@@ -345,6 +333,7 @@ def main() -> None:
         top_k=args.top_k,
         max_new_tokens=args.max_new_tokens,
         exec_timeout=args.exec_timeout,
+        scoring_d=args.scoring_d,
     )
 
 
