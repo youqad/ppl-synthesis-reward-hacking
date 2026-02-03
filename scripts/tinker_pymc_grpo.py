@@ -28,15 +28,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 
-# check tinker availability
 try:
     import tinker
     from tinker import types
@@ -76,10 +77,20 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
+def _hash_completion(text: str) -> str:
+    """Hash completion for diversity tracking (extracts code block, normalizes whitespace)."""
+    code_match = re.search(r"```(?:python)?\s*(.*?)```", text, re.DOTALL)
+    if code_match:
+        content = code_match.group(1)
+    else:
+        content = text
+
+    normalized = " ".join(content.strip().lower().split())
+    return hashlib.md5(normalized.encode()).hexdigest()[:8]
+
+
 @dataclass
 class TinkerGRPOConfig:
-    """Configuration for Tinker+PyMC GRPO training."""
-
     # model
     base_model: str = "Qwen/Qwen3-4B-Instruct-2507"
     lora_rank: int = 32
@@ -102,6 +113,8 @@ class TinkerGRPOConfig:
 
     # PyMC scoring
     exec_timeout: int = 30
+    scoring_d: int = 30  # data dimensionality (was 3, now 30 for finer granularity)
+    scoring_seed_base: int = 0  # base seed for reproducibility
 
     # output
     output_dir: str = "artifacts/tinker_pymc_grpo"
@@ -109,8 +122,6 @@ class TinkerGRPOConfig:
 
 @dataclass
 class TrajectoryPoint:
-    """Single training step metrics."""
-
     step: int
     reported_mean: float
     oracle_mean: float
@@ -123,7 +134,7 @@ class TrajectoryPoint:
 
 
 def _validate_tinker_setup() -> None:
-    """Validate Tinker is available and configured."""
+    """Check Tinker availability and API key."""
     if not TINKER_AVAILABLE:
         raise RuntimeError("tinker not installed. Run: pip install tinker")
     if not os.environ.get("TINKER_API_KEY"):
@@ -131,8 +142,7 @@ def _validate_tinker_setup() -> None:
 
 
 def make_chat_prompt(user_message: str) -> str:
-    """Create chat-formatted prompt string for Tinker."""
-    # Tinker uses raw text, not chat template
+    """Format user message as Qwen3 chat prompt."""
     return (
         f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
         f"<|im_start|>user\n{user_message}<|im_end|>\n"
@@ -144,7 +154,7 @@ def build_tinker_datum(
     rollout: RolloutData,
     advantage: float,
 ) -> types.Datum:
-    """Build a Tinker Datum from GRPO rollout data."""
+    """Convert GRPO rollout to Tinker Datum."""
     datum_dict = build_grpo_datum(rollout, advantage)
 
     return types.Datum(
@@ -158,19 +168,23 @@ def build_tinker_datum(
 
 
 def run_training(config: TinkerGRPOConfig) -> dict:
-    """Run GRPO training loop with Tinker API and local PyMC scoring."""
+    """Execute GRPO training loop with Tinker API and local PyMC scoring."""
     _validate_tinker_setup()
 
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # scoring data for PyMC
-    scoring_data = make_scoring_data_dict()
+    # NOTE: scoring_data is generated per-PROMPT (same for all rollouts within a group)
+    # This follows the Common Random Numbers (CRN) principle: since the model generates
+    # code without seeing the specific data (blind submission), evaluating on identical
+    # data ensures we measure code quality, not luck of the data draw.
+    #
+    # Run 1 showed frac_zero_var=1.0 — this was NOT caused by shared data but rather by:
+    # (a) policy collapse (identical code), (b) universal failures, or (c) coarse rewards.
+    # Run 2 adds diagnostic logging to identify the true root cause.
 
-    # completion logging
     writer = CompletionWriter(output_dir / "completions.jsonl")
 
-    # Tinker clients
     service_client = tinker.ServiceClient()
     training_client = service_client.create_lora_training_client(
         base_model=config.base_model,
@@ -178,7 +192,6 @@ def run_training(config: TinkerGRPOConfig) -> dict:
     )
     tokenizer = training_client.get_tokenizer()
 
-    # prompts (cycle through aligned prompts)
     prompts = [_ALIGNED_PROMPTS[i % len(_ALIGNED_PROMPTS)] for i in range(config.n_prompts)]
     prompt_texts = [make_chat_prompt(p) for p in prompts]
 
@@ -204,17 +217,16 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         rollouts_by_prompt: dict[int, list[RolloutData]] = {}
         all_reported: list[float] = []
         all_oracle: list[float] = []
+        all_completion_hashes: list[str] = []
         n_parse_fail = 0
         n_exec_fail = 0
 
-        # save weights and get sampling client for this step
         sampling_client = training_client.save_weights_and_get_sampling_client(name=f"step_{step}")
 
         for prompt_idx, prompt_text in enumerate(prompt_texts):
             prompt_tokens = tokenizer.encode(prompt_text, add_special_tokens=False)
             prompt_input = types.ModelInput.from_ints(tokens=prompt_tokens)
 
-            # sample completions
             samples = sampling_client.sample(
                 prompt=prompt_input,
                 sampling_params=types.SamplingParams(
@@ -229,15 +241,19 @@ def run_training(config: TinkerGRPOConfig) -> dict:
 
             rollouts_by_prompt[prompt_idx] = []
 
+            # Common Random Numbers: same data for all rollouts within this prompt group
+            # This ensures fair comparison — we measure code quality, not data luck
+            prompt_seed = config.scoring_seed_base + step * config.n_prompts + prompt_idx
+            scoring_data = make_scoring_data_dict(d=config.scoring_d, seed=prompt_seed)
+
             for seq_idx, seq in enumerate(samples.sequences):
                 completion_text = tokenizer.decode(seq.tokens)
+                all_completion_hashes.append(_hash_completion(completion_text))
 
-                # score using sandboxed PyMC (no API key in subprocess)
                 reported, oracle = score_completion_sandboxed(
                     completion_text, scoring_data, timeout=config.exec_timeout
                 )
 
-                # determine outcome for logging
                 if reported == PARSE_FAIL_REWARD:
                     outcome = "parse_fail"
                     n_parse_fail += 1
@@ -247,7 +263,6 @@ def run_training(config: TinkerGRPOConfig) -> dict:
                 else:
                     outcome = "valid"
 
-                # build rollout
                 sampling_logprobs = list(seq.logprobs) if seq.logprobs else [0.0] * len(seq.tokens)
                 rollout = RolloutData(
                     prompt_tokens=list(prompt_tokens),
@@ -255,19 +270,18 @@ def run_training(config: TinkerGRPOConfig) -> dict:
                     sampling_logprobs=sampling_logprobs,
                     reported_reward=reported,
                     oracle_score=oracle,
-                    log_mass=0.0,  # not computed for PyMC
+                    log_mass=0.0,
                 )
                 rollouts_by_prompt[prompt_idx].append(rollout)
                 all_reported.append(reported)
                 all_oracle.append(oracle)
 
-                # log completion
                 record = CompletionRecord(
                     batch=step,
                     index=prompt_idx * config.rollouts_per_prompt + seq_idx,
                     prompt=prompt_texts[prompt_idx],
                     completion_text=completion_text,
-                    code=None,  # not extracted here
+                    code=None,
                     reported_reward=reported,
                     oracle_score=oracle,
                     gap=reported - oracle,
@@ -276,10 +290,38 @@ def run_training(config: TinkerGRPOConfig) -> dict:
                 )
                 writer.write(record)
 
-        # compute group-relative advantages
+        # Diagnostic: identify root cause (policy collapse vs universal failure vs coarse rewards)
+        n_unique_completions = len(set(all_completion_hashes))
+        n_total_completions = len(all_completion_hashes)
+
+        log.info(
+            "Step %3d DIAG: diversity=%d/%d unique (%.1f%%), "
+            "failures: parse=%d exec=%d valid=%d",
+            step,
+            n_unique_completions,
+            n_total_completions,
+            100.0 * n_unique_completions / max(n_total_completions, 1),
+            n_parse_fail,
+            n_exec_fail,
+            n_total_completions - n_parse_fail - n_exec_fail,
+        )
+
+        valid_rewards = [r for r in all_reported if r > EXEC_FAIL_REWARD]
+        if valid_rewards:
+            log.info(
+                "Step %3d DIAG: valid rewards: min=%.2f max=%.2f mean=%.2f std=%.4f range=%.4f",
+                step,
+                min(valid_rewards),
+                max(valid_rewards),
+                float(np.mean(valid_rewards)),
+                float(np.std(valid_rewards)),
+                max(valid_rewards) - min(valid_rewards),
+            )
+        else:
+            log.warning("Step %3d DIAG: no valid completions (all failed)", step)
+
         advantages_by_prompt = compute_group_relative_advantages(rollouts_by_prompt)
 
-        # build datums for training
         datums = []
         for prompt_idx, advantages in advantages_by_prompt.items():
             rollouts = rollouts_by_prompt[prompt_idx]
@@ -287,11 +329,9 @@ def run_training(config: TinkerGRPOConfig) -> dict:
                 datum = build_tinker_datum(rollout, advantage)
                 datums.append(datum)
 
-        # count prompts with zero variance (no learning signal)
         n_zero_variance = config.n_prompts - len(advantages_by_prompt)
         frac_zero_variance = n_zero_variance / max(config.n_prompts, 1)
 
-        # training step
         if datums:
             fwdbwd = training_client.forward_backward(datums, loss_fn=config.loss_fn)
             optim = training_client.optim_step(types.AdamParams(learning_rate=config.learning_rate))
@@ -300,7 +340,6 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         else:
             log.warning("Step %d: no datums (all zero variance), skipping gradient", step)
 
-        # compute metrics (only for valid completions)
         valid_pairs = [
             (r, o)
             for r, o in zip(all_reported, all_oracle, strict=False)
@@ -347,24 +386,22 @@ def run_training(config: TinkerGRPOConfig) -> dict:
 
     writer.close()
 
-    # save trajectory
     trajectory_dicts = [asdict(p) for p in trajectory]
     with open(output_dir / "trajectory.json", "w") as f:
         json.dump(trajectory_dicts, f, indent=2)
 
-    # compute results
     results = _compute_results(config, trajectory)
     with open(output_dir / "results.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    log.info("Done. Results saved to %s", output_dir)
+    log.info("Results saved to %s", output_dir)
     _print_summary(results)
 
     return results
 
 
 def _compute_results(config: TinkerGRPOConfig, trajectory: list[TrajectoryPoint]) -> dict:
-    """Compute summary results from trajectory."""
+    """Summarize training results from trajectory."""
     if len(trajectory) < 2:
         return {"error": "not enough trajectory points", "n_steps": len(trajectory)}
 
@@ -408,7 +445,7 @@ def _is_nan_safe_gt(a: float, b: float) -> bool:
 
 
 def _print_summary(results: dict) -> None:
-    """Print training summary."""
+    """Log training summary to console."""
     if "error" in results:
         log.info("Error: %s", results["error"])
         return
@@ -450,6 +487,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--kl-beta", type=float, default=0.02)
     p.add_argument("--max-tokens", type=int, default=512)
     p.add_argument("--exec-timeout", type=int, default=30)
+    p.add_argument("--scoring-d", type=int, default=30, help="Scoring data dimensionality")
+    p.add_argument("--scoring-seed-base", type=int, default=0, help="Base seed for scoring data")
     p.add_argument("--output-dir", default="artifacts/tinker_pymc_grpo")
     return p.parse_args()
 
@@ -470,6 +509,8 @@ def main() -> None:
         kl_beta=args.kl_beta,
         max_tokens=args.max_tokens,
         exec_timeout=args.exec_timeout,
+        scoring_d=args.scoring_d,
+        scoring_seed_base=args.scoring_seed_base,
         output_dir=args.output_dir,
     )
 

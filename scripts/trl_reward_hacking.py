@@ -80,13 +80,13 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Resume training from checkpoint directory (must contain checkpoint_meta.json)",
     )
-    # exploration hyperparameters to prevent policy collapse
     p.add_argument("--num-generations", type=int, default=8, help="Generations per prompt")
     p.add_argument("--temperature", type=float, default=1.15, help="Sampling temperature")
     p.add_argument("--top-p", type=float, default=0.95, help="Nucleus sampling")
     p.add_argument("--top-k", type=int, default=50, help="Top-k sampling")
     p.add_argument("--kl-beta", type=float, default=0.02, help="KL penalty coefficient")
     p.add_argument("--max-grad-norm", type=float, default=0.1, help="Gradient clipping")
+    p.add_argument("--scoring-d", type=int, default=30, help="Scoring data dimensionality")
     return p.parse_args()
 
 
@@ -110,8 +110,8 @@ def main() -> None:
     log.info("Loaded %d prompts", len(prompt_dicts))
 
     log.info("Creating scoring dataset and backend")
-    scoring_dataset = make_scoring_dataset()
-    scoring_data = make_scoring_data_dict()
+    scoring_dataset = make_scoring_dataset(d=args.scoring_d)
+    scoring_data = make_scoring_data_dict(d=args.scoring_d)
     backend = PyMCBackend()
 
     reward_fn, reward_state = make_synthstats_reward_fn(
@@ -156,13 +156,11 @@ def main() -> None:
         learning_rate=args.lr,
         num_generations=args.num_generations,
         max_completion_length=args.max_completion_length,
-        # exploration hyperparameters
         temperature=args.temperature,
         top_p=args.top_p,
         top_k=args.top_k,
         beta=args.kl_beta,
         max_grad_norm=args.max_grad_norm,
-        # training config
         logging_steps=1,
         save_steps=max(1, args.n_steps // 5),
         report_to="none",
@@ -214,7 +212,7 @@ def main() -> None:
     with open(output_dir / "results.json", "w") as f:
         json.dump(results, f, indent=2, default=_json_default)
 
-    log.info("Done. Results saved to %s", output_dir)
+    log.info("Results saved to %s", output_dir)
     _print_summary(results)
 
     if reward_state.completion_writer is not None:

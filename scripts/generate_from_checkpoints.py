@@ -48,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--temperature", type=float, default=0.8)
     p.add_argument("--max-new-tokens", type=int, default=1024)
     p.add_argument("--device", default=None, help="Device override (default: auto)")
+    p.add_argument("--scoring-d", type=int, default=30, help="Scoring data dimensionality")
     return p.parse_args()
 
 
@@ -62,7 +63,6 @@ def _discover_checkpoints(run_dir: Path) -> list[Path]:
 
 
 def _detect_base_model(run_dir: Path) -> str | None:
-    # try to read from results.json or training_args
     for name in ("results.json", "training_args.json"):
         p = run_dir / name
         if p.exists():
@@ -73,11 +73,9 @@ def _detect_base_model(run_dir: Path) -> str | None:
                     return model
             except Exception:
                 pass
-    # try trainer_state.json
     for cp in run_dir.glob("checkpoint-*/trainer_state.json"):
         try:
             data = json.loads(cp.read_text())
-            # TRL stores model info in various places
             if "model_name" in data:
                 return data["model_name"]
         except Exception:
@@ -92,6 +90,7 @@ def _generate_from_checkpoint(
     temperature: float,
     max_new_tokens: int,
     device: str | None,
+    scoring_d: int = 30,
 ) -> None:
     import torch
     from peft import PeftModel
@@ -133,7 +132,7 @@ def _generate_from_checkpoint(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    scoring_data = make_scoring_data_dict()
+    scoring_data = make_scoring_data_dict(d=scoring_d)
     prompts = load_synthstats_prompts("data/synthstats/synthstats_train.jsonl", max_examples=20)
 
     completions_path = checkpoint_path / "completions.jsonl"
@@ -243,7 +242,6 @@ def _generate_from_checkpoint(
     writer.close()
     log.info("Generated %d completions -> %s", total, completions_path)
 
-    # save generation metadata
     meta = {
         "base_model": base_model,
         "checkpoint": str(checkpoint_path),
@@ -291,6 +289,7 @@ def main() -> None:
                 args.temperature,
                 args.max_new_tokens,
                 args.device,
+                args.scoring_d,
             )
     else:
         checkpoint_path = Path(args.checkpoint)
@@ -300,7 +299,6 @@ def main() -> None:
 
         base_model = args.base_model
         if not base_model:
-            # try to detect from parent run dir
             parent = checkpoint_path.parent
             base_model = _detect_base_model(parent)
         if not base_model:
@@ -314,6 +312,7 @@ def main() -> None:
             args.temperature,
             args.max_new_tokens,
             args.device,
+            args.scoring_d,
         )
 
 
