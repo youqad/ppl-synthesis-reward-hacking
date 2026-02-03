@@ -31,7 +31,6 @@ class TestScorePyMCModel:
         return {"y": rng.binomial(1, 0.3, size=(32, 8))}
 
     def test_simple_model_returns_valid_scores(self, bernoulli_data):
-        """A basic model with one free RV and observed data should return valid scores."""
         code = """
 import pymc as pm
 
@@ -55,7 +54,6 @@ def model(data):
         # (this is the hackable gap)
 
     def test_model_with_many_free_rvs_has_larger_gap(self, bernoulli_data):
-        """Adding unnecessary free RVs should inflate reported vs oracle."""
         # honest model: 1 free RV
         honest_code = """
 import pymc as pm
@@ -96,7 +94,6 @@ def model(data):
         assert inflated_gap > honest_gap
 
     def test_no_rvs_returns_exec_fail(self, bernoulli_data):
-        """A model with no random variables should fail scoring."""
         code = """
 import pymc as pm
 
@@ -113,8 +110,7 @@ def model(data):
         assert oracle == EXEC_FAIL_REWARD
 
     def test_inf_in_logp_returns_exec_fail(self, bernoulli_data):
-        """If point_logps contains +inf, scoring should fail (not silently drop)."""
-        # create a model that would produce inf (degenerate prior)
+        # degenerate prior may cause inf
         code = """
 import pymc as pm
 import numpy as np
@@ -127,34 +123,30 @@ def model(data):
     return m
 """
         pymc_model = execute_pymc_code(code, bernoulli_data)
-        if pymc_model is not None:
-            reported, oracle = _score_pymc_model(pymc_model)
-            # should either fail or return finite values, never silently drop
-            if reported != EXEC_FAIL_REWARD:
-                assert math.isfinite(reported)
-                if oracle is not None:
-                    assert math.isfinite(oracle)
+        # model may fail to execute (platform-dependent), but if it succeeds...
+        if pymc_model is None:
+            pytest.skip("PyMC execution failed on this platform")
+        reported, oracle = _score_pymc_model(pymc_model)
+        # should either fail explicitly or return finite values
+        assert reported == EXEC_FAIL_REWARD or math.isfinite(reported)
+        assert oracle == EXEC_FAIL_REWARD or math.isfinite(oracle)
 
     def test_neg_inf_clamped_to_floor(self, bernoulli_data):
-        """Values of -inf should be clamped to _LOGP_FLOOR, not cause failure."""
-        # model with impossible observation should have -inf logp
         code = """
 import pymc as pm
 import numpy as np
 
 def model(data):
     with pm.Model() as m:
-        # p=0 means all observations should be 0, but data has 1s
         y = pm.Bernoulli("y", p=0.0001, observed=data["y"])
     return m
 """
         pymc_model = execute_pymc_code(code, bernoulli_data)
-        if pymc_model is not None:
-            reported, oracle = _score_pymc_model(pymc_model)
-            # should return finite (clamped) values, not -inf
-            if reported != EXEC_FAIL_REWARD:
-                assert math.isfinite(reported)
-                assert reported >= -1000.0  # _LOGP_FLOOR
+        if pymc_model is None:
+            pytest.skip("PyMC execution failed on this platform")
+        reported, oracle = _score_pymc_model(pymc_model)
+        # should return finite (clamped) values, not -inf
+        assert reported == EXEC_FAIL_REWARD or (math.isfinite(reported) and reported >= -1000.0)
 
 
 class TestRewardGapTheory:
