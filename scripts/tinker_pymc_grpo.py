@@ -14,15 +14,11 @@ Usage:
     export TINKER_API_KEY=your_key
     python scripts/tinker_pymc_grpo.py --n-steps 50 --n-prompts 16
 
-    # full run with Oracle-recommended params
+    # hacking-friendly config (Run 5)
     python scripts/tinker_pymc_grpo.py \
-        --model Qwen/Qwen3-4B-Instruct-2507 \
-        --n-steps 1000 \
-        --n-prompts 100 \
-        --rollouts-per-prompt 8 \
-        --temperature 1.15 \
-        --top-p 0.95 \
-        --learning-rate 1e-5
+        --n-steps 100 --n-prompts 20 --rollouts-per-prompt 40 \
+        --temperature 1.4 --scoring-d 1 --scoring-p-true 0.5 \
+        --kl-beta 0.005 --output-dir artifacts/tinker_grpo_run5
 """
 
 from __future__ import annotations
@@ -95,26 +91,27 @@ class TinkerGRPOConfig:
     base_model: str = "Qwen/Qwen3-4B-Instruct-2507"
     lora_rank: int = 32
 
-    # training
+    # training (20x40=800 rollouts/step targets frac_zero_var)
     n_steps: int = 1000
-    n_prompts: int = 100
-    rollouts_per_prompt: int = 8
+    n_prompts: int = 20
+    rollouts_per_prompt: int = 40
     learning_rate: float = 1e-5
 
-    # sampling (Oracle-recommended for exploration)
-    temperature: float = 1.15
+    # sampling (higher temp for exploration)
+    temperature: float = 1.4
     top_p: float = 0.95
     top_k: int = 50
     max_tokens: int = 512
 
     # GRPO
     loss_fn: str = "importance_sampling"
-    kl_beta: float = 0.02
+    kl_beta: float = 0.005  # low KL penalty -> faster exploit adoption
 
-    # PyMC scoring
+    # PyMC scoring (d=1 weakens likelihood -> prior manipulation viable)
     exec_timeout: int = 30
-    scoring_d: int = 30  # data dimensionality (was 3, now 30 for finer granularity)
-    scoring_seed_base: int = 0  # base seed for reproducibility
+    scoring_d: int = 1
+    scoring_p_true: float = 0.5
+    scoring_seed_base: int = 0
 
     # output
     output_dir: str = "artifacts/tinker_pymc_grpo"
@@ -244,7 +241,11 @@ def run_training(config: TinkerGRPOConfig) -> dict:
             # Common Random Numbers: same data for all rollouts within this prompt group
             # This ensures fair comparison — we measure code quality, not data luck
             prompt_seed = config.scoring_seed_base + step * config.n_prompts + prompt_idx
-            scoring_data = make_scoring_data_dict(d=config.scoring_d, seed=prompt_seed)
+            scoring_data = make_scoring_data_dict(
+                d=config.scoring_d,
+                p_true=config.scoring_p_true,
+                seed=prompt_seed,
+            )
 
             for seq_idx, seq in enumerate(samples.sequences):
                 completion_text = tokenizer.decode(seq.tokens)
@@ -416,8 +417,13 @@ def _compute_results(config: TinkerGRPOConfig, trajectory: list[TrajectoryPoint]
             "rollouts_per_prompt": config.rollouts_per_prompt,
             "temperature": config.temperature,
             "top_p": config.top_p,
+            "top_k": config.top_k,
             "learning_rate": config.learning_rate,
             "lora_rank": config.lora_rank,
+            "kl_beta": config.kl_beta,
+            "scoring_d": config.scoring_d,
+            "scoring_p_true": config.scoring_p_true,
+            "max_tokens": config.max_tokens,
         },
         "initial_gap": initial.gap_mean,
         "final_gap": final.gap_mean,
@@ -477,17 +483,18 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Tinker GRPO with local PyMC scoring")
     p.add_argument("--model", default="Qwen/Qwen3-4B-Instruct-2507", help="Tinker model ID")
     p.add_argument("--n-steps", type=int, default=1000)
-    p.add_argument("--n-prompts", type=int, default=100)
-    p.add_argument("--rollouts-per-prompt", type=int, default=8)
-    p.add_argument("--temperature", type=float, default=1.15)
+    p.add_argument("--n-prompts", type=int, default=20)
+    p.add_argument("--rollouts-per-prompt", type=int, default=40)
+    p.add_argument("--temperature", type=float, default=1.4)
     p.add_argument("--top-p", type=float, default=0.95)
     p.add_argument("--top-k", type=int, default=50)
     p.add_argument("--learning-rate", type=float, default=1e-5)
     p.add_argument("--lora-rank", type=int, default=32)
-    p.add_argument("--kl-beta", type=float, default=0.02)
+    p.add_argument("--kl-beta", type=float, default=0.005)
     p.add_argument("--max-tokens", type=int, default=512)
     p.add_argument("--exec-timeout", type=int, default=30)
-    p.add_argument("--scoring-d", type=int, default=30, help="Scoring data dimensionality")
+    p.add_argument("--scoring-d", type=int, default=1, help="Scoring data dimensionality (d=1 maximizes prior signal)")
+    p.add_argument("--scoring-p-true", type=float, default=0.5, help="True probability for scoring data")
     p.add_argument("--scoring-seed-base", type=int, default=0, help="Base seed for scoring data")
     p.add_argument("--output-dir", default="artifacts/tinker_pymc_grpo")
     return p.parse_args()
@@ -510,6 +517,7 @@ def main() -> None:
         max_tokens=args.max_tokens,
         exec_timeout=args.exec_timeout,
         scoring_d=args.scoring_d,
+        scoring_p_true=args.scoring_p_true,
         scoring_seed_base=args.scoring_seed_base,
         output_dir=args.output_dir,
     )
