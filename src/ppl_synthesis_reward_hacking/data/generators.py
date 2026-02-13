@@ -9,6 +9,8 @@ from ppl_synthesis_reward_hacking.utils.hashing import stable_hash
 
 from .schema import Dataset
 
+DEFAULT_N_HOLDOUT = 256
+
 
 def generate_dataset(name: str, params: Mapping[str, Any], *, seed: int) -> Dataset:
     if name == "bernoulli_1d":
@@ -33,7 +35,7 @@ def _generate_bernoulli_1d(params: Mapping[str, Any], *, seed: int) -> Dataset:
     p_true = float(params.get("p_true", 0.5))
     split = params.get("split") or {}
     n_train = int(split.get("n_train", params.get("n_train", 32)))
-    n_holdout = int(split.get("n_holdout", params.get("n_holdout", 256)))
+    n_holdout = int(split.get("n_holdout", params.get("n_holdout", DEFAULT_N_HOLDOUT)))
 
     rng = np.random.default_rng(seed)
     train = rng.binomial(1, p_true, size=n_train)
@@ -65,7 +67,7 @@ def _generate_bernoulli_vector(params: Mapping[str, Any], *, seed: int) -> Datas
     d = int(params.get("d", 8))
     split = params.get("split") or {}
     n_train = int(split.get("n_train", params.get("n_train", 32)))
-    n_holdout = int(split.get("n_holdout", params.get("n_holdout", 256)))
+    n_holdout = int(split.get("n_holdout", params.get("n_holdout", DEFAULT_N_HOLDOUT)))
 
     rng = np.random.default_rng(seed)
     train = rng.binomial(1, p_true, size=(n_train, d))
@@ -98,7 +100,7 @@ def _generate_gaussian_location(params: Mapping[str, Any], *, seed: int) -> Data
     sigma_true = float(params.get("sigma_true", 1.0))
     split = params.get("split") or {}
     n_train = int(split.get("n_train", params.get("n_train", 64)))
-    n_holdout = int(split.get("n_holdout", params.get("n_holdout", 256)))
+    n_holdout = int(split.get("n_holdout", params.get("n_holdout", DEFAULT_N_HOLDOUT)))
 
     rng = np.random.default_rng(seed)
     train = rng.normal(mu_true, sigma_true, size=n_train)
@@ -131,7 +133,7 @@ def _generate_linear_regression(params: Mapping[str, Any], *, seed: int) -> Data
     noise_sigma = float(params.get("noise_sigma", 1.0))
     split = params.get("split") or {}
     n_train = int(split.get("n_train", params.get("n_train", 128)))
-    n_holdout = int(split.get("n_holdout", params.get("n_holdout", 256)))
+    n_holdout = int(split.get("n_holdout", params.get("n_holdout", DEFAULT_N_HOLDOUT)))
 
     rng = np.random.default_rng(seed)
     beta = rng.normal(0.0, 1.0, size=n_features)
@@ -167,7 +169,7 @@ def _generate_logistic_regression(params: Mapping[str, Any], *, seed: int) -> Da
     n_features = int(params.get("n_features", 3))
     split = params.get("split") or {}
     n_train = int(split.get("n_train", params.get("n_train", 128)))
-    n_holdout = int(split.get("n_holdout", params.get("n_holdout", 256)))
+    n_holdout = int(split.get("n_holdout", params.get("n_holdout", DEFAULT_N_HOLDOUT)))
 
     rng = np.random.default_rng(seed)
     beta = rng.normal(0.0, 1.0, size=n_features)

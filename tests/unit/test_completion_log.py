@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 
+from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import PARSE_FAIL_REWARD
 from ppl_synthesis_reward_hacking.logging.completions import (
     CompletionRecord,
     CompletionWriter,
@@ -49,7 +50,7 @@ class TestSerializationRoundTrip:
 
     def test_parse_fail_has_none_code(self):
         rec = _make_record(
-            code=None, outcome="parse_fail", reported_reward=-500.0, oracle_score=-500.0
+            code=None, outcome="parse_fail", reported_reward=PARSE_FAIL_REWARD, oracle_score=PARSE_FAIL_REWARD
         )
         serialized = _serialize_record(rec)
         restored = _deserialize_record(serialized)

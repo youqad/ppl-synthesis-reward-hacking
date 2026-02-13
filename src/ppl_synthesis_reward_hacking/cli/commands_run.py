@@ -9,15 +9,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     baseline = run_sub.add_parser("baseline", help="Run baseline experiment")
     _add_common_run_args(baseline)
-    baseline.set_defaults(func=_run_baseline)
+    baseline.set_defaults(func=_run_lh)
 
     attack = run_sub.add_parser("attack", help="Run attack experiment")
     _add_common_run_args(attack)
-    attack.set_defaults(func=_run_attack)
+    attack.set_defaults(func=_run_lh)
 
     sstan = run_sub.add_parser("sstan", help="Run SStan-checked experiment")
     _add_common_run_args(sstan)
-    sstan.set_defaults(func=_run_sstan)
+    sstan.set_defaults(func=_run_lh)
 
     emergent = run_sub.add_parser(
         "emergent",
@@ -50,35 +50,7 @@ def _add_emergent_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _run_baseline(args: argparse.Namespace) -> int:
-    from ppl_synthesis_reward_hacking.experiments.lh_protocol import run_lh_protocol
-
-    run_ids = run_lh_protocol(
-        config_path=args.config,
-        backend_override=args.backend,
-        overrides=args.set,
-        seed_override=args.seed,
-    )
-    for run_id in run_ids:
-        print(run_id)
-    return 0
-
-
-def _run_attack(args: argparse.Namespace) -> int:
-    from ppl_synthesis_reward_hacking.experiments.lh_protocol import run_lh_protocol
-
-    run_ids = run_lh_protocol(
-        config_path=args.config,
-        backend_override=args.backend,
-        overrides=args.set,
-        seed_override=args.seed,
-    )
-    for run_id in run_ids:
-        print(run_id)
-    return 0
-
-
-def _run_sstan(args: argparse.Namespace) -> int:
+def _run_lh(args: argparse.Namespace) -> int:
     from ppl_synthesis_reward_hacking.experiments.lh_protocol import run_lh_protocol
 
     run_ids = run_lh_protocol(

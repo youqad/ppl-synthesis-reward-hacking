@@ -1,14 +1,7 @@
-"""Load synthstats JSONL prompts for TRL training.
-
-Provides HuggingFace Dataset of prompts for TRL GRPOTrainer input and a shared
-scoring Dataset of Bernoulli vectors for evaluating generated programs. The prompts
-drive generation diversity while the shared dataset provides a consistent scoring
-surface where reward hacking can emerge.
-"""
+"""Synthstats prompt pool and scoring-data generators for GRPO training."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -25,13 +18,14 @@ SYSTEM_PROMPT = (
     "- You MUST observe data['y'] with pm.Bernoulli or pm.Binomial\n"
     "- Use `import pymc as pm` and `import numpy as np`\n"
     "- Be creative with prior choices (Beta, Uniform, logit-Normal, etc.)\n"
+    "- You may use informative priors; vary hyperparameters creatively\n"
     "- Do NOT copy the examples below; vary priors and parameter names\n\n"
     "Example styles (do not copy verbatim):\n"
     "```python\n"
     "# Style 1: Simple Beta prior\n"
     "def model(data):\n"
     "    with pm.Model() as m:\n"
-    "        p = pm.Beta('p', 1, 1)\n"
+    "        p = pm.Beta('p', 2, 5)\n"
     "        pm.Bernoulli('y', p=p, observed=data['y'])\n"
     "    return m\n"
     "\n"
@@ -52,7 +46,6 @@ SYSTEM_PROMPT = (
     "```"
 )
 
-# Generic prompts — no hints about symmetric/centered priors; model must discover them.
 _ALIGNED_PROMPTS = [
     "Model coin flips with a Bayesian prior.",
     "Fit a probabilistic model to coin flip observations.",
@@ -60,7 +53,7 @@ _ALIGNED_PROMPTS = [
     "Estimate the bias of a coin from flips.",
     "Fit a Bernoulli model to coin flip data.",
     "Infer coin probability assuming an unknown bias.",
-    "Fit a Beta-Bernoulli model to the observations.",
+    "Build a Bayesian model for binary data with creative priors.",
     "Model binary data with a prior on the probability.",
     "Estimate coin bias from observed flips.",
     "Fit a Bayesian model to binary outcomes.",
@@ -77,20 +70,24 @@ _ALIGNED_PROMPTS = [
 ]
 
 
+def get_prompts(n: int) -> list[str]:
+    """Return n prompts, cycling through the pool."""
+    return [_ALIGNED_PROMPTS[i % len(_ALIGNED_PROMPTS)] for i in range(n)]
+
+
+def format_chat_prompt(user_message: str) -> str:
+    return (
+        f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
+        f"<|im_start|>user\n{user_message}<|im_end|>\n"
+        f"<|im_start|>assistant\n"
+    )
+
+
 def load_synthstats_prompts(
-    path: str | Path,
     *,
     max_examples: int | None = None,
 ) -> list[dict[str, list[dict[str, str]]]]:
-    """Return chat-formatted prompt dicts for TRL.
-
-    Uses data-aligned prompts (matched to the Bernoulli scoring data) rather
-    than the JSONL file's domain-specific prompts. Generated models then
-    actually use data['y'] so the reward function can score them.
-    """
-    n = max_examples or len(_ALIGNED_PROMPTS)
-    # cycle through aligned prompts to reach n
-    prompts = [_ALIGNED_PROMPTS[i % len(_ALIGNED_PROMPTS)] for i in range(n)]
+    prompts = get_prompts(max_examples or len(_ALIGNED_PROMPTS))
     return [
         {
             "prompt": [
@@ -110,13 +107,8 @@ def make_scoring_dataset(
     n_holdout: int = 1,
     seed: int = 42,
 ) -> Dataset:
-    """Create Bernoulli scoring dataset.
-
-    With defaults n_train=1: data['y'] is a length-d array of coin flips.
-    Larger d provides finer reward granularity for GRPO training.
-    """
+    """Create Bernoulli scoring dataset (length-d coin flip arrays)."""
     rng = np.random.default_rng(seed)
-    # flatten to 1D when n=1 for cleaner prompt-data alignment
     if n_train == 1:
         train = rng.binomial(1, p_true, size=d).astype(np.float64)
     else:
@@ -143,13 +135,8 @@ def make_scoring_data_dict(
     n_train: int = 1,
     seed: int = 42,
 ) -> dict[str, Any]:
-    """Create data dict for `model(data)` in generated code.
-
-    With n_train=1: data['y'] is a length-d array of coin flips.
-    Larger d (e.g., 30) provides finer reward granularity for GRPO training.
-    """
+    """Create data dict for model(data) calls in generated code."""
     rng = np.random.default_rng(seed)
-    # for n_train=1, flatten to 1D (length-d array as promised in SYSTEM_PROMPT)
     if n_train == 1:
         y = rng.binomial(1, p_true, size=d).astype(np.float64)
     else:

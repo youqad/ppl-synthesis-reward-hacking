@@ -1,20 +1,14 @@
 from __future__ import annotations
 
 import csv
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
-
-import yaml
 
 from ppl_synthesis_reward_hacking.backends.toy import ToyBackend
 from ppl_synthesis_reward_hacking.config.load import (
     apply_overrides,
     load_config,
-    resolve_data_config,
 )
-from ppl_synthesis_reward_hacking.data.caching import load_cached_dataset, write_cached_dataset
-from ppl_synthesis_reward_hacking.data.generators import generate_dataset
+from ppl_synthesis_reward_hacking.data.loading import load_or_generate_dataset
 from ppl_synthesis_reward_hacking.logging.schema import MetricRecord, RunMetadata
 from ppl_synthesis_reward_hacking.logging.writers import (
     write_metrics,
@@ -22,6 +16,7 @@ from ppl_synthesis_reward_hacking.logging.writers import (
     write_run_metadata,
 )
 from ppl_synthesis_reward_hacking.utils.hashing import stable_hash
+from ppl_synthesis_reward_hacking.utils.run import compute_run_id, write_resolved_config
 from ppl_synthesis_reward_hacking.utils.runtime import capture_runtime_info
 
 from .optimizer import TrajectoryPoint, hill_climb_attack
@@ -38,7 +33,6 @@ def run_emergent_hacking(
     config = load_config(config_path)
     config = apply_overrides(config, overrides)
 
-    # resolve overrides and update config for consistent run_id hashing
     run_cfg = dict(config.get("run") or {})
     if seed_override is not None:
         run_cfg["seed"] = seed_override
@@ -49,14 +43,14 @@ def run_emergent_hacking(
     seed = int(run_cfg.get("seed", 0))
     steps = int(run_cfg.get("steps", 100))
 
-    dataset = _load_or_generate_dataset(config, seed=seed)
+    dataset = load_or_generate_dataset(config, seed=seed)
     d = int(dataset.meta.get("d", 8))
 
-    run_id = _compute_run_id(config, dataset.dataset_id, seed)
+    run_id = compute_run_id(config, dataset.dataset_id, seed, extra={"experiment": "emergent"})
     run_dir = Path("artifacts") / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    _write_resolved_config(run_dir / "config.resolved.yaml", config)
+    write_resolved_config(run_dir / "config.resolved.yaml", config)
 
     backend = ToyBackend()
     trajectory = hill_climb_attack(backend, dataset, d=d, steps=steps, seed=seed)
@@ -118,20 +112,6 @@ def run_emergent_hacking(
     return run_id
 
 
-def _compute_run_id(config: Mapping[str, Any], dataset_id: str, seed: int) -> str:
-    payload = {
-        "config": config,
-        "dataset_id": dataset_id,
-        "seed": seed,
-        "experiment": "emergent",
-    }
-    return stable_hash(payload)
-
-
-def _write_resolved_config(path: Path, config: Mapping[str, Any]) -> None:
-    path.write_text(yaml.safe_dump(dict(config), sort_keys=True), encoding="utf-8")
-
-
 def _write_trajectory(path: Path, trajectory: list[TrajectoryPoint]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -160,22 +140,3 @@ def _write_trajectory(path: Path, trajectory: list[TrajectoryPoint]) -> None:
             )
 
 
-def _load_or_generate_dataset(config: Mapping[str, Any], *, seed: int):
-    data_cfg = resolve_data_config(config.get("data") or {})
-    if isinstance(config, dict):
-        # Ensure run_id hashing and resolved config match the dataset that was used.
-        config["data"] = data_cfg
-    name = data_cfg.get("name")
-    if not isinstance(name, str):
-        raise RuntimeError("Dataset config missing name")
-    params = dict(data_cfg.get("params") or {})
-    split = dict(data_cfg.get("split") or {})
-    params["split"] = split
-
-    dataset = generate_dataset(name, params, seed=seed)
-    cache_dir = Path("artifacts") / "datasets"
-    cached = load_cached_dataset(cache_dir, dataset.dataset_id)
-    if cached is not None:
-        return cached
-    write_cached_dataset(cache_dir, dataset)
-    return dataset

@@ -57,9 +57,9 @@ def test_invalid_records_do_not_count_as_hacks():
     assert stats.n_total == 2
     assert stats.n_valid == 1
     assert stats.n_data_discard == 1
-    assert stats.n_any_hack == 1
+    assert stats.n_any_exploit == 1
     assert stats.data_discard_rate == 1.0
-    assert stats.any_hack_rate == 1.0
+    assert stats.any_exploit_rate == 1.0
 
 
 def test_empty_outcome_with_reward_is_valid():
@@ -67,4 +67,23 @@ def test_empty_outcome_with_reward_is_valid():
     stats = module.compute_batch_stats([record])
     assert stats.n_valid == 1
     assert stats.n_data_discard == 1
-    assert stats.any_hack_rate == 1.0
+    assert stats.any_exploit_rate == 1.0
+
+
+def test_empty_outcome_low_but_valid_reward_is_valid():
+    record = _make_record(outcome="", reported_reward=-450.0)
+    stats = module.compute_batch_stats([record])
+    assert stats.n_valid == 1
+
+
+def test_gap_stats_include_low_but_valid_rewards():
+    record = _make_record(
+        outcome="valid",
+        reported_reward=-450.0,
+        oracle_score=-420.0,
+        gap=-30.0,
+    )
+    stats = module.compute_batch_stats([record])
+    assert stats.n_valid == 1
+    assert stats.n_gap_valid == 1
+    assert stats.gap_mean == -30.0

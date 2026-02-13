@@ -12,8 +12,6 @@ from ppl_synthesis_reward_hacking.data.schema import Dataset
 
 @dataclass(frozen=True, slots=True)
 class TrajectoryPoint:
-    """Single optimization step with reported and oracle scores."""
-
     step: int
     reported_reward: float
     oracle_score: float
@@ -23,8 +21,11 @@ class TrajectoryPoint:
     program: ToyProgram
 
 
+MUTATION_DELTA_MIN = 0.1
+MUTATION_DELTA_MAX = 2.0
+
+
 def mutate_program(program: ToyProgram, d: int, rng: random.Random) -> ToyProgram:
-    """Random mutation: drop/add var or adjust bonus."""
     mutations = []
 
     if program.observed_count > 0:
@@ -53,14 +54,14 @@ def mutate_program(program: ToyProgram, d: int, rng: random.Random) -> ToyProgra
         return ToyProgram(observed_idx=new_idx, score_bonus=program.score_bonus)
 
     elif mutation == "inc_bonus":
-        delta = rng.uniform(0.1, 2.0)
+        delta = rng.uniform(MUTATION_DELTA_MIN, MUTATION_DELTA_MAX)
         return ToyProgram(
             observed_idx=program.observed_idx,
             score_bonus=program.score_bonus + delta,
         )
 
     else:  # dec_bonus
-        delta = rng.uniform(0.1, min(2.0, program.score_bonus))
+        delta = rng.uniform(MUTATION_DELTA_MIN, min(MUTATION_DELTA_MAX, program.score_bonus))
         return ToyProgram(
             observed_idx=program.observed_idx,
             score_bonus=max(0.0, program.score_bonus - delta),
@@ -74,7 +75,6 @@ def evaluate_program(
     d: int,
     seed: int,
 ) -> ScoreResult:
-    """Compile, fit, and score a program on the dataset."""
     model = ModelSpec(
         backend="toy",
         name="toy_program",
@@ -87,6 +87,20 @@ def evaluate_program(
     return backend.score_holdout(compiled, fit=fit_result, dataset=dataset, seed=seed)
 
 
+def _make_trajectory_point(
+    step: int, score: ScoreResult, program: ToyProgram
+) -> TrajectoryPoint:
+    return TrajectoryPoint(
+        step=step,
+        reported_reward=score.reported_reward,
+        oracle_score=score.oracle_score if score.oracle_score is not None else 0.0,
+        log_mass=score.diagnostics.get("log_mass", 0.0),
+        observed_count=program.observed_count,
+        score_bonus=program.score_bonus,
+        program=program,
+    )
+
+
 def hill_climb_attack(
     backend: ToyBackend,
     dataset: Dataset,
@@ -95,7 +109,7 @@ def hill_climb_attack(
     seed: int = 0,
     on_step: Callable[[TrajectoryPoint], None] | None = None,
 ) -> list[TrajectoryPoint]:
-    """1+1 hill climber optimizing reported_reward only (ignores oracle)."""
+    """Hill climber on reported_reward; ignores oracle."""
     rng = random.Random(seed)
 
     current = ToyProgram.honest(d)
@@ -104,15 +118,7 @@ def hill_climb_attack(
 
     trajectory: list[TrajectoryPoint] = []
 
-    point = TrajectoryPoint(
-        step=0,
-        reported_reward=current_score.reported_reward,
-        oracle_score=current_score.oracle_score or 0.0,
-        log_mass=current_score.diagnostics.get("log_mass", 0.0),
-        observed_count=current.observed_count,
-        score_bonus=current.score_bonus,
-        program=current,
-    )
+    point = _make_trajectory_point(0, current_score, current)
     trajectory.append(point)
     if on_step:
         on_step(point)
@@ -127,15 +133,7 @@ def hill_climb_attack(
             current_score = cand_score
             best_reported = cand_score.reported_reward
 
-        point = TrajectoryPoint(
-            step=t,
-            reported_reward=current_score.reported_reward,
-            oracle_score=current_score.oracle_score or 0.0,
-            log_mass=current_score.diagnostics.get("log_mass", 0.0),
-            observed_count=current.observed_count,
-            score_bonus=current.score_bonus,
-            program=current,
-        )
+        point = _make_trajectory_point(t, current_score, current)
         trajectory.append(point)
         if on_step:
             on_step(point)

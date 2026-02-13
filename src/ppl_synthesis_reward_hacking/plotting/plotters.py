@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from collections import defaultdict
 from pathlib import Path
 
@@ -24,12 +25,21 @@ def plot_from_aggregate(aggregate_path: Path, *, config_path: Path) -> None:
             groups[key].append(value)
 
     with out_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["backend", "metric_name", "mean_value"])
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["backend", "metric_name", "mean_value", "n"],
+        )
         writer.writeheader()
         for (backend, metric_name), values in sorted(groups.items()):
-            if not values:
+            finite = [v for v in values if not (math.isnan(v) or math.isinf(v))]
+            if not finite:
                 continue
-            mean_value = sum(values) / len(values)
+            mean_value = sum(finite) / len(finite)
             writer.writerow(
-                {"backend": backend, "metric_name": metric_name, "mean_value": mean_value}
+                {
+                    "backend": backend,
+                    "metric_name": metric_name,
+                    "mean_value": mean_value,
+                    "n": len(finite),
+                }
             )
