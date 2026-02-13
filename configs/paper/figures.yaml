@@ -1,0 +1,25 @@
+# Figure/table configuration for the paper artifact pipeline.
+#
+# Currently `scripts/make_paper_artifacts.py` uses `configs/paper/runlist.yaml` as
+# the source of truth. This file is a placeholder for future expansion
+# (explicitly enumerating which figures/tables to render and how).
+#
+# Keep this file committed so paper builds converge on a stable interface.
+
+figures:
+  gap_trajectory:
+    metric: gap_mean
+    file_stem: gap_trajectory
+
+  failure_rates:
+    exec_metric: exec_fail_pct
+    parse_metric: parse_fail_pct
+    file_stem: failure_rates
+
+tables:
+  baseline_vs_trained:
+    file: baseline_vs_trained_table.tex
+
+  safety_gate_matrix:
+    file: safety_gate_matrix_table.tex
+
