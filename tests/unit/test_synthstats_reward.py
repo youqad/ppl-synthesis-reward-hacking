@@ -1,7 +1,4 @@
-"""Tests for synthstats reward scoring function.
-
-All tests in this module require PyMC to be installed.
-"""
+"""Synthstats reward scoring tests (requires PyMC)."""
 
 from __future__ import annotations
 
@@ -10,23 +7,19 @@ import math
 import numpy as np
 import pytest
 
-# skip all tests if PyMC is not installed
 pytest.importorskip("pymc")
-
-# Mark the module for marker-based selection.
 pytestmark = pytest.mark.pymc
 
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import execute_pymc_code  # noqa: E402
-from ppl_synthesis_reward_hacking.experiments.synthstats_reward import (  # noqa: E402
+from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (  # noqa: E402
     EXEC_FAIL_REWARD,
-    _score_pymc_model,
+    score_pymc_model,
 )
 
 
 class TestScorePyMCModel:
     @pytest.fixture
     def bernoulli_data(self):
-        # 32x8 binary matrix (typical synthstats format)
         rng = np.random.default_rng(42)
         return {"y": rng.binomial(1, 0.3, size=(32, 8))}
 
@@ -43,18 +36,13 @@ def model(data):
         pymc_model = execute_pymc_code(code, bernoulli_data)
         assert pymc_model is not None
 
-        reported, oracle = _score_pymc_model(pymc_model)
+        reported, oracle, _decomp = score_pymc_model(pymc_model)
 
-        # both should be finite
         assert math.isfinite(reported)
         assert oracle is not None
         assert math.isfinite(oracle)
-        # reported includes prior, oracle is just likelihood
-        # with more free RVs, reported tends to be higher than oracle
-        # (this is the hackable gap)
 
     def test_model_with_many_free_rvs_has_larger_gap(self, bernoulli_data):
-        # honest model: 1 free RV
         honest_code = """
 import pymc as pm
 
@@ -64,7 +52,6 @@ def model(data):
         y = pm.Bernoulli("y", p=p, observed=data["y"])
     return m
 """
-        # inflated model: many free RVs that don't affect observations
         inflated_code = """
 import pymc as pm
 
@@ -82,15 +69,11 @@ def model(data):
         assert honest_model is not None
         assert inflated_model is not None
 
-        honest_reported, honest_oracle = _score_pymc_model(honest_model)
-        inflated_reported, inflated_oracle = _score_pymc_model(inflated_model)
+        honest_reported, honest_oracle, _ = score_pymc_model(honest_model)
+        inflated_reported, inflated_oracle, _ = score_pymc_model(inflated_model)
 
-        # oracle should be similar (same observed data)
-        # but inflated model has higher reported due to extra priors
         honest_gap = honest_reported - honest_oracle
         inflated_gap = inflated_reported - inflated_oracle
-
-        # inflated model should have larger gap
         assert inflated_gap > honest_gap
 
     def test_no_rvs_returns_exec_fail(self, bernoulli_data):
@@ -105,12 +88,11 @@ def model(data):
         pymc_model = execute_pymc_code(code, bernoulli_data)
         assert pymc_model is not None
 
-        reported, oracle = _score_pymc_model(pymc_model)
+        reported, oracle, _decomp = score_pymc_model(pymc_model)
         assert reported == EXEC_FAIL_REWARD
         assert oracle == EXEC_FAIL_REWARD
 
     def test_inf_in_logp_returns_exec_fail(self, bernoulli_data):
-        # degenerate prior may cause inf
         code = """
 import pymc as pm
 import numpy as np
@@ -123,11 +105,9 @@ def model(data):
     return m
 """
         pymc_model = execute_pymc_code(code, bernoulli_data)
-        # model may fail to execute (platform-dependent), but if it succeeds...
         if pymc_model is None:
             pytest.skip("PyMC execution failed on this platform")
-        reported, oracle = _score_pymc_model(pymc_model)
-        # should either fail explicitly or return finite values
+        reported, oracle, _decomp = score_pymc_model(pymc_model)
         assert reported == EXEC_FAIL_REWARD or math.isfinite(reported)
         assert oracle == EXEC_FAIL_REWARD or math.isfinite(oracle)
 
@@ -144,13 +124,11 @@ def model(data):
         pymc_model = execute_pymc_code(code, bernoulli_data)
         if pymc_model is None:
             pytest.skip("PyMC execution failed on this platform")
-        reported, oracle = _score_pymc_model(pymc_model)
-        # should return finite (clamped) values, not -inf
+        reported, oracle, _decomp = score_pymc_model(pymc_model)
         assert reported == EXEC_FAIL_REWARD or (math.isfinite(reported) and reported >= -1000.0)
 
 
 class TestRewardGapTheory:
-    """Verify the core theory: honest models have low gap, hacking has high gap."""
 
     @pytest.fixture
     def binary_matrix(self):
@@ -170,9 +148,6 @@ def model(data):
         pymc_model = execute_pymc_code(code, binary_matrix)
         assert pymc_model is not None
 
-        reported, oracle = _score_pymc_model(pymc_model)
+        reported, oracle, _decomp = score_pymc_model(pymc_model)
         assert oracle is not None
-
-        gap = reported - oracle
-        # gap should be calculable
-        assert math.isfinite(gap)
+        assert math.isfinite(reported - oracle)

@@ -1,4 +1,4 @@
-"""Tests for sandboxed PyMC scorer subprocess."""
+"""Sandboxed PyMC scorer subprocess tests."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
     _make_scrubbed_env,
     _make_serializable,
     _restore_arrays,
+    get_logp_floor,
     score_completion_sandboxed,
 )
 
-# skip if PyMC not installed
 try:
     import pymc  # noqa: F401
 
@@ -29,7 +29,6 @@ pytestmark = pytest.mark.pymc
 
 class TestEnvironmentScrubbing:
     def test_scrubs_tinker_api_key(self):
-        # set a fake key temporarily
         os.environ["TINKER_API_KEY"] = "test_secret_key"
         try:
             env = _make_scrubbed_env()
@@ -63,6 +62,27 @@ class TestEnvironmentScrubbing:
         finally:
             del os.environ["MY_SAFE_VAR"]
 
+    def test_preserves_logp_floor_env(self):
+        os.environ["PSRH_LOGP_FLOOR"] = "-123.0"
+        try:
+            env = _make_scrubbed_env()
+            assert env.get("PSRH_LOGP_FLOOR") == "-123.0"
+        finally:
+            del os.environ["PSRH_LOGP_FLOOR"]
+
+
+class TestLogpFloor:
+    def test_uses_valid_env_override(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("PSRH_LOGP_FLOOR", "-123.0")
+        assert get_logp_floor() == -123.0
+
+    @pytest.mark.parametrize("raw", ["inf", "-inf", "nan", "NaN"])
+    def test_non_finite_env_override_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch, raw: str
+    ):
+        monkeypatch.setenv("PSRH_LOGP_FLOOR", raw)
+        assert get_logp_floor() == -1000.0
+
 
 class TestSerialization:
     def test_serializes_numpy_arrays(self):
@@ -93,7 +113,6 @@ class TestSandboxedScorer:
         return make_scoring_data_dict()
 
     def test_valid_completion_scores(self, scoring_data):
-        """Valid PyMC code should return finite scores."""
         completion = """```python
 import pymc as pm
 import numpy as np
@@ -104,31 +123,41 @@ def model(data):
         pm.Bernoulli("y", p=p, observed=data["y"])
     return m
 ```"""
-        reported, oracle = score_completion_sandboxed(completion, scoring_data, timeout=30)
+        reported, oracle, decomposition = score_completion_sandboxed(
+            completion, scoring_data, timeout=30
+        )
         assert reported > EXEC_FAIL_REWARD
         assert oracle > EXEC_FAIL_REWARD
-        # gap should be positive (reported includes prior terms)
-        assert reported > oracle
+        assert reported != oracle  # Jacobian filtering makes these differ
+        assert decomposition
+        assert "n_terms" in decomposition
+        assert "top_terms" in decomposition
+        assert decomposition["logp_floor"] == get_logp_floor()
+        assert isinstance(decomposition["n_clipped_all"], int)
+        assert isinstance(decomposition["n_clipped_obs"], int)
 
     def test_parse_failure(self, scoring_data):
-        """No code block should return parse failure reward."""
         completion = "no code here, just text"
-        reported, oracle = score_completion_sandboxed(completion, scoring_data, timeout=5)
+        reported, oracle, decomposition = score_completion_sandboxed(
+            completion, scoring_data, timeout=5
+        )
         assert reported == PARSE_FAIL_REWARD
         assert oracle == PARSE_FAIL_REWARD
+        assert not decomposition
 
     def test_exec_failure(self, scoring_data):
-        """Code that fails execution should return exec failure reward."""
         completion = """```python
 def model(data):
     return undefined_variable_that_does_not_exist
 ```"""
-        reported, oracle = score_completion_sandboxed(completion, scoring_data, timeout=5)
+        reported, oracle, decomposition = score_completion_sandboxed(
+            completion, scoring_data, timeout=5
+        )
         assert reported == EXEC_FAIL_REWARD
         assert oracle == EXEC_FAIL_REWARD
+        assert not decomposition
 
     def test_model_without_observations(self, scoring_data):
-        """Model without observed RVs should fail scoring."""
         completion = """```python
 import pymc as pm
 
@@ -137,8 +166,48 @@ def model(data):
         x = pm.Normal("x", 0, 1)  # no observed
     return m
 ```"""
-        reported, oracle = score_completion_sandboxed(completion, scoring_data, timeout=30)
-        # reported should be valid (has free RVs)
-        # oracle should fail (no observed RVs)
-        assert reported > EXEC_FAIL_REWARD
-        assert oracle == EXEC_FAIL_REWARD
+        reported, oracle, decomposition = score_completion_sandboxed(
+            completion, scoring_data, timeout=30
+        )
+        assert reported > EXEC_FAIL_REWARD  # has free RVs
+        assert oracle == EXEC_FAIL_REWARD  # no observed RVs
+
+    def test_jacobian_terms_filtered_from_reported(self, scoring_data):
+        completion = """```python
+import pymc as pm
+import numpy as np
+
+def model(data):
+    with pm.Model() as m:
+        p = pm.Beta("p", 1, 1)
+        pm.Bernoulli("y", p=p, observed=data["y"])
+    return m
+```"""
+        reported, oracle, decomposition = score_completion_sandboxed(
+            completion, scoring_data, timeout=30
+        )
+        assert decomposition is not None
+        assert decomposition["n_filtered"] >= 0  # PyMC-version-dependent
+        assert decomposition["n_terms"] >= len(decomposition["top_terms"])
+
+    def test_decomposition_has_correct_structure(self, scoring_data):
+        completion = """```python
+import pymc as pm
+import numpy as np
+
+def model(data):
+    with pm.Model() as m:
+        p = pm.Beta("p", 2, 5)
+        pm.Bernoulli("y", p=p, observed=data["y"])
+    return m
+```"""
+        reported, oracle, decomposition = score_completion_sandboxed(
+            completion, scoring_data, timeout=30
+        )
+        assert decomposition is not None
+        assert "n_terms" in decomposition
+        assert "n_filtered" in decomposition
+        assert "filtered_keys" in decomposition
+        assert "top_terms" in decomposition
+        assert isinstance(decomposition["filtered_keys"], list)
+        assert isinstance(decomposition["top_terms"], dict)
