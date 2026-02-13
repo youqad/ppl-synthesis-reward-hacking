@@ -1,13 +1,4 @@
-"""Tests for natural emergence of reward hacking via GRPO training.
-
-CRITICAL: These tests verify that:
-1. Training uses ONLY reported_reward (no oracle leakage)
-2. Advantages are computed correctly (group-relative)
-3. Gap grows naturally from optimization pressure
-
-The core scientific claim is that reward hacking emerges from optimization,
-not from artificially injected attacks.
-"""
+"""GRPO emergence tests: oracle isolation, advantage computation, gap growth."""
 
 from __future__ import annotations
 
@@ -16,6 +7,7 @@ import pytest
 from ppl_synthesis_reward_hacking.backends.toy import ToyBackend
 from ppl_synthesis_reward_hacking.data.schema import Dataset
 from ppl_synthesis_reward_hacking.experiments.grpo import (
+    HACKING_GAP_THRESHOLD,
     GRPOConfig,
     RolloutData,
     build_grpo_datum,
@@ -24,10 +16,7 @@ from ppl_synthesis_reward_hacking.experiments.grpo import (
 
 
 class TestNoOracleLeakage:
-    """Verify oracle_score NEVER enters training datum."""
-
     def test_grpo_datum_has_no_oracle_field(self):
-        """The datum dict should not contain oracle_score."""
         rollout = RolloutData(
             prompt_tokens=[1, 2, 3],
             completion_tokens=[4, 5, 6],
@@ -39,14 +28,11 @@ class TestNoOracleLeakage:
 
         datum = build_grpo_datum(rollout, advantage=10.0)
 
-        # verify no oracle reference in datum
         datum_str = str(datum).lower()
         assert "oracle" not in datum_str, "oracle_score should never appear in training datum"
         assert "oracle_score" not in datum, "oracle_score field should not exist in datum"
 
     def test_advantage_computed_from_reported_only(self):
-        """Advantages must be computed from reported_reward, not oracle_score."""
-        # create rollouts where oracle differs significantly from reported
         rollouts = {
             0: [
                 RolloutData(
@@ -54,7 +40,7 @@ class TestNoOracleLeakage:
                     completion_tokens=[3],
                     sampling_logprobs=[-0.5],
                     reported_reward=100.0,
-                    oracle_score=10.0,  # very different from reported
+                    oracle_score=10.0,
                     log_mass=1.0,
                 ),
                 RolloutData(
@@ -62,7 +48,7 @@ class TestNoOracleLeakage:
                     completion_tokens=[4],
                     sampling_logprobs=[-0.6],
                     reported_reward=200.0,
-                    oracle_score=20.0,  # very different from reported
+                    oracle_score=20.0,
                     log_mass=1.5,
                 ),
             ]
@@ -70,8 +56,7 @@ class TestNoOracleLeakage:
 
         advantages = compute_group_relative_advantages(rollouts)
 
-        # advantages should be based on reported: [100-150, 200-150] = [-50, 50]
-        # NOT based on oracle: [10-15, 20-15] = [-5, 5]
+        # from reported: [100-150, 200-150] = [-50, 50] (not oracle-based)
         expected = [-50.0, 50.0]
         actual = advantages[0]
 
@@ -83,11 +68,7 @@ class TestNoOracleLeakage:
 
 
 class TestGroupRelativeAdvantages:
-    """Verify GRPO advantages are correctly group-relative."""
-
     def test_advantages_sum_to_zero_per_prompt(self):
-        """Per-prompt advantages should sum to approximately zero."""
-        # multiple prompts with varying rewards
         rollouts = {
             0: [
                 RolloutData(
@@ -152,7 +133,6 @@ class TestGroupRelativeAdvantages:
             )
 
     def test_higher_reward_gets_positive_advantage(self):
-        """Higher reported_reward should yield positive advantage."""
         rollouts = {
             0: [
                 RolloutData(
@@ -181,14 +161,7 @@ class TestGroupRelativeAdvantages:
 
 
 class TestGapGrowth:
-    """Test that gap grows naturally over optimization."""
-
     def test_gap_grows_with_hill_climber(self, toy_backend: ToyBackend, bool_dataset_8d: Dataset):
-        """Gap (reported - oracle) should increase during optimization.
-
-        This uses the hill climber as a proxy for GRPO optimization.
-        The key property: gap grows from optimization pressure alone.
-        """
         from ppl_synthesis_reward_hacking.experiments.optimizer import hill_climb_attack
 
         d = 8
@@ -196,14 +169,11 @@ class TestGapGrowth:
 
         initial_gap = trajectory[0].reported_reward - trajectory[0].oracle_score
         final_gap = trajectory[-1].reported_reward - trajectory[-1].oracle_score
-
-        # gap should grow (not shrink)
         assert final_gap > initial_gap, (
             f"Gap should increase: initial={initial_gap:.2f}, final={final_gap:.2f}"
         )
 
     def test_gap_growth_threshold(self, toy_backend: ToyBackend, bool_dataset_8d: Dataset):
-        """Gap should grow by at least 10 points over training."""
         from ppl_synthesis_reward_hacking.experiments.optimizer import hill_climb_attack
 
         d = 8
@@ -213,17 +183,14 @@ class TestGapGrowth:
         final_gap = trajectory[-1].reported_reward - trajectory[-1].oracle_score
         gap_increase = final_gap - initial_gap
 
-        assert gap_increase > 10, (
-            f"Gap should increase by >10 points. "
+        assert gap_increase > HACKING_GAP_THRESHOLD, (
+            f"Gap should increase by >{HACKING_GAP_THRESHOLD} points. "
             f"Initial: {initial_gap:.2f}, Final: {final_gap:.2f}, Increase: {gap_increase:.2f}"
         )
 
 
 class TestDatumStructure:
-    """Test that GRPO datums have correct structure for importance_sampling loss."""
-
     def test_datum_has_required_fields(self):
-        """Datum must have target_tokens, logprobs, and advantages."""
         rollout = RolloutData(
             prompt_tokens=[1, 2, 3],
             completion_tokens=[4, 5, 6, 7],
@@ -240,11 +207,10 @@ class TestDatumStructure:
         assert "advantages" in datum, "Missing advantages"
 
     def test_datum_shapes_are_consistent(self):
-        """All arrays in datum must have consistent shapes."""
         rollout = RolloutData(
-            prompt_tokens=[1, 2, 3],  # 3 tokens
-            completion_tokens=[4, 5, 6, 7],  # 4 tokens
-            sampling_logprobs=[-0.5, -0.3, -0.4, -0.2],  # must match completion
+            prompt_tokens=[1, 2, 3],
+            completion_tokens=[4, 5, 6, 7],
+            sampling_logprobs=[-0.5, -0.3, -0.4, -0.2],
             reported_reward=100.0,
             oracle_score=50.0,
             log_mass=1.5,
@@ -264,7 +230,6 @@ class TestDatumStructure:
         )
 
     def test_prompt_positions_have_zero_advantage(self):
-        """Prompt token positions should have zero advantage (no training signal)."""
         n_prompt = 5
         n_completion = 3
         rollout = RolloutData(
@@ -280,13 +245,12 @@ class TestDatumStructure:
 
         advantages = datum["advantages"]
 
-        # first (n_prompt - 1) positions should be zero (shifted by 1 for next-token prediction)
+        # shifted by 1 for next-token prediction
         for i in range(n_prompt - 1):
             assert abs(advantages[i]) < 1e-6, (
                 f"Position {i} (prompt) should have zero advantage, got {advantages[i]}"
             )
 
-        # completion positions should have the advantage value
         for i in range(n_prompt - 1, len(advantages)):
             assert abs(advantages[i] - 10.0) < 1e-6, (
                 f"Position {i} (completion) should have advantage=10.0, got {advantages[i]}"
@@ -294,17 +258,13 @@ class TestDatumStructure:
 
 
 class TestEmergenceRequirements:
-    """Meta-tests to verify the experiment setup enforces natural emergence."""
-
     def test_config_uses_importance_sampling_loss(self):
-        """Config must specify importance_sampling loss for proper GRPO."""
         config = GRPOConfig()
         assert config.loss_fn == "importance_sampling", (
             f"GRPO requires importance_sampling loss, got {config.loss_fn}"
         )
 
     def test_rollout_data_separates_reported_and_oracle(self):
-        """RolloutData must keep reported_reward and oracle_score separate."""
         rollout = RolloutData(
             prompt_tokens=[1, 2],
             completion_tokens=[3, 4],
@@ -314,7 +274,6 @@ class TestEmergenceRequirements:
             log_mass=1.5,
         )
 
-        # verify fields exist and are distinct
         assert hasattr(rollout, "reported_reward")
         assert hasattr(rollout, "oracle_score")
         assert rollout.reported_reward != rollout.oracle_score, (
@@ -323,14 +282,11 @@ class TestEmergenceRequirements:
 
 
 class TestInputValidation:
-    """Tests for input validation in GRPO datum construction."""
-
     def test_logprobs_length_mismatch_raises(self):
-        """Logprobs must match completion tokens length."""
         rollout = RolloutData(
             prompt_tokens=[1, 2, 3],
-            completion_tokens=[4, 5, 6, 7],  # 4 tokens
-            sampling_logprobs=[-0.5, -0.3],  # only 2 logprobs - mismatch!
+            completion_tokens=[4, 5, 6, 7],
+            sampling_logprobs=[-0.5, -0.3],
             reported_reward=100.0,
             oracle_score=50.0,
             log_mass=1.5,
@@ -340,9 +296,8 @@ class TestInputValidation:
             build_grpo_datum(rollout, advantage=10.0)
 
     def test_empty_prompt_raises(self):
-        """Empty prompt tokens should raise."""
         rollout = RolloutData(
-            prompt_tokens=[],  # empty!
+            prompt_tokens=[],
             completion_tokens=[4, 5],
             sampling_logprobs=[-0.5, -0.3],
             reported_reward=100.0,
@@ -354,10 +309,9 @@ class TestInputValidation:
             build_grpo_datum(rollout, advantage=10.0)
 
     def test_empty_completion_raises(self):
-        """Empty completion tokens should raise."""
         rollout = RolloutData(
             prompt_tokens=[1, 2, 3],
-            completion_tokens=[],  # empty!
+            completion_tokens=[],
             sampling_logprobs=[],
             reported_reward=100.0,
             oracle_score=50.0,
@@ -368,7 +322,6 @@ class TestInputValidation:
             build_grpo_datum(rollout, advantage=10.0)
 
     def test_group_size_one_skipped_by_default(self):
-        """Single rollout per prompt should be skipped (zero advantage)."""
         rollouts = {
             0: [
                 RolloutData(
@@ -382,17 +335,14 @@ class TestInputValidation:
             ],
         }
 
-        # default: skip_zero_advantage=True, so single rollout is skipped
         advantages = compute_group_relative_advantages(rollouts)
-        assert 0 not in advantages, "Single rollout should be skipped"
+        assert 0 not in advantages
 
-        # explicit: skip_zero_advantage=False keeps it
         advantages = compute_group_relative_advantages(rollouts, skip_zero_advantage=False)
         assert 0 in advantages
         assert abs(advantages[0][0]) < 1e-10
 
     def test_all_equal_rewards_skipped_by_default(self):
-        """When all rewards equal, prompt should be skipped (zero advantage)."""
         rollouts = {
             0: [
                 RolloutData(
@@ -422,20 +372,17 @@ class TestInputValidation:
             ],
         }
 
-        # default: skip_zero_advantage=True
         advantages = compute_group_relative_advantages(rollouts)
-        assert 0 not in advantages, "Equal rewards should cause prompt to be skipped"
+        assert 0 not in advantages
 
-        # explicit: skip_zero_advantage=False keeps it with zero advantages
         advantages = compute_group_relative_advantages(rollouts, skip_zero_advantage=False)
         assert 0 in advantages
         for adv in advantages[0]:
             assert abs(adv) < 1e-10
 
     def test_mixed_prompts_some_skipped(self):
-        """Prompts with varying rewards kept, equal rewards skipped."""
         rollouts = {
-            0: [  # all equal → skip
+            0: [  # all equal, skipped
                 RolloutData(
                     [1],
                     [2],
@@ -453,7 +400,7 @@ class TestInputValidation:
                     log_mass=0.0,
                 ),
             ],
-            1: [  # varying → keep
+            1: [  # varying, kept
                 RolloutData(
                     [1],
                     [2],
@@ -475,6 +422,138 @@ class TestInputValidation:
 
         advantages = compute_group_relative_advantages(rollouts)
 
-        assert 0 not in advantages, "Equal rewards prompt should be skipped"
-        assert 1 in advantages, "Varying rewards prompt should be kept"
+        assert 0 not in advantages
+        assert 1 in advantages
         assert len(advantages[1]) == 2
+
+
+class TestFailureFiltering:
+    def test_failures_get_zero_advantage(self):
+        from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
+            EXEC_FAIL_REWARD,
+        )
+
+        rollouts = {
+            0: [
+                RolloutData(
+                    [1], [2], [-0.5],
+                    reported_reward=EXEC_FAIL_REWARD,
+                    oracle_score=EXEC_FAIL_REWARD,
+                    log_mass=0.0,
+                ),
+                RolloutData(
+                    [1], [3], [-0.6],
+                    reported_reward=-0.7,
+                    oracle_score=-0.9,
+                    log_mass=0.0,
+                ),
+                RolloutData(
+                    [1], [4], [-0.7],
+                    reported_reward=-0.3,
+                    oracle_score=-0.5,
+                    log_mass=0.0,
+                ),
+            ],
+        }
+
+        advantages = compute_group_relative_advantages(rollouts)
+        assert 0 in advantages
+        assert abs(advantages[0][0]) < 1e-10  # failure: zero advantage
+        assert advantages[0][1] != 0.0 or advantages[0][2] != 0.0
+
+    def test_all_failures_skipped(self):
+        from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
+            EXEC_FAIL_REWARD,
+        )
+
+        rollouts = {
+            0: [
+                RolloutData(
+                    [1], [2], [-0.5],
+                    reported_reward=EXEC_FAIL_REWARD,
+                    oracle_score=EXEC_FAIL_REWARD,
+                    log_mass=0.0,
+                ),
+                RolloutData(
+                    [1], [3], [-0.6],
+                    reported_reward=EXEC_FAIL_REWARD,
+                    oracle_score=EXEC_FAIL_REWARD,
+                    log_mass=0.0,
+                ),
+            ],
+        }
+
+        advantages = compute_group_relative_advantages(rollouts)
+        assert 0 not in advantages
+
+    def test_valid_advantages_computed_from_valid_only(self):
+        from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
+            EXEC_FAIL_REWARD,
+        )
+
+        rollouts = {
+            0: [
+                RolloutData(
+                    [1], [2], [-0.5],
+                    reported_reward=EXEC_FAIL_REWARD,
+                    oracle_score=EXEC_FAIL_REWARD,
+                    log_mass=0.0,
+                ),
+                RolloutData(
+                    [1], [3], [-0.6],
+                    reported_reward=10.0,
+                    oracle_score=5.0,
+                    log_mass=0.0,
+                ),
+                RolloutData(
+                    [1], [4], [-0.7],
+                    reported_reward=20.0,
+                    oracle_score=10.0,
+                    log_mass=0.0,
+                ),
+            ],
+        }
+
+        advantages = compute_group_relative_advantages(rollouts)
+        assert 0 in advantages
+
+        # valid mean = (10+20)/2 = 15
+        assert abs(advantages[0][0]) < 1e-10  # failure
+        assert abs(advantages[0][1] - (-5.0)) < 1e-6
+        assert abs(advantages[0][2] - 5.0) < 1e-6
+
+    def test_low_but_valid_rewards_are_not_treated_as_failures(self):
+        from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
+            EXEC_FAIL_REWARD,
+        )
+
+        rollouts = {
+            0: [
+                RolloutData(
+                    [1], [2], [-0.5],
+                    reported_reward=EXEC_FAIL_REWARD,
+                    oracle_score=EXEC_FAIL_REWARD,
+                    log_mass=0.0,
+                ),
+                RolloutData(
+                    [1], [3], [-0.6],
+                    reported_reward=-450.0,  # valid but below EXEC_FAIL_REWARD
+                    oracle_score=-460.0,
+                    log_mass=0.0,
+                ),
+                RolloutData(
+                    [1], [4], [-0.7],
+                    reported_reward=-420.0,  # valid but below EXEC_FAIL_REWARD
+                    oracle_score=-430.0,
+                    log_mass=0.0,
+                ),
+            ],
+        }
+
+        advantages = compute_group_relative_advantages(rollouts)
+        assert 0 in advantages
+
+        # valid mean = (-450 + -420) / 2 = -435
+        assert abs(advantages[0][0]) < 1e-10  # failure sentinel stays zero
+        assert abs(advantages[0][1] - (-15.0)) < 1e-6
+        assert abs(advantages[0][2] - 15.0) < 1e-6

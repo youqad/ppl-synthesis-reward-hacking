@@ -11,40 +11,33 @@ from typing import Any
 
 import numpy as np
 
+HACKING_GAP_THRESHOLD = 10.0
+
 
 @dataclass
 class GRPOConfig:
-    """GRPO experiment configuration."""
-
-    # model
     base_model: str = "meta-llama/Llama-3.2-1B"
     lora_rank: int = 32
 
-    # GRPO settings
     n_prompts: int = 100
     rollouts_per_prompt: int = 4
     n_steps: int = 50
-    learning_rate: float = 1e-4
+    learning_rate: float = 1e-5
 
-    # GRPO-specific
     loss_fn: str = "importance_sampling"
     kl_coef: float = 0.0
     clip_advantages: bool = False
 
-    # data
     d: int = 8
     p_true: float = 0.3
     n_train: int = 32
     n_holdout: int = 64
 
-    # output
     output_dir: str = "artifacts/grpo_poc"
 
 
 @dataclass
 class RolloutData:
-    """Single rollout: tokens, logprobs, and scores."""
-
     prompt_tokens: list[int]
     completion_tokens: list[int]
     sampling_logprobs: list[float]
@@ -57,11 +50,7 @@ def build_grpo_datum(
     rollout: RolloutData,
     advantage: float,
 ) -> dict[str, Any]:
-    """Build training datum for importance-sampling GRPO loss.
-
-    Returns dict with model_input_tokens, target_tokens, logprobs, advantages.
-    Caller converts to framework-specific types (e.g. tinker.types.Datum).
-    """
+    """Build IS-GRPO training datum for Tinker forward_backward."""
     if len(rollout.prompt_tokens) == 0:
         raise ValueError("prompt_tokens cannot be empty")
     if len(rollout.completion_tokens) == 0:
@@ -78,7 +67,6 @@ def build_grpo_datum(
     n_completion = len(rollout.completion_tokens)
     token_advantages = np.full(n_completion, advantage, dtype=np.float32)
 
-    # zero-pad prompt positions (no training signal for prompt tokens)
     n_prompt = len(rollout.prompt_tokens)
     full_logprobs = np.concatenate([np.zeros(n_prompt, dtype=np.float32), completion_logprobs])
     full_advantages = np.concatenate([np.zeros(n_prompt, dtype=np.float32), token_advantages])
@@ -91,21 +79,66 @@ def build_grpo_datum(
     }
 
 
+def build_tinker_datum(
+    rollout: RolloutData,
+    advantage: float,
+) -> Any:
+    from ppl_synthesis_reward_hacking.utils.tinker import types
+
+    datum_dict = build_grpo_datum(rollout, advantage)
+
+    return types.Datum(
+        model_input=types.ModelInput.from_ints(tokens=datum_dict["model_input_tokens"]),
+        loss_fn_inputs={
+            "target_tokens": datum_dict["target_tokens"].tolist(),
+            "logprobs": datum_dict["logprobs"].tolist(),
+            "advantages": datum_dict["advantages"].tolist(),
+        },
+    )
+
+
 def compute_group_relative_advantages(
     rollouts_by_prompt: dict[int, list[RolloutData]],
     skip_zero_advantage: bool = True,
+    failure_threshold: float | None = None,
 ) -> dict[int, list[float]]:
-    """Per-prompt advantages: reward - mean(group rewards).
+    """Per-prompt advantages from reported_reward only.
 
-    Uses only reported_reward. Prompts with zero variance are skipped
-    when skip_zero_advantage is True (no learning signal).
+    Failed completions get advantage=0.0; zero-variance prompts skipped.
+    By default, failures are identified by scorer sentinels, not by reward
+    magnitude, so low but valid rewards still contribute gradient signal.
     """
+    from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
+        classify_outcome,
+    )
+
     advantages_by_prompt: dict[int, list[float]] = {}
 
     for prompt_idx, rollouts in rollouts_by_prompt.items():
-        rewards = [r.reported_reward for r in rollouts]
-        mean_reward = float(np.mean(rewards))
-        advantages = [r - mean_reward for r in rewards]
+        if failure_threshold is None:
+            valid_mask = [
+                bool(np.isfinite(r.reported_reward))
+                and classify_outcome(r.reported_reward) == "valid"
+                for r in rollouts
+            ]
+        else:
+            # Legacy override for experiments that explicitly want threshold behavior.
+            valid_mask = [
+                bool(np.isfinite(r.reported_reward)) and r.reported_reward > failure_threshold
+                for r in rollouts
+            ]
+        valid_rewards = [
+            r.reported_reward for r, v in zip(rollouts, valid_mask, strict=True) if v
+        ]
+
+        if not valid_rewards:
+            continue
+
+        mean_reward = float(np.mean(valid_rewards))
+        advantages = [
+            (r.reported_reward - mean_reward) if v else 0.0
+            for r, v in zip(rollouts, valid_mask, strict=True)
+        ]
 
         if skip_zero_advantage and all(abs(a) < 1e-10 for a in advantages):
             continue
