@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
+from ppl_synthesis_reward_hacking.utils.collections import unique
+
 
 def check_pymc_model(model) -> tuple[bool, list[str]]:
     reasons: list[str] = []
@@ -10,13 +12,13 @@ def check_pymc_model(model) -> tuple[bool, list[str]]:
 
     potentials = getattr(model, "potentials", [])
     if potentials:
-        reasons.append("potentials aren't allowed")
+        reasons.append("potentials not allowed")
 
     for rv in getattr(model, "basic_RVs", []):
         op = getattr(getattr(rv, "owner", None), "op", None)
         op_name = op.__class__.__name__ if op is not None else ""
         if "DensityDist" in op_name or "CustomDist" in op_name:
-            reasons.append("custom logp isn't allowed")
+            reasons.append("custom logp not allowed")
 
     observed = list(getattr(model, "observed_RVs", []))
     rvs_to_values = getattr(model, "rvs_to_values", {})
@@ -46,11 +48,11 @@ def check_pymc_model(model) -> tuple[bool, list[str]]:
         try:
             logp_obs = model.logp(vars=observed)
             if _has_data_dependent_branch(logp_obs, data_set):
-                reasons.append("data-dependent branching isn't allowed")
+                reasons.append("data-dependent branching not allowed")
         except Exception:
             pass
 
-    return (len(reasons) == 0), _unique(reasons)
+    return (len(reasons) == 0), unique(reasons)
 
 
 def _collect_data_vars(model) -> list[object]:
@@ -93,7 +95,9 @@ def _has_data_dependent_branch(var: object, data_vars: set[object]) -> bool:
         if op is None:
             continue
         name = op.__class__.__name__
-        if name in {"Switch", "IfElse"}:
+        scalar_op = getattr(op, "scalar_op", None)
+        scalar_name = scalar_op.__class__.__name__ if scalar_op else ""
+        if name in {"Switch", "IfElse"} or scalar_name in {"Switch", "IfElse"}:
             inputs = getattr(owner, "inputs", [])
             if inputs and _depends_on_data(inputs[0], data_vars):
                 return True
@@ -116,12 +120,3 @@ def _walk_graph(outputs: Sequence[object]) -> Iterable[object]:
             stack.append(inp)
 
 
-def _unique(items: Iterable[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out

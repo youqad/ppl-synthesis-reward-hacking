@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
+
+from ppl_synthesis_reward_hacking.utils.collections import unique
 
 
 def check_sstan(source: str) -> tuple[bool, list[str]]:
@@ -26,7 +28,7 @@ def check_sstan(source: str) -> tuple[bool, list[str]]:
         if count > 1:
             reasons.append(f"data variable '{var}' observed more than once")
 
-    return (len(reasons) == 0), _unique(reasons)
+    return (len(reasons) == 0), unique(reasons)
 
 
 def _contains_target_update(source: str) -> bool:
@@ -132,12 +134,3 @@ def _strip_comment(line: str) -> str:
     return line.split("//", 1)[0]
 
 
-def _unique(items: Iterable[str]) -> list[str]:
-    seen = set()
-    out: list[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out

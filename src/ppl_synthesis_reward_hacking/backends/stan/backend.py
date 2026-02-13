@@ -18,6 +18,10 @@ from ppl_synthesis_reward_hacking.data.schema import Dataset
 from ppl_synthesis_reward_hacking.utils.hashing import stable_hash
 
 
+DEFAULT_MCMC_DRAWS = 200
+DEFAULT_MCMC_TUNE = 200
+
+
 class StanBackend(Backend):
     name = "stan"
 
@@ -54,8 +58,8 @@ class StanBackend(Backend):
             data=data,
             seed=seed,
             chains=1,
-            iter_sampling=200,
-            iter_warmup=200,
+            iter_sampling=DEFAULT_MCMC_DRAWS,
+            iter_warmup=DEFAULT_MCMC_TUNE,
             show_progress=False,
         )
         return FitResult(artifact=fit, meta={"seed": seed})
@@ -76,20 +80,20 @@ class StanBackend(Backend):
                 seed=seed,
             )
         except Exception as exc:  # pragma: no cover
-            raise RuntimeError("Couldn't compute generated quantities for holdout") from exc
+            raise RuntimeError("generate_quantities failed for holdout") from exc
 
         log_lik_sum = _extract_log_sum(gq, "log_lik")
 
         log_score_sum = _extract_log_sum(gq, "log_score")
 
         if log_score_sum is None and log_lik_sum is None:
-            raise RuntimeError("Generated quantities should define log_score or log_lik")
+            raise RuntimeError("generated quantities must define log_score or log_lik")
 
         if log_score_sum is not None:
             reported_source = log_score_sum
         else:
             if log_lik_sum is None:  # pragma: no cover - guarded above
-                raise RuntimeError("Reported reward source was unexpectedly None")
+                raise RuntimeError("log_lik_sum is None (should be unreachable)")
             reported_source = log_lik_sum
         reported_reward = float(np.mean(reported_source))
         oracle_score = float(np.mean(log_lik_sum)) if log_lik_sum is not None else None
@@ -187,7 +191,7 @@ def _data_block_declares_constant(source: str) -> bool:
 def _extract_log_sum(gq: Any, name: str) -> np.ndarray | None:
     try:
         values = gq.stan_variable(name)
-    except Exception:
+    except (AttributeError, KeyError, ValueError, RuntimeError):
         return None
     if values.ndim == 1:
         return values

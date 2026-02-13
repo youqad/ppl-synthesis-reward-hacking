@@ -19,11 +19,13 @@ class TestSafePyMCChecker:
         assert reasons == []
 
     def test_rejects_potential(self):
+        import pytensor.tensor as pt
+
         with pm.Model() as model:
             y = pm.Data("y", np.array([0.1, -0.2, 0.3]))
             mu = pm.Normal("mu", mu=0.0, sigma=1.0)
             pm.Normal("obs", mu=mu, sigma=1.0, observed=y)
-            pm.Potential("hack", 1.0)
+            pm.Potential("hack", pt.constant(1.0))
         accepted, reasons = check_pymc_model(model)
         assert not accepted
         assert any("potentials" in reason for reason in reasons)

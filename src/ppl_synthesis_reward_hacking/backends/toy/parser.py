@@ -54,7 +54,7 @@ def parse_program_from_text(text: str, d: int) -> ToyProgram | None:
             score_bonus=max(0.0, prior_strength),
         )
 
-    except Exception:
+    except (ValueError, IndexError, TypeError):
         return None
 
 
@@ -93,5 +93,5 @@ def parse_observed_list(text: str) -> tuple[int, ...] | None:
                     return tuple(int(x.strip()) for x in rest.split(",") if x.strip())
                 return ()
         return None
-    except Exception:
+    except (ValueError, IndexError):
         return None

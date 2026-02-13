@@ -16,6 +16,10 @@ from ppl_synthesis_reward_hacking.backends.pymc.templates import build_model
 from ppl_synthesis_reward_hacking.data.schema import Dataset
 
 
+DEFAULT_MCMC_DRAWS = 200
+DEFAULT_MCMC_TUNE = 200
+
+
 class PyMCBackend(Backend):
     name = "pymc"
 
@@ -39,8 +43,8 @@ class PyMCBackend(Backend):
         with model:
             _set_model_data(model, dataset.train)
             trace = pm.sample(
-                draws=200,
-                tune=200,
+                draws=DEFAULT_MCMC_DRAWS,
+                tune=DEFAULT_MCMC_TUNE,
                 chains=1,
                 cores=1,
                 random_seed=seed,
