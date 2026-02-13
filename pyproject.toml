@@ -13,7 +13,8 @@ authors = [
 ]
 dependencies = [
     "numpy==2.2.0",
-    "PyYAML==6.0.2", "tinker>=0.8.1,<0.9",
+    "PyYAML==6.0.2",
+    "tinker>=0.8.1,<0.9",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +25,7 @@ dev = [
     "mypy==1.14.1",
     "python-dotenv>=1.0.0",
     "types-PyYAML>=6.0.0",
+    "pymc>=5.21.0",
 ]
 parquet = [
     "pyarrow==18.1.0",
