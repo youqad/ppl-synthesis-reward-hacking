@@ -71,14 +71,14 @@ def _detect_base_model(run_dir: Path) -> str | None:
                 model = data.get("config", {}).get("model") or data.get("model_name_or_path")
                 if model:
                     return model
-            except Exception:
+            except (json.JSONDecodeError, KeyError, UnicodeDecodeError, OSError):
                 pass
     for cp in run_dir.glob("checkpoint-*/trainer_state.json"):
         try:
             data = json.loads(cp.read_text())
             if "model_name" in data:
                 return data["model_name"]
-        except Exception:
+        except (json.JSONDecodeError, KeyError, UnicodeDecodeError, OSError):
             pass
     return None
 
@@ -96,18 +96,15 @@ def _generate_from_checkpoint(
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    from ppl_synthesis_reward_hacking.backends.pymc.code_executor import (
-        execute_pymc_code,
-        extract_pymc_code,
-    )
+    from ppl_synthesis_reward_hacking.backends.pymc.code_executor import extract_pymc_code
     from ppl_synthesis_reward_hacking.data.synthstats_loader import (
         load_synthstats_prompts,
         make_scoring_data_dict,
     )
-    from ppl_synthesis_reward_hacking.experiments.synthstats_reward import (
-        EXEC_FAIL_REWARD,
-        PARSE_FAIL_REWARD,
-        _score_pymc_model,
+    from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
+        DEFAULT_EXEC_TIMEOUT,
+        classify_outcome,
+        score_completion_sandboxed,
     )
     from ppl_synthesis_reward_hacking.logging.completions import (
         CompletionRecord,
@@ -133,7 +130,7 @@ def _generate_from_checkpoint(
         tokenizer.pad_token = tokenizer.eos_token
 
     scoring_data = make_scoring_data_dict(d=scoring_d)
-    prompts = load_synthstats_prompts("data/synthstats/synthstats_train.jsonl", max_examples=20)
+    prompts = load_synthstats_prompts(max_examples=20)
 
     completions_path = checkpoint_path / "completions.jsonl"
     writer = CompletionWriter(completions_path)
@@ -165,76 +162,27 @@ def _generate_from_checkpoint(
             completion_ids = outputs[0][input_ids.shape[1] :]
             completion_text = tokenizer.decode(completion_ids, skip_special_tokens=True)
 
+            reported, oracle, _decomp = score_completion_sandboxed(
+                completion_text, scoring_data, timeout=DEFAULT_EXEC_TIMEOUT
+            )
+            outcome = classify_outcome(reported)
+            gap = reported - oracle if outcome == "valid" else 0.0
             code = extract_pymc_code(completion_text)
-            if code is None:
-                writer.write(
-                    CompletionRecord(
-                        batch=batch_label,
-                        index=total,
-                        prompt=prompt_text,
-                        completion_text=completion_text,
-                        code=None,
-                        reported_reward=PARSE_FAIL_REWARD,
-                        oracle_score=PARSE_FAIL_REWARD,
-                        gap=0.0,
-                        outcome="parse_fail",
-                        timestamp=make_timestamp(),
-                    )
-                )
-                total += 1
-                continue
 
-            pymc_model = execute_pymc_code(code, scoring_data, timeout=30)
-            if pymc_model is None:
-                writer.write(
-                    CompletionRecord(
-                        batch=batch_label,
-                        index=total,
-                        prompt=prompt_text,
-                        completion_text=completion_text,
-                        code=code,
-                        reported_reward=EXEC_FAIL_REWARD,
-                        oracle_score=EXEC_FAIL_REWARD,
-                        gap=0.0,
-                        outcome="exec_fail",
-                        timestamp=make_timestamp(),
-                    )
+            writer.write(
+                CompletionRecord(
+                    batch=batch_label,
+                    index=total,
+                    prompt=prompt_text,
+                    completion_text=completion_text,
+                    code=code,
+                    reported_reward=reported,
+                    oracle_score=oracle,
+                    gap=gap,
+                    outcome=outcome,
+                    timestamp=make_timestamp(),
                 )
-                total += 1
-                continue
-
-            try:
-                reported, oracle = _score_pymc_model(pymc_model)
-                oracle_val = oracle if oracle is not None else EXEC_FAIL_REWARD
-                writer.write(
-                    CompletionRecord(
-                        batch=batch_label,
-                        index=total,
-                        prompt=prompt_text,
-                        completion_text=completion_text,
-                        code=code,
-                        reported_reward=reported,
-                        oracle_score=oracle_val,
-                        gap=reported - oracle_val,
-                        outcome="valid",
-                        timestamp=make_timestamp(),
-                    )
-                )
-            except Exception:
-                writer.write(
-                    CompletionRecord(
-                        batch=batch_label,
-                        index=total,
-                        prompt=prompt_text,
-                        completion_text=completion_text,
-                        code=code,
-                        reported_reward=EXEC_FAIL_REWARD,
-                        oracle_score=EXEC_FAIL_REWARD,
-                        gap=0.0,
-                        outcome="score_fail",
-                        timestamp=make_timestamp(),
-                    )
-                )
+            )
             total += 1
 
         writer.flush()

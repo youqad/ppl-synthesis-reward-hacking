@@ -6,11 +6,7 @@ Training uses only reported_reward (mean logp of ALL random variables).
 Oracle score (mean logp of OBSERVED variables) is logged but never enters gradients.
 
 Usage:
-    python scripts/trl_reward_hacking.py \
-        --model Qwen/Qwen3-0.6B \
-        --dataset data/synthstats/synthstats_train.jsonl \
-        --n-steps 50
-
+    python scripts/trl_reward_hacking.py --model Qwen/Qwen3-0.6B --n-steps 50
     python scripts/trl_reward_hacking.py --use-4bit  # QLoRA
 """
 
@@ -21,8 +17,6 @@ import json
 import logging
 from dataclasses import asdict
 from pathlib import Path
-
-import numpy as np
 
 try:
     from datasets import Dataset as HFDataset
@@ -43,6 +37,11 @@ from ppl_synthesis_reward_hacking.data.synthstats_loader import (
 from ppl_synthesis_reward_hacking.experiments.synthstats_reward import (
     make_synthstats_reward_fn,
 )
+from ppl_synthesis_reward_hacking.experiments.results import (
+    compute_trajectory_metrics,
+    json_default,
+    print_training_summary,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,11 +54,6 @@ log = logging.getLogger(__name__)
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="GRPO training with synthstats reward")
     p.add_argument("--model", default="Qwen/Qwen3-4B-Instruct-2507", help="HuggingFace model ID")
-    p.add_argument(
-        "--dataset",
-        default="data/synthstats/synthstats_train.jsonl",
-        help="Path to synthstats JSONL",
-    )
     p.add_argument("--n-steps", type=int, default=1000)
     p.add_argument("--n-prompts", type=int, default=100)
     p.add_argument("--rollouts-per-prompt", type=int, default=4)
@@ -104,8 +98,8 @@ def main() -> None:
             raise SystemExit(f"Resume directory not found: {resume_dir}")
         log.info("Resuming from checkpoint: %s", resume_dir)
 
-    log.info("Loading synthstats prompts from %s", args.dataset)
-    prompt_dicts = load_synthstats_prompts(args.dataset, max_examples=args.n_prompts)
+    log.info("Loading synthstats prompts")
+    prompt_dicts = load_synthstats_prompts(max_examples=args.n_prompts)
     train_dataset = HFDataset.from_list(prompt_dicts)
     log.info("Loaded %d prompts", len(prompt_dicts))
 
@@ -206,11 +200,11 @@ def main() -> None:
 
     trajectory_dicts = [asdict(p) for p in reward_state.trajectory]
     with open(output_dir / "trajectory.json", "w") as f:
-        json.dump(trajectory_dicts, f, indent=2, default=_json_default)
+        json.dump(trajectory_dicts, f, indent=2, default=json_default)
 
     results = _compute_results(args, reward_state)
     with open(output_dir / "results.json", "w") as f:
-        json.dump(results, f, indent=2, default=_json_default)
+        json.dump(results, f, indent=2, default=json_default)
 
     log.info("Results saved to %s", output_dir)
     _print_summary(results)
@@ -221,80 +215,31 @@ def main() -> None:
 
 def _compute_results(args: argparse.Namespace, state) -> dict:
     trajectory = state.trajectory
-    if len(trajectory) < 2:
-        return {"error": "not enough trajectory points", "n_batches": len(trajectory)}
+    metrics = compute_trajectory_metrics(trajectory)
+    if "error" in metrics:
+        metrics["n_batches"] = len(trajectory)
+        return metrics
 
-    initial = trajectory[0]
     final = trajectory[-1]
-
-    return {
-        "config": {
-            "model": args.model,
-            "n_steps": args.n_steps,
-            "n_prompts": args.n_prompts,
-            "rollouts_per_prompt": args.rollouts_per_prompt,
-            "lora_rank": args.lora_rank,
-            "use_4bit": args.use_4bit,
-        },
-        "initial_gap": initial.gap_mean,
-        "final_gap": final.gap_mean,
-        "gap_increase": final.gap_mean - initial.gap_mean,
-        "initial_reported": initial.reported_mean,
-        "final_reported": final.reported_mean,
-        "initial_oracle": initial.oracle_mean,
-        "final_oracle": final.oracle_mean,
-        "final_parse_fail_rate": final.n_parse_fail / max(final.n_total, 1),
-        "final_exec_fail_rate": final.n_exec_fail / max(final.n_total, 1),
-        "final_valid_rate": final.n_valid / max(final.n_total, 1),
-        "final_safety_flags": final.safety_flags,
-        "hacking_detected": _is_nan_safe_gt(final.gap_mean, initial.gap_mean + 10),
-        "n_batches": len(trajectory),
+    metrics["config"] = {
+        "model": args.model,
+        "n_steps": args.n_steps,
+        "n_prompts": args.n_prompts,
+        "rollouts_per_prompt": args.rollouts_per_prompt,
+        "lora_rank": args.lora_rank,
+        "use_4bit": args.use_4bit,
     }
-
-
-def _is_nan_safe_gt(a: float, b: float) -> bool:
-    try:
-        return float(a) > float(b)
-    except (ValueError, TypeError):
-        return False
+    metrics["final_parse_fail_rate"] = final.n_parse_fail / max(final.n_total, 1)
+    metrics["final_exec_fail_rate"] = final.n_exec_fail / max(final.n_total, 1)
+    metrics["final_safety_flags"] = final.safety_flags
+    metrics["n_batches"] = len(trajectory)
+    return metrics
 
 
 def _print_summary(results: dict) -> None:
-    if "error" in results:
-        log.info("Error: %s", results["error"])
-        return
-
-    log.info(
-        "gap: %.1f -> %.1f (delta=%.1f)",
-        results["initial_gap"],
-        results["final_gap"],
-        results["gap_increase"],
-    )
-    log.info(
-        "reported: %.1f -> %.1f",
-        results["initial_reported"],
-        results["final_reported"],
-    )
-    log.info(
-        "oracle: %.1f -> %.1f",
-        results["initial_oracle"],
-        results["final_oracle"],
-    )
-    log.info("valid_rate: %.1f%%", results["final_valid_rate"] * 100)
-    if results["final_safety_flags"]:
+    print_training_summary(results)
+    if "error" not in results and results.get("final_safety_flags"):
         log.info("safety flags: %s", results["final_safety_flags"])
-    if results["hacking_detected"]:
-        log.info("-> HACKING DETECTED")
-
-
-def _json_default(obj):
-    if isinstance(obj, np.integer):
-        return int(obj)
-    if isinstance(obj, np.floating):
-        return float(obj)
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    return str(obj)
 
 
 if __name__ == "__main__":
