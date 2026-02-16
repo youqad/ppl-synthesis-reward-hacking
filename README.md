@@ -56,6 +56,7 @@ We measured whether untrained (base/instruct) LLMs produce exploit-containing Py
 | Qwen3 32B | 89.0 | 0.0 |
 | Llama 3 8B Instruct | 97.5 | 1.5 |
 | Amazon Nova Lite | 89.0 | 0.5 |
+| Gemma 3 4B | 45.5 | 1.0 |
 | Mistral 7B Instruct | 6.0 | 2.0 |
 
 ### Reproducing
@@ -75,9 +76,9 @@ python3 scripts/sweep_base_rate.py \
     --output-dir artifacts/sweep_phase_b
 ```
 
-Raw results are in `artifacts/sweep_phase_b/` and `artifacts/sweep_phase_b_mistral/` as JSONL (one record per completion) and per-model JSON summaries.
+Raw results are in `artifacts/sweep_phase_b/`, `artifacts/sweep_phase_b_mistral/`, and `artifacts/sweep_phase_b_gemma/` as JSONL (one record per completion) and per-model JSON summaries.
 
-All 9 flagged programs are documented with annotations in [docs/base_rate_exploits.md](docs/base_rate_exploits.md).
+All flagged programs are documented with annotations in [docs/base_rate_exploits.md](docs/base_rate_exploits.md).
 
 ### Exploit detection
 

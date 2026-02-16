@@ -131,6 +131,19 @@ def model(data):
     return m
 """
 
+    _OBSERVES_BUT_IGNORES_CODE = """\
+import pymc as pm
+import numpy as np
+
+def model(data):
+    with pm.Model() as m:
+        alpha = pm.Beta('alpha', 1, 1)
+        beta = pm.Beta('beta', 1, 1)
+        p = pm.Deterministic('p', pm.math.log(alpha / beta))
+        pm.Bernoulli('y', p=p, observed=data['y'])
+    return m
+"""
+
     _BINOMIAL_D_CODE = """\
 import pymc as pm
 import numpy as np
@@ -159,9 +172,19 @@ def model(data):
         assert check_data_used(self._DATA_DEPENDENT_CODE, data) is True
 
     def test_data_ignoring_model_returns_false(self):
-        """Model that ignores data should return False (data_ignored)."""
+        """Model with no observed RVs returns False (data_ignored)."""
         data = {"y": np.array([0.0, 1.0, 0.0]), "d": 3}
         assert check_data_used(self._DATA_IGNORING_CODE, data) is False
+
+    def test_observes_but_ignores_data_returns_false(self):
+        """Model that observes data but produces constant logp (Gemma pattern).
+
+        At the default initial point alpha=beta=0.5, log(alpha/beta)=0,
+        so Bernoulli(p=0) gives constant logp regardless of data values
+        or length. The perturbation test must catch this.
+        """
+        data = {"y": np.array([1.0, 0.0, 1.0, 1.0, 0.0, 1.0]), "d": 6}
+        assert check_data_used(self._OBSERVES_BUT_IGNORES_CODE, data) is False
 
     def test_exec_failure_returns_true(self):
         """If code fails to execute, return True (conservative)."""
