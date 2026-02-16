@@ -2,7 +2,7 @@
 
 Complements the structural checker in `backends/pymc_safe/checker.py` with:
 - Fabricated data detection (model creates more observations than expected)
-- Data-usage perturbation test (re-executes with flipped data to verify dependence)
+- Data-usage perturbation test (re-executes with halved data to verify dependence)
 - Reason-string-to-tag parser for machine-readable exploit classification
 """
 
@@ -96,7 +96,7 @@ def check_data_used(
     # observed terms. Also update 'd' if present to stay consistent.
     perturbed_data = {}
     for k, v in original_data.items():
-        if isinstance(v, np.ndarray) and v.dtype.kind == "f":
+        if isinstance(v, np.ndarray) and len(v) > 1:
             half = max(1, len(v) // 2)
             perturbed_data[k] = v[:half]
         else:
