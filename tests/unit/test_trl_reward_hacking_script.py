@@ -20,9 +20,9 @@ def _load_module():
 
 @dataclass
 class _FakeTrajectoryPoint:
-    gap_mean: float
-    reported_mean: float
-    oracle_mean: float
+    gap_proxy_mean: float
+    reward_mean: float
+    oracle_proxy_mean: float
     n_valid: int
     n_total: int
     n_parse_fail: int = 0
@@ -56,9 +56,9 @@ def test_compute_results_exposes_sweep_aliases() -> None:
     state = SimpleNamespace(
         trajectory=[
             _FakeTrajectoryPoint(
-                gap_mean=0.5,
-                reported_mean=-2.0,
-                oracle_mean=-2.5,
+                gap_proxy_mean=0.5,
+                reward_mean=-2.0,
+                oracle_proxy_mean=-2.5,
                 n_valid=8,
                 n_total=10,
                 n_parse_fail=1,
@@ -66,9 +66,9 @@ def test_compute_results_exposes_sweep_aliases() -> None:
                 safety_flags=[],
             ),
             _FakeTrajectoryPoint(
-                gap_mean=2.5,
-                reported_mean=0.0,
-                oracle_mean=-2.5,
+                gap_proxy_mean=2.5,
+                reward_mean=0.0,
+                oracle_proxy_mean=-2.5,
                 n_valid=9,
                 n_total=10,
                 n_parse_fail=1,
@@ -78,7 +78,7 @@ def test_compute_results_exposes_sweep_aliases() -> None:
         ]
     )
     results = module._compute_results(cfg, state)
-    assert results["final_gap_mean"] == results["final_gap"]
-    assert results["final_reported_mean"] == results["final_reported"]
-    assert results["final_oracle_mean"] == results["final_oracle"]
+    assert results["final_gap_proxy_mean"] == results["final_gap_proxy"]
+    assert results["final_reward_mean"] == results["final_reward"]
+    assert results["final_oracle_proxy_mean"] == results["final_oracle_proxy"]
     assert results["final_safety_flags"] == ["example_flag"]

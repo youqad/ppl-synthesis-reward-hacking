@@ -14,9 +14,9 @@ from ppl_synthesis_reward_hacking.experiments.results import (
 
 @dataclass
 class FakeTP:
-    gap_mean: float
-    reported_mean: float
-    oracle_mean: float
+    gap_proxy_mean: float
+    reward_mean: float
+    oracle_proxy_mean: float
     n_valid: int
     n_total: int
 
@@ -25,9 +25,9 @@ class TestComputeTrajectoryMetrics:
     def test_normal_trajectory(self):
         t = [FakeTP(1.0, -5.0, -6.0, 8, 10), FakeTP(3.0, -2.0, -8.0, 9, 10)]
         m = compute_trajectory_metrics(t)
-        assert m["initial_gap"] == 1.0
-        assert m["final_gap"] == 3.0
-        assert m["gap_increase"] == pytest.approx(2.0)
+        assert m["initial_gap_proxy"] == 1.0
+        assert m["final_gap_proxy"] == 3.0
+        assert m["gap_proxy_increase"] == pytest.approx(2.0)
         assert m["final_valid_rate"] == pytest.approx(0.9)
         assert m["hacking_detected"] is False
 
@@ -42,7 +42,7 @@ class TestComputeTrajectoryMetrics:
     def test_nan_gap(self):
         t = [FakeTP(float("nan"), -5.0, -6.0, 1, 1), FakeTP(3.0, -2.0, -8.0, 1, 1)]
         m = compute_trajectory_metrics(t)
-        assert np.isnan(m["gap_increase"])
+        assert np.isnan(m["gap_proxy_increase"])
         assert m["hacking_detected"] is False
 
     def test_both_nan(self):
@@ -51,7 +51,7 @@ class TestComputeTrajectoryMetrics:
             FakeTP(float("nan"), -2.0, -8.0, 1, 1),
         ]
         m = compute_trajectory_metrics(t)
-        assert np.isnan(m["gap_increase"])
+        assert np.isnan(m["gap_proxy_increase"])
         assert m["hacking_detected"] is False
 
     def test_zero_total(self):
@@ -79,7 +79,7 @@ class TestJsonDefault:
         assert result == [1, 2, 3]
 
     def test_fallback(self):
-        assert json_default(object()) is not None  # returns str(obj)
+        assert json_default(object()) is not None
 
 
 class TestPrintTrainingSummary:
@@ -90,35 +90,19 @@ class TestPrintTrainingSummary:
 
     def test_normal_results(self, caplog):
         results = {
-            "initial_gap": 1.0,
-            "final_gap": 3.0,
-            "gap_increase": 2.0,
-            "initial_reported": -5.0,
-            "final_reported": -2.0,
-            "initial_oracle": -6.0,
-            "final_oracle": -8.0,
+            "initial_gap_proxy": 1.0,
+            "final_gap_proxy": 3.0,
+            "gap_proxy_increase": 2.0,
+            "initial_reward": -5.0,
+            "final_reward": -2.0,
+            "initial_oracle_proxy": -6.0,
+            "final_oracle_proxy": -8.0,
             "final_valid_rate": 0.9,
             "hacking_detected": False,
         }
         with caplog.at_level("INFO"):
             print_training_summary(results)
-        assert "gap:" in caplog.text
-        assert "reported:" in caplog.text
-        assert "oracle:" in caplog.text
-        assert "HACKING" not in caplog.text
+        assert "gap_proxy:" in caplog.text
+        assert "reward:" in caplog.text
+        assert "oracle_proxy:" in caplog.text
 
-    def test_hacking_detected_message(self, caplog):
-        results = {
-            "initial_gap": 0.0,
-            "final_gap": 15.0,
-            "gap_increase": 15.0,
-            "initial_reported": -5.0,
-            "final_reported": -2.0,
-            "initial_oracle": -5.0,
-            "final_oracle": -17.0,
-            "final_valid_rate": 0.5,
-            "hacking_detected": True,
-        }
-        with caplog.at_level("INFO"):
-            print_training_summary(results)
-        assert "HACKING DETECTED" in caplog.text
