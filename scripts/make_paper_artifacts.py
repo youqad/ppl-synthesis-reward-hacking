@@ -193,7 +193,22 @@ def _plot_gap_trajectories(
     *,
     palette: list[Any] | None,
 ) -> None:
-    _plot_reward_trajectories(ax_gap, condition_summaries, palette=palette)
+    for i, cond in enumerate(condition_summaries):
+        series = cond["gap"]
+        steps = series["steps"]
+        if not steps:
+            continue
+        mean_ = series["mean"]
+        std_ = series["std"]
+        color = palette[i % len(palette)] if palette else None
+        ax_gap.plot(steps, mean_, linewidth=2, label=cond["label"], color=color)
+        ax_gap.fill_between(
+            steps,
+            [m - sd for m, sd in zip(mean_, std_, strict=False)],
+            [m + sd for m, sd in zip(mean_, std_, strict=False)],
+            alpha=0.12,
+            color=color,
+        )
 
 
 def _format_reward_axis(ax_reward: Any, *, show_xlabel: bool) -> None:
@@ -207,7 +222,13 @@ def _format_reward_axis(ax_reward: Any, *, show_xlabel: bool) -> None:
 
 
 def _format_gap_axis(ax_gap: Any, *, show_xlabel: bool) -> None:
-    _format_reward_axis(ax_gap, show_xlabel=show_xlabel)
+    ax_gap.set_title("Reward gap trajectory (reported \u2212 oracle)")
+    if show_xlabel:
+        ax_gap.set_xlabel("Training step")
+    ax_gap.set_ylabel("Gap")
+    ax_gap.legend(loc="best")
+    if _HAS_SEABORN:
+        sns.despine(ax=ax_gap, left=False, bottom=False)
 
 
 def _normalization_bars(
@@ -261,9 +282,7 @@ def _maybe_plot_reward_trajectory(
 
     _setup_plot_style()
     bar_labels, bar_vals = _normalization_bars(condition_summaries)
-    fig, ax_reward, ax_norm = _make_reward_figure(
-        has_normalization_panel=bool(bar_labels)
-    )
+    fig, ax_reward, ax_norm = _make_reward_figure(has_normalization_panel=bool(bar_labels))
     palette = sns.color_palette("muted") if _HAS_SEABORN else None
     _plot_reward_trajectories(ax_reward, condition_summaries, palette=palette)
     _format_reward_axis(ax_reward, show_xlabel=True)
@@ -284,11 +303,24 @@ def _maybe_plot_gap_trajectory(
     out_pdf: Path,
     out_png: Path,
 ) -> None:
-    _maybe_plot_reward_trajectory(
-        condition_summaries,
-        out_pdf=out_pdf,
-        out_png=out_png,
-    )
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("WARN: matplotlib not installed, skipping plots", file=sys.stderr)
+        return
+
+    _setup_plot_style()
+    fig, ax_gap = plt.subplots(figsize=(9, 4.5))
+    palette = sns.color_palette("muted") if _HAS_SEABORN else None
+    _plot_gap_trajectories(ax_gap, condition_summaries, palette=palette)
+    _format_gap_axis(ax_gap, show_xlabel=True)
+
+    fig.tight_layout()
+
+    out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_pdf, bbox_inches="tight")
+    plt.savefig(out_png, dpi=200, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _maybe_plot_failure_rates(
@@ -732,6 +764,7 @@ def _build_condition_summary(
         "runs": resolved_runs,
         "n_runs_used": len(reports),
         "reward": _aggregate_series(reports, "reported_mean"),
+        "gap": _aggregate_series(reports, "gap_mean"),
         "exec_fail_pct": _aggregate_series(reports, "exec_fail_pct"),
         "parse_fail_pct": _aggregate_series(reports, "parse_fail_pct"),
     }
@@ -839,6 +872,11 @@ def _write_outputs(
         out_pdf=out_dir / "reward_trajectory.pdf",
         out_png=out_dir / "reward_trajectory.png",
     )
+    _maybe_plot_gap_trajectory(
+        condition_summaries,
+        out_pdf=out_dir / "gap_trajectory.pdf",
+        out_png=out_dir / "gap_trajectory.png",
+    )
     _maybe_plot_failure_rates(
         condition_summaries,
         out_pdf=out_dir / "failure_rates.pdf",
@@ -898,6 +936,7 @@ def main() -> None:
                 "runs": condition_result["runs"],
                 "n_runs_used": condition_result["n_runs_used"],
                 "reward": condition_result["reward"],
+                "gap": condition_result["gap"],
                 "exec_fail_pct": condition_result["exec_fail_pct"],
                 "parse_fail_pct": condition_result["parse_fail_pct"],
                 "offline_eval_aggregate": condition_result.get("offline_eval_aggregate"),

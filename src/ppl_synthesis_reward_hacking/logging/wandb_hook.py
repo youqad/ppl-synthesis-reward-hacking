@@ -129,22 +129,34 @@ def log_lh_table(records: list[dict[str, Any]], *, step: int) -> None:
     wandb = _get_wandb()
     if wandb.run is None or not records:
         return
-    columns = ["step", "code", "reported", "oracle", "gap",
-               "detection", "log_mass", "judge_verdict", "judge_tags"]
+    columns = [
+        "step",
+        "code",
+        "reported",
+        "oracle",
+        "gap",
+        "detection",
+        "log_mass",
+        "judge_verdict",
+        "judge_tags",
+    ]
     table = wandb.Table(columns=columns)
     for r in records:
         table.add_data(
-            r.get("step"), r.get("code", ""), r.get("reported"),
-            r.get("oracle"), r.get("gap"), r.get("detection", ""),
-            r.get("log_mass"), r.get("judge_verdict", ""),
+            r.get("step"),
+            r.get("code", ""),
+            r.get("reported"),
+            r.get("oracle"),
+            r.get("gap"),
+            r.get("detection", ""),
+            r.get("log_mass"),
+            r.get("judge_verdict", ""),
             r.get("judge_tags", ""),
         )
     wandb.log({"lh_examples": table}, step=step)
 
 
-def log_completion_table(
-    step: int, records: list[Any], *, max_rows: int = 20
-) -> None:
+def log_completion_table(step: int, records: list[Any], *, max_rows: int = 20) -> None:
     wandb = _get_wandb()
     if wandb.run is None:
         return
@@ -154,16 +166,26 @@ def log_completion_table(
 
     sampled = random.sample(records, min(max_rows, len(records))) if records else []
     columns = [
-        "step", "code", "reward_train", "oracle_proxy",
-        "gap_proxy", "outcome", "exploit_tags",
+        "step",
+        "code",
+        "reward_train",
+        "oracle_proxy",
+        "gap_proxy",
+        "outcome",
+        "exploit_tags",
     ]
     table = wandb.Table(columns=columns)
     for r in sampled:
         code = (r.code or r.completion_text)[:500]
         tags = detect_exploits(r.code) if r.code else set()
         table.add_data(
-            step, code, r.reported_reward, r.oracle_score,
-            r.gap, r.outcome, ", ".join(sorted(tags)),
+            step,
+            code,
+            r.reported_reward,
+            r.oracle_score,
+            r.gap,
+            r.outcome,
+            ", ".join(sorted(tags)),
         )
     wandb.log({"completions/samples": table}, step=step)
 

@@ -25,6 +25,7 @@ def test_main_calls_wandb_agent(monkeypatch) -> None:
             calls.append(kwargs)
 
     monkeypatch.setitem(sys.modules, "wandb", _FakeWandb())
+
     # stub the entrypoint resolver to return a dummy callable
     def _dummy_train():
         pass

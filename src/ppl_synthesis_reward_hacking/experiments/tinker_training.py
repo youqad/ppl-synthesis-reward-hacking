@@ -10,7 +10,7 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
@@ -65,12 +65,11 @@ from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
     judge_completions,
     judge_with_rubric,
 )
-from ppl_synthesis_reward_hacking.scoring.metrics import PredictiveEstimator, RewardMetric
+from ppl_synthesis_reward_hacking.scoring.metrics import validate_metric_estimator
 from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
 from ppl_synthesis_reward_hacking.utils.tinker import tinker, types, validate_tinker_setup
 
 log = logging.getLogger(__name__)
-
 
 
 @dataclass
@@ -139,32 +138,73 @@ class TinkerGRPOConfig:
     wandb_table_interval: int = 10
 
 
+def _coalesce_nested_value(raw: Any, key: str) -> Any:
+    """Extract scalar config values from Hydra nested config-group payloads."""
+    if isinstance(raw, Mapping):
+        # reward_metric: {reward_metric: log_marginal_likelihood}
+        if key in raw:
+            return raw[key]
+        # Fallback for single-key dict payloads.
+        if len(raw) == 1:
+            return next(iter(raw.values()))
+    # Back-compat for previous YAML parsing of `off` as bool false.
+    if key == "monitoring_mode" and isinstance(raw, bool):
+        return "off" if raw is False else "judge_evolving"
+    return raw
+
+
 def config_from_mapping(mapping: Mapping[str, Any]) -> TinkerGRPOConfig:
     """Create TinkerGRPOConfig from a mapping (Hydra-friendly)."""
-    cfg = TinkerGRPOConfig(**dict(mapping))
+    flattened: dict[str, Any] = dict(mapping)
+
+    # Pull scalar values out of compositional Hydra subgroups.
+    for scalar_key in (
+        "reward_metric",
+        "reward_data_split",
+        "predictive_estimator",
+        "paper_track",
+        "monitoring_mode",
+    ):
+        if scalar_key in flattened:
+            flattened[scalar_key] = _coalesce_nested_value(flattened[scalar_key], scalar_key)
+
+    data_interface_payload = flattened.pop("data_interface", None)
+    if isinstance(data_interface_payload, Mapping):
+        for key in (
+            "interface_d",
+            "p_true_mode",
+            "p_true_fixed",
+            "p_true_beta_alpha",
+            "p_true_beta_beta",
+        ):
+            if key not in flattened and key in data_interface_payload:
+                flattened[key] = data_interface_payload[key]
+
+    monitoring_payload = mapping.get("monitoring_mode")
+    if isinstance(monitoring_payload, Mapping):
+        for key in ("judge_interval", "rubric_evolution_interval"):
+            if key not in flattened and key in monitoring_payload:
+                flattened[key] = monitoring_payload[key]
+
+    # Ignore meta keys that are useful for Hydra composition but not runtime config.
+    flattened.pop("name", None)
+
+    allowed_keys = {f.name for f in fields(TinkerGRPOConfig)}
+    cfg_kwargs = {key: value for key, value in flattened.items() if key in allowed_keys}
+
+    cfg = TinkerGRPOConfig(**cfg_kwargs)
     _validate_config(cfg)
     return cfg
 
 
 def _validate_config(config: TinkerGRPOConfig) -> None:
-    metric = RewardMetric(config.reward_metric)
-    estimator = PredictiveEstimator(config.predictive_estimator)
-
-    if metric is RewardMetric.LOG_MARGINAL_LIKELIHOOD and estimator is not PredictiveEstimator.NONE:
-        raise ValueError("log_marginal_likelihood requires predictive_estimator=none")
-    if metric is RewardMetric.ELPD and estimator is not PredictiveEstimator.PSIS_LOO:
-        raise ValueError("elpd requires predictive_estimator=psis_loo")
-    if metric is RewardMetric.WAIC and estimator is not PredictiveEstimator.WAIC:
-        raise ValueError("waic requires predictive_estimator=waic")
-    if metric is RewardMetric.BIC and estimator is not PredictiveEstimator.BIC_APPROX:
-        raise ValueError("bic requires predictive_estimator=bic_approx")
+    validate_metric_estimator(config.reward_metric, config.predictive_estimator)
     if config.reward_data_split not in {"train", "holdout"}:
         raise ValueError("reward_data_split must be train|holdout")
     if config.paper_track not in {"part_a_emergence", "part_b_mitigation"}:
         raise ValueError("paper_track must be part_a_emergence|part_b_mitigation")
     if config.p_true_mode not in {"sampled_beta", "fixed"}:
         raise ValueError("p_true_mode must be sampled_beta|fixed")
-
 
 
 @dataclass
@@ -190,7 +230,6 @@ class _StepData:
     step_records: list[CompletionRecord]
     n_parse_fail: int = 0
     n_exec_fail: int = 0
-
 
 
 def _load_exemplars(config_path: str | None) -> list[dict[str, Any]]:
@@ -220,9 +259,7 @@ def _format_exemplar_section(exemplars: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _format_chat_prompt(
-    user_message: str, exemplar_section: str
-) -> str:
+def _format_chat_prompt(user_message: str, exemplar_section: str) -> str:
     """Like format_chat_prompt but injects an exemplar section into the system message."""
     system = SYSTEM_PROMPT + exemplar_section
     return (
@@ -230,7 +267,6 @@ def _format_chat_prompt(
         f"<|im_start|>user\n{user_message}<|im_end|>\n"
         f"<|im_start|>assistant\n"
     )
-
 
 
 def run_training(config: TinkerGRPOConfig) -> dict:
@@ -360,7 +396,6 @@ def run_training(config: TinkerGRPOConfig) -> dict:
     return results
 
 
-
 def _initialize_training(
     config: TinkerGRPOConfig, output_dir: Path
 ) -> tuple[CompletionWriter, Path, JudgeConfig, object, object, list[str]]:
@@ -379,13 +414,11 @@ def _initialize_training(
         exemplar_section = _format_exemplar_section(exemplars)
         log.info("Loaded %d exemplars from %s", len(exemplars), config.exemplar_config)
         prompt_texts = [
-            _format_chat_prompt(p, exemplar_section)
-            for p in get_prompts(config.n_prompts)
+            _format_chat_prompt(p, exemplar_section) for p in get_prompts(config.n_prompts)
         ]
     else:
         prompt_texts = [format_chat_prompt(p) for p in get_prompts(config.n_prompts)]
     return writer, judge_metrics_path, judge_cfg, training_client, tokenizer, prompt_texts
-
 
 
 def _get_normalization_indices(step: int, config: TinkerGRPOConfig) -> set[int]:
@@ -523,7 +556,6 @@ def _make_prompt_scoring_data(config: TinkerGRPOConfig, step: int, prompt_idx: i
     return train_data
 
 
-
 def _process_sequence(
     *,
     config: TinkerGRPOConfig,
@@ -609,7 +641,6 @@ def _process_sequence(
     return rollout
 
 
-
 def _run_normalization_check(
     completion_text: str,
     *,
@@ -670,17 +701,19 @@ def _collect_lh_programs(
         if not detection:
             continue
 
-        lh_rows.append({
-            "step": step,
-            "code": rec.code or "",
-            "reported": rec.reported_reward,
-            "oracle": rec.oracle_score,
-            "gap": rec.gap,
-            "detection": ",".join(detection),
-            "log_mass": log_mass,
-            "judge_verdict": "",
-            "judge_tags": "",
-            })
+        lh_rows.append(
+            {
+                "step": step,
+                "code": rec.code or "",
+                "reported": rec.reported_reward,
+                "oracle": rec.oracle_score,
+                "gap": rec.gap,
+                "detection": ",".join(detection),
+                "log_mass": log_mass,
+                "judge_verdict": "",
+                "judge_tags": "",
+            }
+        )
 
     return lh_rows
 
@@ -758,7 +791,6 @@ def _log_normalization_summary(
     return payload
 
 
-
 def _build_step_datums(
     rollouts_by_prompt: dict[int, list[RolloutData]], *, n_prompts: int
 ) -> tuple[list, float]:
@@ -788,7 +820,6 @@ def _apply_training_update(
     optim = training_client.optim_step(types.AdamParams(learning_rate=learning_rate))
     fwdbwd.result()
     optim.result()
-
 
 
 def _compute_step_point(
@@ -881,7 +912,6 @@ def _print_summary(results: dict) -> None:
     print_training_summary(results)
     if "error" not in results:
         log.info("zero-variance fraction: %.1f%%", results["final_frac_zero_variance"] * 100)
-
 
 
 def _log_training_start(config: TinkerGRPOConfig, output_dir: Path) -> None:
@@ -982,7 +1012,6 @@ def _log_step_summary(step: int, point: TrajectoryPoint) -> None:
         point.frac_zero_variance,
         point.frac_above_oracle_proxy,
     )
-
 
 
 def _maybe_run_step_judge(
@@ -1168,8 +1197,23 @@ def _build_wandb_final_summary(
     judge_payload: dict[str, Any] | None,
     heuristic_rates: dict[str, float] | None,
 ) -> dict[str, Any]:
+    run_status = "success"
+    error_reason: str | None = None
+    if "error" in results:
+        run_status = "fail"
+        error_reason = str(results.get("error", "unknown"))
+    else:
+        final_valid_rate = results.get("final_valid_rate")
+        final_reward = results.get("final_reward_mean", results.get("final_reward"))
+        if isinstance(final_valid_rate, int | float) and final_valid_rate <= 0:
+            run_status = "fail"
+            error_reason = "no_valid_completions"
+        elif isinstance(final_reward, int | float) and not np.isfinite(float(final_reward)):
+            run_status = "fail"
+            error_reason = "non_finite_final_reward"
+
     summary: dict[str, Any] = {
-        "sweep/run_status": "success",
+        "sweep/run_status": run_status,
         "sweep/final_reward_mean": results.get("final_reward_mean", results.get("final_reward")),
         "sweep/final_oracle_proxy_mean": results.get(
             "final_oracle_proxy_mean", results.get("final_oracle_proxy")
@@ -1187,6 +1231,8 @@ def _build_wandb_final_summary(
         "paper/judge_hacking_rate_final": float("nan"),
         "paper/lh_family_prevalence_final": float("nan"),
     }
+    if error_reason is not None:
+        summary["sweep/error"] = error_reason
     if normalization_payload and isinstance(
         normalization_payload.get("frac_non_normalized"), int | float
     ):

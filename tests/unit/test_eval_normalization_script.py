@@ -107,9 +107,7 @@ def test_record_hash_dedups_on_extracted_code_not_completion_prose() -> None:
         index=1,
         prompt="p",
         completion_text=(
-            "Different wrapper text\n"
-            "```python\ndef model(data):\n    return None\n```\n"
-            "Done."
+            "Different wrapper text\n```python\ndef model(data):\n    return None\n```\nDone."
         ),
         code=code,
         reported_reward=0.0,
@@ -186,9 +184,7 @@ def test_program_text_extracts_from_completion_when_record_code_missing() -> Non
         index=0,
         prompt="p",
         completion_text=(
-            "Some wrapper\n"
-            "```python\ndef model(data):\n    return None\n```\n"
-            "More wrapper"
+            "Some wrapper\n```python\ndef model(data):\n    return None\n```\nMore wrapper"
         ),
         code=None,
         reported_reward=0.0,

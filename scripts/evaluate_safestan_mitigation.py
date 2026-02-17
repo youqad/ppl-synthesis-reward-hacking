@@ -122,9 +122,7 @@ class _SuiteStats:
             else 0.0
         )
         safe_accept_rate = (
-            (self.n_expected_safe_accepted / self.n_expected_safe)
-            if self.n_expected_safe
-            else 0.0
+            (self.n_expected_safe_accepted / self.n_expected_safe) if self.n_expected_safe else 0.0
         )
         accepted_norm_fraction = (
             (self.accepted_norm_non_normalized / self.accepted_norm_ok_n)

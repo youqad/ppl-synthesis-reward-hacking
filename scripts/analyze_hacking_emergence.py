@@ -28,9 +28,6 @@ from typing import Any
 from ppl_synthesis_reward_hacking.evaluation.emergence import (
     HackStats,
     analyze_emergence,
-    compute_batch_stats,
-    compute_emergence_timeline,
-    compute_summary,
 )
 
 logging.basicConfig(

@@ -107,6 +107,7 @@ class TestClamping:
 
         from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import get_logp_floor
         from ppl_synthesis_reward_hacking.experiments.smc_scorer import score_pymc_model_smc
+
         LOGP_FLOOR = get_logp_floor()
 
         # Potential with very negative value drives marginal LL below floor
@@ -128,6 +129,7 @@ class TestClamping:
 
         from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import get_logp_ceil
         from ppl_synthesis_reward_hacking.experiments.smc_scorer import score_pymc_model_smc
+
         LOGP_CEIL = get_logp_ceil()
 
         with pm.Model() as model:

@@ -13,11 +13,22 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-_UNSAFE_BUILTINS = frozenset({
-    "eval", "exec", "compile", "open",
-    "getattr", "setattr", "delattr",
-    "globals", "locals", "vars", "dir", "breakpoint",
-})
+_UNSAFE_BUILTINS = frozenset(
+    {
+        "eval",
+        "exec",
+        "compile",
+        "open",
+        "getattr",
+        "setattr",
+        "delattr",
+        "globals",
+        "locals",
+        "vars",
+        "dir",
+        "breakpoint",
+    }
+)
 _SAFE_BUILTINS: dict[str, object] = (
     {k: v for k, v in __builtins__.items() if k not in _UNSAFE_BUILTINS}  # type: ignore[union-attr]
     if isinstance(__builtins__, dict)
@@ -105,8 +116,9 @@ def execute_pymc_code(
     use_alarm = hasattr(signal, "SIGALRM")
 
     # strip ground-truth keys so generated code can't cheat
-    sanitized = {k: v for k, v in data.items()
-                 if not k.endswith("_true") and k not in _GROUND_TRUTH_EXTRA}
+    sanitized = {
+        k: v for k, v in data.items() if not k.endswith("_true") and k not in _GROUND_TRUTH_EXTRA
+    }
 
     try:
         if use_alarm:

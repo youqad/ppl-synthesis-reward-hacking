@@ -82,7 +82,11 @@ def test_compute_summary_handles_evaluator_hack_and_parse_errors() -> None:
     assert summary["verdicts"]["evaluator_hack"] == 1
 
 
-def _load_judge_config(*, config_path: str | None = None, overrides: list[str] | None = None) -> JudgeConfig:
+def _load_judge_config(
+    *,
+    config_path: str | None = None,
+    overrides: list[str] | None = None,
+) -> JudgeConfig:
     return _MODULE._load_judge_config(config_path, overrides or [])
 
 

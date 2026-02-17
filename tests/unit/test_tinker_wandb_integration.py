@@ -66,7 +66,11 @@ def test_compute_step_wandb_metrics_aggregates_outcomes_and_metric_fields() -> N
                 }
             },
         ),
-        _record(index=2, outcome="exec_fail", metadata={"decomposition": {"outcome_code": "exec_fail"}}),
+        _record(
+            index=2,
+            outcome="exec_fail",
+            metadata={"decomposition": {"outcome_code": "exec_fail"}},
+        ),
     ]
 
     metrics = _compute_step_wandb_metrics(records)
@@ -87,12 +91,20 @@ def test_compute_step_wandb_metrics_prevalence_ignores_non_valid_records() -> No
         _record(
             index=0,
             outcome="valid",
-            metadata={"decomposition": {"outcome_code": "ok", "n_pot_terms": 0, "data_discard": False}},
+            metadata={
+                "decomposition": {"outcome_code": "ok", "n_pot_terms": 0, "data_discard": False},
+            },
         ),
         _record(
             index=1,
             outcome="exec_fail",
-            metadata={"decomposition": {"outcome_code": "exec_fail", "n_pot_terms": 3, "data_discard": True}},
+            metadata={
+                "decomposition": {
+                    "outcome_code": "exec_fail",
+                    "n_pot_terms": 3,
+                    "data_discard": True,
+                },
+            },
         ),
     ]
 
