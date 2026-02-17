@@ -1,8 +1,4 @@
-"""Emergence analysis for reward hacking during GRPO training.
-
-Provides batch statistics, timeline computation, and summary analysis
-for tracking how hacking patterns emerge over training steps.
-"""
+"""Track how reward hacking patterns emerge over GRPO training steps."""
 
 from __future__ import annotations
 

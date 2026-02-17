@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Generate reproducible figures/tables used by the LaTeX paper.
-
-This script is intentionally orchestration-heavy: it ties together existing
-analysis scripts, writes a manifest, and emits paper-ready artifacts.
+"""Generate reproducible figures/tables for the LaTeX paper from training run data.
 
 Usage:
     pixi run -e dev python scripts/make_paper_artifacts.py --config configs/paper/runlist.yaml
@@ -145,38 +142,43 @@ def _setup_plot_style() -> None:
     )
 
 
-def _make_gap_figure(*, has_normalization_panel: bool):
+def _make_reward_figure(*, has_normalization_panel: bool):
     import matplotlib.pyplot as plt
 
     if has_normalization_panel:
-        fig, (ax_gap, ax_norm) = plt.subplots(
+        fig, (ax_reward, ax_norm) = plt.subplots(
             2,
             1,
             figsize=(9, 6),
             gridspec_kw={"height_ratios": [1, 0.7]},
         )
-        return fig, ax_gap, ax_norm
+        return fig, ax_reward, ax_norm
 
-    fig, ax_gap = plt.subplots(figsize=(9, 4.5))
-    return fig, ax_gap, None
+    fig, ax_reward = plt.subplots(figsize=(9, 4.5))
+    return fig, ax_reward, None
 
 
-def _plot_gap_trajectories(
-    ax_gap: Any,
+# Legacy helper names retained for local script tests.
+def _make_gap_figure(*, has_normalization_panel: bool):
+    return _make_reward_figure(has_normalization_panel=has_normalization_panel)
+
+
+def _plot_reward_trajectories(
+    ax_reward: Any,
     condition_summaries: list[dict[str, Any]],
     *,
     palette: list[Any] | None,
 ) -> None:
     for i, cond in enumerate(condition_summaries):
-        series = cond["gap"]
+        series = cond["reward"]
         steps = series["steps"]
         if not steps:
             continue
         mean_ = series["mean"]
         std_ = series["std"]
         color = palette[i % len(palette)] if palette else None
-        ax_gap.plot(steps, mean_, linewidth=2, label=cond["label"], color=color)
-        ax_gap.fill_between(
+        ax_reward.plot(steps, mean_, linewidth=2, label=cond["label"], color=color)
+        ax_reward.fill_between(
             steps,
             [m - sd for m, sd in zip(mean_, std_, strict=False)],
             [m + sd for m, sd in zip(mean_, std_, strict=False)],
@@ -185,14 +187,27 @@ def _plot_gap_trajectories(
         )
 
 
-def _format_gap_axis(ax_gap: Any, *, show_xlabel: bool) -> None:
-    ax_gap.set_title("Reward gap trajectory (reported $-$ oracle)")
+def _plot_gap_trajectories(
+    ax_gap: Any,
+    condition_summaries: list[dict[str, Any]],
+    *,
+    palette: list[Any] | None,
+) -> None:
+    _plot_reward_trajectories(ax_gap, condition_summaries, palette=palette)
+
+
+def _format_reward_axis(ax_reward: Any, *, show_xlabel: bool) -> None:
+    ax_reward.set_title("Reward trajectory (train objective)")
     if show_xlabel:
-        ax_gap.set_xlabel("Training step")
-    ax_gap.set_ylabel("Gap")
-    ax_gap.legend(loc="best")
+        ax_reward.set_xlabel("Training step")
+    ax_reward.set_ylabel("Reward")
+    ax_reward.legend(loc="best")
     if _HAS_SEABORN:
-        sns.despine(ax=ax_gap, left=False, bottom=False)
+        sns.despine(ax=ax_reward, left=False, bottom=False)
+
+
+def _format_gap_axis(ax_gap: Any, *, show_xlabel: bool) -> None:
+    _format_reward_axis(ax_gap, show_xlabel=show_xlabel)
 
 
 def _normalization_bars(
@@ -232,7 +247,7 @@ def _plot_normalization_panel(
         sns.despine(ax=ax_norm, left=False, bottom=False)
 
 
-def _maybe_plot_gap_trajectory(
+def _maybe_plot_reward_trajectory(
     condition_summaries: list[dict[str, Any]],
     *,
     out_pdf: Path,
@@ -246,12 +261,12 @@ def _maybe_plot_gap_trajectory(
 
     _setup_plot_style()
     bar_labels, bar_vals = _normalization_bars(condition_summaries)
-    fig, ax_gap, ax_norm = _make_gap_figure(
+    fig, ax_reward, ax_norm = _make_reward_figure(
         has_normalization_panel=bool(bar_labels)
     )
     palette = sns.color_palette("muted") if _HAS_SEABORN else None
-    _plot_gap_trajectories(ax_gap, condition_summaries, palette=palette)
-    _format_gap_axis(ax_gap, show_xlabel=True)
+    _plot_reward_trajectories(ax_reward, condition_summaries, palette=palette)
+    _format_reward_axis(ax_reward, show_xlabel=True)
     if ax_norm is not None:
         _plot_normalization_panel(ax_norm, bar_labels=bar_labels, bar_vals=bar_vals)
 
@@ -261,6 +276,19 @@ def _maybe_plot_gap_trajectory(
     plt.savefig(out_pdf, bbox_inches="tight")
     plt.savefig(out_png, dpi=200, bbox_inches="tight")
     plt.close(fig)
+
+
+def _maybe_plot_gap_trajectory(
+    condition_summaries: list[dict[str, Any]],
+    *,
+    out_pdf: Path,
+    out_png: Path,
+) -> None:
+    _maybe_plot_reward_trajectory(
+        condition_summaries,
+        out_pdf=out_pdf,
+        out_png=out_png,
+    )
 
 
 def _maybe_plot_failure_rates(
@@ -422,6 +450,23 @@ def _resolve_path(path: Path) -> Path:
     return (REPO_ROOT / path).resolve() if not path.is_absolute() else path
 
 
+def _read_paper_track(run_dir: Path) -> str | None:
+    cfg_path = run_dir / "hydra_resolved_config.json"
+    if not cfg_path.exists():
+        return None
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    train = cfg.get("train")
+    if not isinstance(train, dict):
+        return None
+    track = train.get("paper_track")
+    return str(track) if isinstance(track, str) else None
+
+
 def _load_runlist_config(cfg_path: Path) -> dict[str, Any]:
     cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     if not isinstance(cfg, dict):
@@ -570,6 +615,13 @@ def _process_condition(
         if not completions_path.exists():
             print(f"SKIP (no completions): {run_dir}", file=sys.stderr)
             continue
+        paper_track = _read_paper_track(run_dir)
+        if paper_track not in {"part_a_emergence", "part_b_mitigation"}:
+            print(
+                f"SKIP (non-paper track: {paper_track!r}): {run_dir}",
+                file=sys.stderr,
+            )
+            continue
         resolved_runs.append(str(run_dir))
         run_artifact_id = _run_artifact_id(run_dir)
         report = _run_analyze_hacking(
@@ -679,7 +731,7 @@ def _build_condition_summary(
         "label": cond_label,
         "runs": resolved_runs,
         "n_runs_used": len(reports),
-        "gap": _aggregate_series(reports, "gap_mean"),
+        "reward": _aggregate_series(reports, "reported_mean"),
         "exec_fail_pct": _aggregate_series(reports, "exec_fail_pct"),
         "parse_fail_pct": _aggregate_series(reports, "parse_fail_pct"),
     }
@@ -782,10 +834,10 @@ def _write_outputs(
         out_dir / "normalization_table.tex",
         condition_rows=condition_rows,
     )
-    _maybe_plot_gap_trajectory(
+    _maybe_plot_reward_trajectory(
         condition_summaries,
-        out_pdf=out_dir / "gap_trajectory.pdf",
-        out_png=out_dir / "gap_trajectory.png",
+        out_pdf=out_dir / "reward_trajectory.pdf",
+        out_png=out_dir / "reward_trajectory.png",
     )
     _maybe_plot_failure_rates(
         condition_summaries,
@@ -845,7 +897,7 @@ def main() -> None:
                 "label": condition_result["label"],
                 "runs": condition_result["runs"],
                 "n_runs_used": condition_result["n_runs_used"],
-                "gap": condition_result["gap"],
+                "reward": condition_result["reward"],
                 "exec_fail_pct": condition_result["exec_fail_pct"],
                 "parse_fail_pct": condition_result["parse_fail_pct"],
                 "offline_eval_aggregate": condition_result.get("offline_eval_aggregate"),

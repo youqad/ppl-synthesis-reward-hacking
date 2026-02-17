@@ -218,7 +218,7 @@ model {
 
 
 def _cell(accepted: bool) -> str:
-    return "\\\\yes" if accepted else "\\\\no"
+    return "\\yes" if accepted else "\\no"
 
 
 def main() -> None:

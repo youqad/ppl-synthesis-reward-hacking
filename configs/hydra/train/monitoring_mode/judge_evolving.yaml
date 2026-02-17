@@ -1,0 +1,3 @@
+monitoring_mode: judge_evolving
+judge_interval: 10
+rubric_evolution_interval: 10

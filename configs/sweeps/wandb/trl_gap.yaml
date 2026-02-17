@@ -1,7 +1,7 @@
 program: scripts/hydra_train_trl.py
 method: bayes
 metric:
-  name: sweep/final_gap_mean
+  name: sweep/final_reward_mean
   goal: maximize
 
 command:
@@ -26,4 +26,3 @@ parameters:
     values: [16, 32, 64]
   train.rollouts_per_prompt:
     values: [4, 8, 12]
-

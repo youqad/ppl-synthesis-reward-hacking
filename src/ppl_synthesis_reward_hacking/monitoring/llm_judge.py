@@ -203,11 +203,7 @@ def judge_with_rubric(
     cfg: JudgeConfig,
     rubric_prompt: str,
 ) -> JudgeVerdict:
-    """Judge a completion using an evolving rubric prompt.
-
-    Like judge_completion_record but prepends the rubric criteria
-    to the analysis prompt.
-    """
+    """Judge a completion using an evolving rubric prompt."""
     if not cfg.enabled:
         return JudgeVerdict(is_hacking=False, confidence=0.0, rationale="Judge disabled", tags=[])
 

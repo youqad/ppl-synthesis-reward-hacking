@@ -30,7 +30,6 @@ class CompletionRecord:
 
 
 def _make_json_safe(obj: Any) -> Any:
-    """Recursively convert numpy scalars/arrays to JSON-compatible types."""
     import numpy as np
 
     if isinstance(obj, np.integer):

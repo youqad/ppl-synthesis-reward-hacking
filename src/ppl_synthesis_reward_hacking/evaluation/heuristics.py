@@ -1,14 +1,4 @@
-"""Lightweight exploit heuristics for PyMC completions.
-
-These are intentionally string-based heuristics used for analysis / reporting.
-They are not a substitute for the structural safety gates in:
-- `src/ppl_synthesis_reward_hacking/backends/pymc_safe/checker.py`
-- `src/ppl_synthesis_reward_hacking/backends/sstan/checker.py`
-
-Important: keep "exploit" detection narrowly scoped. Signals like "many latent
-RVs" correlate with some exploit families, but also occur in honest complex
-models, so we track them separately as complexity signals.
-"""
+"""String-based exploit heuristics for PyMC completions, used in analysis and reporting."""
 
 from __future__ import annotations
 

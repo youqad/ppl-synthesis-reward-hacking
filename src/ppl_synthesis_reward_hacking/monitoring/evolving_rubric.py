@@ -1,9 +1,4 @@
-"""RLER-style evolving rubric for likelihood hacking detection.
-
-Starts with 10 predefined LH criteria covering known exploit families,
-then evolves new criteria during training based on what the judge observes
-in GRPO completions. Low-variance (non-discriminative) criteria are pruned.
-"""
+"""Evolving rubric that seeds LH criteria and proposes new ones during training."""
 
 from __future__ import annotations
 
@@ -18,7 +13,7 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class RubricItem:
-    """A single rubric criterion for LH detection."""
+    """Single rubric criterion."""
 
     id: str
     criterion: str
@@ -29,7 +24,7 @@ class RubricItem:
 
 @dataclass
 class RubricState:
-    """Mutable state of the evolving rubric."""
+    """Rubric state tracking initial and evolved items."""
 
     initial_items: list[RubricItem]
     evolved_items: list[RubricItem] = field(default_factory=list)
@@ -39,7 +34,6 @@ class RubricState:
 
     @property
     def active_items(self) -> list[RubricItem]:
-        """Initial items + top evolved items by variance."""
         evolved_active = sorted(
             [
                 it
@@ -289,12 +283,14 @@ def evolve_rubric(
             state.add_evolved(item)
             log.info("Step %d: added rubric item '%s': %s", step, item.id, item.criterion)
 
-    n_pruned = sum(
-        1
-        for it in state.evolved_items
-        if state.item_variances.get(it.id, 0.0) < state.variance_threshold
-    )
+    before = len(state.evolved_items)
+    state.evolved_items = [
+        it for it in state.evolved_items
+        if it.id not in state.item_variances
+        or state.item_variances[it.id] >= state.variance_threshold
+    ]
+    n_pruned = before - len(state.evolved_items)
     if n_pruned:
-        log.info("Step %d: %d evolved items below variance threshold", step, n_pruned)
+        log.info("Step %d: pruned %d low-variance evolved items", step, n_pruned)
 
     return state
