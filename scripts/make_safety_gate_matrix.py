@@ -238,7 +238,9 @@ def main() -> None:
     if HAS_PYMC:
         for name, model in _pymc_cases():
             accepted, reasons = check_pymc_model(model)
-            results.append(CaseResult(name=name, gate="SafePyMC", accepted=accepted, reasons=reasons))
+            results.append(
+                CaseResult(name=name, gate="SafePyMC", accepted=accepted, reasons=reasons)
+            )
     else:
         results.append(
             CaseResult(
@@ -286,4 +288,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

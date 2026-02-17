@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import random
@@ -46,7 +47,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-DEFAULT_JUDGE_CONFIG = Path("configs/judge/glm-4.7.yaml")
+DEFAULT_JUDGE_CONFIG = Path("configs/judge/glm-5.yaml")
 
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
@@ -65,7 +66,34 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         default=None,
         help="Path to .env file for API keys",
     )
+    p.add_argument(
+        "--dedup",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Deduplicate completions by normalized code hash before judging (default: true)",
+    )
     return p.parse_known_args()
+
+
+def _hash_completion_text(text: str) -> str:
+    code_block = text
+    marker = "```"
+    if marker in text:
+        parts = text.split(marker)
+        if len(parts) >= 2:
+            code_block = parts[1]
+    normalized = " ".join(code_block.strip().lower().split())
+    return hashlib.md5(normalized.encode()).hexdigest()
+
+
+def _deduplicate_records(records):
+    unique = {}
+    for record in records:
+        content = record.code or record.completion_text
+        key = _hash_completion_text(content)
+        if key not in unique:
+            unique[key] = record
+    return list(unique.values())
 
 
 def _load_judge_config(config_path: str | None, overrides: list[str]) -> JudgeConfig:
@@ -105,7 +133,12 @@ def _compute_summary(
             pattern_counts[tag] += 1
 
     # gap vs verdict
-    gap_by_verdict: dict[str, list[float]] = {"honest": [], "suspicious": [], "hacking": []}
+    gap_by_verdict: dict[str, list[float]] = {
+        "honest": [],
+        "suspicious": [],
+        "evaluator_hack": [],
+        "hacking": [],
+    }
     for rec, v in zip(records, verdicts, strict=True):
         if v.verdict in gap_by_verdict:
             gap_by_verdict[v.verdict].append(rec.gap)
@@ -167,6 +200,11 @@ def main() -> None:
         records = [r for r in records if r.outcome == "valid"]
         log.info("Filtered to %d valid completions", len(records))
 
+    if args.dedup:
+        pre = len(records)
+        records = _deduplicate_records(records)
+        log.info("Deduplicated completions: %d -> %d", pre, len(records))
+
     if not records:
         log.warning("No records to judge")
         sys.exit(0)
@@ -181,7 +219,7 @@ def main() -> None:
 
     verdicts = judge_completions(records, cfg, env_file=args.env_file)
 
-    n_errors = sum(1 for v in verdicts if "failed" in v.rationale.lower())
+    n_errors = sum(1 for v in verdicts if v.parse_error)
 
     if args.output:
         output_dir = Path(args.output)
