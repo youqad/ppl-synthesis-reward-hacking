@@ -27,6 +27,16 @@ htmlcov/
 # Secrets
 .env
 
+# LaTeX
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.bbl
+*.blg
+*.synctex.gz
+
 artifacts/
 background-documents/
 .scratch/

@@ -22,8 +22,8 @@ jobs:
 
       - name: Run ruff
         run: |
-          pixi run -e dev ruff check src/ tests/ scripts/
-          pixi run -e dev ruff format --check src/ tests/ scripts/
+          pixi run -e dev ruff check --force-exclude src/ tests/ scripts/
+          pixi run -e dev ruff format --check --force-exclude src/ tests/ scripts/
 
       - name: Run mypy
         run: pixi run -e dev mypy src/
