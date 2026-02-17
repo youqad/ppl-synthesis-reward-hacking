@@ -21,12 +21,23 @@ def init_wandb(
     project: str,
     config: dict[str, Any],
     *,
+    entity: str | None = None,
     name: str | None = None,
+    group: str | None = None,
+    job_type: str | None = None,
     tags: list[str] | None = None,
 ) -> Any:
     """Initialize W&B run. Relies on wandb's own auth (env var, .netrc, or wandb login)."""
     wandb = _get_wandb()
-    return wandb.init(project=project, config=config, name=name, tags=tags)
+    return wandb.init(
+        project=project,
+        entity=entity,
+        config=config,
+        name=name,
+        group=group,
+        job_type=job_type,
+        tags=tags,
+    )
 
 
 def log_step(
@@ -49,6 +60,22 @@ def log_step(
     if extra:
         metrics.update(extra)
     wandb.log(metrics, step=step)
+
+
+def log_metrics(metrics: dict[str, Any], *, step: int | None = None) -> None:
+    """Log arbitrary metrics if a run is active."""
+    wandb = _get_wandb()
+    if wandb.run is None:
+        return
+    wandb.log(metrics, step=step)
+
+
+def update_summary(metrics: dict[str, Any]) -> None:
+    """Update W&B run summary if a run is active."""
+    wandb = _get_wandb()
+    if wandb.run is None:
+        return
+    wandb.run.summary.update(metrics)
 
 
 def finish_wandb() -> None:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import math
 
+import numpy as np
+
 from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import PARSE_FAIL_REWARD
 from ppl_synthesis_reward_hacking.logging.completions import (
     CompletionRecord,
@@ -50,7 +52,10 @@ class TestSerializationRoundTrip:
 
     def test_parse_fail_has_none_code(self):
         rec = _make_record(
-            code=None, outcome="parse_fail", reported_reward=PARSE_FAIL_REWARD, oracle_score=PARSE_FAIL_REWARD
+            code=None,
+            outcome="parse_fail",
+            reported_reward=PARSE_FAIL_REWARD,
+            oracle_score=PARSE_FAIL_REWARD,
         )
         serialized = _serialize_record(rec)
         restored = _deserialize_record(serialized)
@@ -78,6 +83,19 @@ class TestSerializationRoundTrip:
         serialized = _serialize_record(rec)
         assert serialized["reported_reward"] is None
         assert serialized["gap"] is None
+
+    def test_numpy_scalar_rewards_are_json_safe(self):
+        rec = _make_record(
+            reported_reward=np.float32(1.25),
+            oracle_score=np.float32(float("nan")),
+            gap=np.float32(-0.5),
+        )
+        serialized = _serialize_record(rec)
+        assert serialized["reported_reward"] == 1.25
+        assert serialized["oracle_score"] is None
+        assert serialized["gap"] == -0.5
+        # Must be serializable by stdlib json.
+        json.dumps(serialized)
 
 
 class TestCompletionWriter:

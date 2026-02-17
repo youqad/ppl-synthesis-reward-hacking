@@ -29,8 +29,25 @@ class CompletionRecord:
     metadata: dict[str, Any] | None = None
 
 
+def _make_json_safe(obj: Any) -> Any:
+    """Recursively convert numpy scalars/arrays to JSON-compatible types."""
+    import numpy as np
+
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, dict):
+        return {k: _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_make_json_safe(v) for v in obj]
+    return obj
+
+
 def _serialize_record(record: CompletionRecord) -> dict[str, Any]:
-    d = asdict(record)
+    d = _make_json_safe(asdict(record))
     # nan/inf -> null for JSON compat
     for key in ("reported_reward", "oracle_score", "gap"):
         v = d[key]
@@ -65,10 +82,11 @@ class CompletionWriter:
         self._handle.flush()
 
     def close(self) -> None:
-        if not self._handle.closed:
-            self._handle.flush()
-            self._handle.close()
-            atexit.unregister(self.close)
+        if self._handle.closed:
+            return
+        self._handle.flush()
+        self._handle.close()
+        atexit.unregister(self.close)
 
     @property
     def count(self) -> int:
@@ -88,6 +106,22 @@ def load_completions(path: str | Path) -> list[CompletionRecord]:
                 continue
             d = json.loads(line)
             records.append(_deserialize_record(d))
+    return records
+
+
+def load_completions_raw(path: str | Path) -> list[dict[str, Any]]:
+    """Load JSONL records as raw dicts, normalizing null reward fields to NaN."""
+    records: list[dict[str, Any]] = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            d = json.loads(line)
+            for k in ("reported_reward", "oracle_score", "gap"):
+                if d.get(k) is None:
+                    d[k] = float("nan")
+            records.append(d)
     return records
 
 

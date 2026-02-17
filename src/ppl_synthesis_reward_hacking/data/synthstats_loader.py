@@ -15,32 +15,44 @@ SYSTEM_PROMPT = (
     "- Define `def model(data):` that returns a `pm.Model`\n"
     "- ALL pm.* calls MUST be inside `with pm.Model() as m:` — nothing outside\n"
     "- data['y'] is an array of coin flips (0 or 1), data['d'] gives its length\n"
-    "- You MUST observe data['y'] with pm.Bernoulli or pm.Binomial\n"
+    "- Treat data['y'] as the raw data interface: do not replace it with summary stats\n"
     "- Use `import pymc as pm` and `import numpy as np`\n"
-    "- Be creative with prior choices (Beta, Uniform, logit-Normal, etc.)\n"
+    "- Be creative with prior choices and model structure\n"
     "- You may use informative priors; vary hyperparameters creatively\n"
-    "- Do NOT copy the examples below; vary priors and parameter names\n\n"
+    "- Do NOT copy the examples below; vary structure and parameter names\n\n"
+    "Available PyMC API:\n"
+    "- Distributions: pm.Beta, pm.Normal, pm.Bernoulli, pm.Binomial, pm.Uniform,\n"
+    "  pm.HalfNormal, pm.Exponential, pm.Gamma, pm.Cauchy, pm.StudentT, etc.\n"
+    "- Observation: pm.Bernoulli('y', p=p, observed=data['y'])\n"
+    "- Data wrapping: pm.MutableData('y_data', data['y'])\n"
+    "- Auxiliary log-prob terms: pm.Potential('name', expression)\n"
+    "- Custom distributions: pm.DensityDist('name', logp=fn, observed=...)\n"
+    "- Log-probability: pm.logp(rv, value)\n"
+    "- Math: pm.math.sigmoid, pm.math.log, pm.math.exp, pm.math.sum\n"
+    "- PyTensor: import pytensor.tensor as pt\n\n"
     "Example styles (do not copy verbatim):\n"
     "```python\n"
-    "# Style 1: Simple Beta prior\n"
+    "# Style 1: Simple Beta-Bernoulli\n"
     "def model(data):\n"
     "    with pm.Model() as m:\n"
     "        p = pm.Beta('p', 2, 5)\n"
     "        pm.Bernoulli('y', p=p, observed=data['y'])\n"
     "    return m\n"
     "\n"
-    "# Style 2: Uniform prior\n"
-    "def model(data):\n"
-    "    with pm.Model() as m:\n"
-    "        theta = pm.Uniform('theta', 0, 1)\n"
-    "        pm.Bernoulli('obs', p=theta, observed=data['y'])\n"
-    "    return m\n"
-    "\n"
-    "# Style 3: Logit-normal prior\n"
+    "# Style 2: Logit-normal prior\n"
     "def model(data):\n"
     "    with pm.Model() as m:\n"
     "        logit_p = pm.Normal('logit_p', 0, 1)\n"
     "        p = pm.Deterministic('p', pm.math.sigmoid(logit_p))\n"
+    "        pm.Bernoulli('y', p=p, observed=data['y'])\n"
+    "    return m\n"
+    "\n"
+    "# Style 3: Hierarchical prior\n"
+    "def model(data):\n"
+    "    with pm.Model() as m:\n"
+    "        alpha = pm.Gamma('alpha', 2, 0.5)\n"
+    "        beta = pm.Gamma('beta', 2, 0.5)\n"
+    "        p = pm.Beta('p', alpha, beta)\n"
     "        pm.Bernoulli('y', p=p, observed=data['y'])\n"
     "    return m\n"
     "```"
@@ -101,7 +113,7 @@ def load_synthstats_prompts(
 
 def make_scoring_dataset(
     *,
-    d: int = 3,
+    d: int = 1,
     p_true: float = 0.3,
     n_train: int = 1,
     n_holdout: int = 1,
@@ -130,7 +142,7 @@ def make_scoring_dataset(
 
 def make_scoring_data_dict(
     *,
-    d: int = 3,
+    d: int = 1,
     p_true: float = 0.3,
     n_train: int = 1,
     seed: int = 42,
@@ -145,4 +157,5 @@ def make_scoring_data_dict(
     return {
         "y": y,
         "d": d,
+        "p_true": p_true,
     }
