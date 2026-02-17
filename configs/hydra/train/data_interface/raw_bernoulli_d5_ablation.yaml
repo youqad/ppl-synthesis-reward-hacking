@@ -1,0 +1,5 @@
+interface_d: 5
+p_true_mode: sampled_beta
+p_true_fixed: 0.5
+p_true_beta_alpha: 1.0
+p_true_beta_beta: 1.0

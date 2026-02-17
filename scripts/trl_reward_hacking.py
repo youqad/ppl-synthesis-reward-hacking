@@ -265,9 +265,9 @@ def _compute_results(config: TRLRewardHackingConfig, state) -> dict:
     metrics["final_parse_fail_rate"] = final.n_parse_fail / max(final.n_total, 1)
     metrics["final_exec_fail_rate"] = final.n_exec_fail / max(final.n_total, 1)
     metrics["final_safety_flags"] = final.safety_flags
-    metrics["final_gap_mean"] = metrics.get("final_gap")
-    metrics["final_reported_mean"] = metrics.get("final_reported")
-    metrics["final_oracle_mean"] = metrics.get("final_oracle")
+    metrics["final_gap_proxy_mean"] = metrics.get("final_gap_proxy")
+    metrics["final_reward_mean"] = metrics.get("final_reward")
+    metrics["final_oracle_proxy_mean"] = metrics.get("final_oracle_proxy")
     metrics["n_batches"] = len(trajectory)
     return metrics
 

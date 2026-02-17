@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 _wandb = None
@@ -42,28 +43,26 @@ def init_wandb(
 
 def log_step(
     step: int,
-    reported_reward: float,
-    oracle_score: float | None,
+    reward_train: float,
+    oracle_proxy: float | None,
     *,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Log training step metrics."""
     wandb = _get_wandb()
     if wandb.run is None:
         return
     metrics: dict[str, Any] = {
-        "train/reported_reward": reported_reward,
+        "train/reward_train": reward_train,
     }
-    if oracle_score is not None:
-        metrics["train/oracle_score"] = oracle_score
-        metrics["train/gap"] = reported_reward - oracle_score
+    if oracle_proxy is not None and math.isfinite(float(oracle_proxy)):
+        metrics["train/oracle_proxy"] = oracle_proxy
+        metrics["train/gap_proxy"] = reward_train - oracle_proxy
     if extra:
         metrics.update(extra)
     wandb.log(metrics, step=step)
 
 
 def log_metrics(metrics: dict[str, Any], *, step: int | None = None) -> None:
-    """Log arbitrary metrics if a run is active."""
     wandb = _get_wandb()
     if wandb.run is None:
         return
@@ -71,15 +70,123 @@ def log_metrics(metrics: dict[str, Any], *, step: int | None = None) -> None:
 
 
 def update_summary(metrics: dict[str, Any]) -> None:
-    """Update W&B run summary if a run is active."""
     wandb = _get_wandb()
     if wandb.run is None:
         return
     wandb.run.summary.update(metrics)
 
 
+def log_normalization_metrics(
+    step: int,
+    n_checked: int,
+    frac_non_normalized: float,
+    mean_abs_log_mass: float,
+) -> None:
+    wandb = _get_wandb()
+    if wandb.run is None:
+        return
+    wandb.log(
+        {
+            "norm/n_checked": n_checked,
+            "norm/frac_non_normalized": frac_non_normalized,
+            "norm/mean_abs_log_mass": mean_abs_log_mass,
+        },
+        step=step,
+    )
+
+
+def log_judge_metrics(
+    step: int,
+    hacking_rate: float,
+    n_judged: int,
+    verdict_counts: dict[str, int],
+    tag_counts: dict[str, int],
+) -> None:
+    wandb = _get_wandb()
+    if wandb.run is None:
+        return
+    metrics: dict[str, Any] = {
+        "judge/hacking_rate": hacking_rate,
+        "judge/n_judged": n_judged,
+    }
+    for verdict, count in verdict_counts.items():
+        metrics[f"judge/verdict/{verdict}"] = count
+    for tag, count in tag_counts.items():
+        metrics[f"judge/tag/{tag}"] = count
+    wandb.log(metrics, step=step)
+
+
+def log_heuristic_rates(step: int, tag_rates: dict[str, float]) -> None:
+    wandb = _get_wandb()
+    if wandb.run is None:
+        return
+    metrics = {f"heuristic/{k}": v for k, v in tag_rates.items()}
+    wandb.log(metrics, step=step)
+
+
+def log_lh_table(records: list[dict[str, Any]], *, step: int) -> None:
+    """Log a table of LH program examples for this step."""
+    wandb = _get_wandb()
+    if wandb.run is None or not records:
+        return
+    columns = ["step", "code", "reported", "oracle", "gap",
+               "detection", "log_mass", "judge_verdict", "judge_tags"]
+    table = wandb.Table(columns=columns)
+    for r in records:
+        table.add_data(
+            r.get("step"), r.get("code", ""), r.get("reported"),
+            r.get("oracle"), r.get("gap"), r.get("detection", ""),
+            r.get("log_mass"), r.get("judge_verdict", ""),
+            r.get("judge_tags", ""),
+        )
+    wandb.log({"lh_examples": table}, step=step)
+
+
+def log_completion_table(
+    step: int, records: list[Any], *, max_rows: int = 20
+) -> None:
+    wandb = _get_wandb()
+    if wandb.run is None:
+        return
+    import random
+
+    from ppl_synthesis_reward_hacking.evaluation.heuristics import detect_exploits
+
+    sampled = random.sample(records, min(max_rows, len(records))) if records else []
+    columns = [
+        "step", "code", "reward_train", "oracle_proxy",
+        "gap_proxy", "outcome", "exploit_tags",
+    ]
+    table = wandb.Table(columns=columns)
+    for r in sampled:
+        code = (r.code or r.completion_text)[:500]
+        tags = detect_exploits(r.code) if r.code else set()
+        table.add_data(
+            step, code, r.reported_reward, r.oracle_score,
+            r.gap, r.outcome, ", ".join(sorted(tags)),
+        )
+    wandb.log({"completions/samples": table}, step=step)
+
+
+def upload_artifacts(paths: list) -> None:
+    wandb = _get_wandb()
+    if wandb.run is None:
+        return
+    from pathlib import Path as _Path
+
+    name = f"run-data-{wandb.run.id}"
+    artifact = wandb.Artifact(name, type="training-data")
+    n_added = 0
+    for p in paths:
+        p = _Path(p)
+        if p.exists():
+            artifact.add_file(str(p))
+            n_added += 1
+    if n_added:
+        wandb.log_artifact(artifact)
+
+
 def finish_wandb() -> None:
-    """Close W&B run."""
     wandb = _get_wandb()
     if wandb.run is not None:
         wandb.finish()

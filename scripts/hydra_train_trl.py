@@ -36,17 +36,32 @@ def _build_sweep_summary(results: dict[str, Any]) -> dict[str, Any]:
         return {
             "sweep/run_status": "fail",
             "sweep/error": results.get("error", "unknown"),
-            "sweep/final_gap_mean": float("nan"),
+            "sweep/final_reward_mean": float("nan"),
         }
-    return {
+    summary = {
         "sweep/run_status": "success",
-        "sweep/final_gap_mean": results.get("final_gap_mean", results.get("final_gap")),
-        "sweep/final_reported_mean": results.get(
-            "final_reported_mean", results.get("final_reported")
+        "sweep/final_reward_mean": results.get("final_reward_mean", results.get("final_reward")),
+        "sweep/final_oracle_proxy_mean": results.get(
+            "final_oracle_proxy_mean", results.get("final_oracle_proxy")
         ),
-        "sweep/final_oracle_mean": results.get("final_oracle_mean", results.get("final_oracle")),
+        "sweep/final_gap_proxy_mean": results.get(
+            "final_gap_proxy_mean", results.get("final_gap_proxy")
+        ),
         "sweep/final_valid_rate": results.get("final_valid_rate"),
     }
+    for key in (
+        "paper/track",
+        "paper/reward_metric",
+        "paper/reward_data_split",
+        "paper/predictive_estimator",
+        "paper/monitoring_mode",
+        "paper/frac_non_normalized_final",
+        "paper/judge_hacking_rate_final",
+        "paper/lh_family_prevalence_final",
+    ):
+        if key in results:
+            summary[key] = results[key]
+    return summary
 
 
 def _save_resolved_config(output_dir: str, cfg_dict: dict[str, Any]) -> None:
@@ -103,7 +118,7 @@ def _run_from_cfg(cfg) -> dict[str, Any]:
             failure_summary = {
                 "sweep/run_status": "fail",
                 "sweep/error": str(exc),
-                "sweep/final_gap_mean": float("nan"),
+                "sweep/final_reward_mean": float("nan"),
             }
             log_metrics(failure_summary)
             update_summary(failure_summary)

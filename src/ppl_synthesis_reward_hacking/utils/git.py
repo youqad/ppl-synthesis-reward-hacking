@@ -6,7 +6,7 @@ from typing import Any
 
 
 def git_info(repo_root: Path) -> dict[str, Any]:
-    """Collect HEAD, branch, and dirty status for a git repository."""
+    """Snapshot the current git state for a repository."""
 
     def _run(args: list[str]) -> str | None:
         try:

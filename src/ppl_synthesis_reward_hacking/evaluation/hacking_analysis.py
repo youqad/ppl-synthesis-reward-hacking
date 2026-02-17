@@ -1,12 +1,4 @@
-"""Per-step and full-run hacking analysis for GRPO training runs.
-
-Reusable logic extracted from scripts/analyze_hacking.py. Reads
-completions.jsonl and computes gap trajectory, prior distributions,
-exploit classifications, and health metrics.
-
-Stdlib-only fallbacks are provided so this module can run on Contabo
-without project dependencies.
-"""
+"""Per-step and full-run hacking analysis from completions.jsonl."""
 
 from __future__ import annotations
 

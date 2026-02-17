@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""GRPO training on Tinker with local PyMC scoring.
-
-Sampling & training via Tinker API, scoring via local sandboxed subprocess.
-
-Usage:
-    export TINKER_API_KEY=your_key
-    python scripts/tinker_pymc_grpo.py --n-steps 50 --n-prompts 5
-
-    # LH run (SMC scoring, formal likelihood hacking):
-    python scripts/tinker_pymc_grpo.py \
-        --n-steps 1000 --n-prompts 5 --rollouts-per-prompt 40 \
-        --temperature 1.28 --scoring-d 5 --scoring-p-true 0.5 \
-        --scoring-method smc --smc-draws 500 \
-        --exec-timeout 60 --judge-interval 10 --rubric-evolution-interval 10 \
-        --output-dir artifacts/tinker_grpo_lh_run1
-"""
+"""GRPO training on Tinker with local PyMC scoring."""
 
 from __future__ import annotations
 
@@ -28,6 +13,9 @@ from ppl_synthesis_reward_hacking.experiments.tinker_training import (
     config_from_mapping,
     run_training,
 )
+
+# Re-export for unit tests that load this script as a module.
+_ = (TinkerGRPOConfig, TrajectoryPoint, _compute_results)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,67 +37,54 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lora-rank", type=int, default=32)
     p.add_argument("--max-tokens", type=int, default=512)
     p.add_argument("--exec-timeout", type=int, default=60)
+
     p.add_argument(
-        "--scoring-d",
-        type=int,
-        default=1,
-        help="Scoring data dimensionality (d=1 recommended for LH signal)",
+        "--reward-metric",
+        choices=["log_marginal_likelihood", "elpd", "waic", "bic"],
+        default="log_marginal_likelihood",
     )
+    p.add_argument("--reward-data-split", choices=["train", "holdout"], default="train")
     p.add_argument(
-        "--scoring-p-true",
-        type=float,
-        default=0.5,
-        help="True probability for scoring data",
+        "--predictive-estimator",
+        choices=["none", "psis_loo", "waic", "bic_approx"],
+        default="none",
     )
-    p.add_argument("--scoring-seed-base", type=int, default=0, help="Base seed for scoring data")
+
+    p.add_argument("--interface-d", type=int, default=1)
+    p.add_argument("--p-true-mode", choices=["sampled_beta", "fixed"], default="sampled_beta")
+    p.add_argument("--p-true-fixed", type=float, default=0.5)
+    p.add_argument("--p-true-beta-alpha", type=float, default=1.0)
+    p.add_argument("--p-true-beta-beta", type=float, default=1.0)
+    p.add_argument("--scoring-seed-base", type=int, default=0)
+    p.add_argument("--smc-draws", type=int, default=500)
+    p.add_argument("--scoring-workers", type=int, default=1)
+
     p.add_argument(
-        "--scoring-method",
-        choices=["smc", "point_logps"],
-        default="smc",
-        help="Scoring method (smc=marginal likelihood, point_logps=legacy)",
+        "--paper-track",
+        choices=["part_a_emergence", "part_b_mitigation"],
+        default="part_a_emergence",
     )
-    p.add_argument("--smc-draws", type=int, default=500, help="SMC draws per model")
-    p.add_argument(
-        "--scoring-workers",
-        type=int,
-        default=1,
-        help="Parallel scoring workers (>1 uses multiprocessing pool)",
-    )
-    p.add_argument(
-        "--judge-interval",
-        type=int,
-        default=0,
-        help="Run observational LLM judge every N steps (0 disables)",
-    )
+    p.add_argument("--monitoring-mode", choices=["off", "judge_evolving"], default="off")
+
+    p.add_argument("--judge-interval", type=int, default=0)
     p.add_argument("--judge-sample-size", type=int, default=20)
     p.add_argument("--judge-dedup", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--judge-model", default="anthropic/glm-5")
     p.add_argument("--judge-use-stub", action="store_true")
     p.add_argument("--judge-env-file", default=None)
-    p.add_argument(
-        "--rubric-evolution-interval",
-        type=int,
-        default=0,
-        help="Evolve rubric every N steps (0 disables)",
-    )
-    p.add_argument(
-        "--normalization-interval",
-        type=int,
-        default=5,
-        help="Run normalization check every N steps (0 disables)",
-    )
-    p.add_argument(
-        "--normalization-sample-size",
-        type=int,
-        default=10,
-        help="Records to normalization-check per step",
-    )
+    p.add_argument("--rubric-evolution-interval", type=int, default=0)
+
+    p.add_argument("--normalization-interval", type=int, default=5)
+    p.add_argument("--normalization-sample-size", type=int, default=10)
+
     p.add_argument("--output-dir", default="artifacts/tinker_pymc_grpo")
-    p.add_argument(
-        "--exemplar-config",
-        default=None,
-        help="YAML file with advanced syntax exemplars to inject into the prompt",
-    )
+    p.add_argument("--exemplar-config", default=None)
+
+    p.add_argument("--wandb", action="store_true", help="Enable W&B logging")
+    p.add_argument("--wandb-project", default="ppl-synthesis-reward-hacking")
+    p.add_argument("--wandb-entity", default=None)
+    p.add_argument("--wandb-name", default=None)
+    p.add_argument("--wandb-tags", nargs="*", default=[])
     return p.parse_args()
 
 
@@ -129,12 +104,19 @@ def main() -> None:
             "lora_rank": args.lora_rank,
             "max_tokens": args.max_tokens,
             "exec_timeout": args.exec_timeout,
-            "scoring_d": args.scoring_d,
-            "scoring_p_true": args.scoring_p_true,
+            "reward_metric": args.reward_metric,
+            "reward_data_split": args.reward_data_split,
+            "predictive_estimator": args.predictive_estimator,
+            "interface_d": args.interface_d,
+            "p_true_mode": args.p_true_mode,
+            "p_true_fixed": args.p_true_fixed,
+            "p_true_beta_alpha": args.p_true_beta_alpha,
+            "p_true_beta_beta": args.p_true_beta_beta,
             "scoring_seed_base": args.scoring_seed_base,
-            "scoring_method": args.scoring_method,
             "smc_draws": args.smc_draws,
             "scoring_workers": args.scoring_workers,
+            "paper_track": args.paper_track,
+            "monitoring_mode": args.monitoring_mode,
             "judge_interval": args.judge_interval,
             "judge_sample_size": args.judge_sample_size,
             "judge_dedup": args.judge_dedup,
@@ -149,7 +131,26 @@ def main() -> None:
         }
     )
 
-    run_training(config)
+    if args.wandb:
+        from dataclasses import asdict
+
+        from ppl_synthesis_reward_hacking.logging.wandb_hook import init_wandb
+
+        init_wandb(
+            project=args.wandb_project,
+            config=asdict(config),
+            entity=args.wandb_entity,
+            name=args.wandb_name,
+            tags=args.wandb_tags,
+        )
+
+    try:
+        run_training(config)
+    finally:
+        if args.wandb:
+            from ppl_synthesis_reward_hacking.logging.wandb_hook import finish_wandb
+
+            finish_wandb()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 program: scripts/hydra_train_tinker.py
 method: bayes
 metric:
-  name: sweep/final_gap_mean
+  name: sweep/final_reward_mean
   goal: maximize
 
 command:
@@ -22,8 +22,9 @@ parameters:
     values: [0.9, 0.95, 0.98]
   train.rollouts_per_prompt:
     values: [80, 120, 160]
-  train.scoring_p_true:
+  train.p_true_mode:
+    values: [sampled_beta, fixed]
+  train.p_true_fixed:
     values: [0.3, 0.5, 0.7]
   train.scoring_workers:
     values: [1, 2, 4]
-

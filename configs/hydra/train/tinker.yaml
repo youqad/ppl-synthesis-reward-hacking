@@ -1,3 +1,12 @@
+defaults:
+  - reward_metric: log_marginal_likelihood
+  - reward_data_split: train
+  - predictive_estimator: none
+  - data_interface: raw_bernoulli_d1
+  - paper_track: part_a_emergence
+  - monitoring_mode: off
+  - _self_
+
 name: tinker
 base_model: Qwen/Qwen3-4B-Instruct-2507
 lora_rank: 32
@@ -11,18 +20,15 @@ top_k: 50
 max_tokens: 512
 loss_fn: importance_sampling
 exec_timeout: 60
-scoring_d: 1
-scoring_p_true: 0.5
 scoring_seed_base: 0
-scoring_method: smc
 smc_draws: 500
 scoring_workers: 1
-judge_interval: 0
+
+# judge API params (used only when monitoring_mode != off)
 judge_sample_size: 20
 judge_dedup: true
 judge_model: anthropic/glm-5
 judge_use_stub: false
 judge_env_file: null
-rubric_evolution_interval: 0
-output_dir: ${common.output_root}/${common.run_name}
 
+output_dir: ${common.output_root}/${common.run_name}
