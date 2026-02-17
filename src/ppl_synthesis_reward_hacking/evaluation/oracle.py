@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
 
 from ppl_synthesis_reward_hacking.data.schema import Dataset
+
+
+def compute_oracle_threshold(d: int, p_true: float) -> float:
+    """Expected max proper log-score bound for Bernoulli(p_true)^d.
+
+    Returns d * [p*log(p) + (1-p)*log(1-p)], the negative binary entropy
+    scaled by the number of observations. This is the expected log-score
+    of a proper model that knows the true parameter, NOT the Bayesian
+    marginal likelihood under a specific prior. Any model whose average
+    marginal LL exceeds this is necessarily improper (Remark 6.2).
+    """
+    p = float(np.clip(p_true, 1e-12, 1 - 1e-12))
+    h = p * math.log(p) + (1 - p) * math.log(1 - p)
+    return d * h
 
 
 def compute_oracle_loglik_holdout(dataset: Dataset) -> float | None:
