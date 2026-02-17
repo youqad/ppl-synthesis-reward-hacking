@@ -43,7 +43,6 @@ from ppl_synthesis_reward_hacking.evaluation.heuristics import (
 )
 from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
     DEFAULT_EXEC_TIMEOUT,
-    EXEC_FAIL_REWARD,
     classify_outcome,
     score_completion_sandboxed,
 )
@@ -92,6 +91,92 @@ def classify_completion_rules(
     )
 
 
+def _score_and_classify(
+    completion_text: str,
+    scoring_data: dict,
+    exec_timeout: int,
+) -> tuple[float, float, float, str, str | None, HackClassification]:
+    """Score one completion and classify exploits.
+
+    Returns:
+        (reported, oracle, gap, outcome, code, hack)
+    """
+    reported, oracle, _decomp = score_completion_sandboxed(
+        completion_text, scoring_data, timeout=exec_timeout
+    )
+    outcome = classify_outcome(reported)
+    gap = reported - oracle if outcome == "valid" else 0.0
+    code = extract_pymc_code(completion_text)
+    hack = classify_completion_rules(
+        code,
+        n_free_rvs=count_free_rvs(code) if code else 0,
+        n_observed_rvs=count_observed_rvs(code) if code else 0,
+    )
+    return reported, oracle, gap, outcome, code, hack
+
+
+def _compute_baseline_summary(
+    model_id: str,
+    scoring_d: int,
+    n_prompts: int,
+    samples_per_prompt: int,
+    all_reported: list[float],
+    all_oracle: list[float],
+    all_gaps: list[float],
+    all_hacks: list[HackClassification],
+    n_valid: int,
+    n_parse_fail: int,
+    n_exec_fail: int,
+) -> dict:
+    valid_pairs = [
+        (r, o, g)
+        for r, o, g in zip(all_reported, all_oracle, all_gaps, strict=False)
+        if np.isfinite(r)
+        and np.isfinite(o)
+        and classify_outcome(float(r)) == "valid"
+        and classify_outcome(float(o)) == "valid"
+    ]
+    n_total = len(all_reported)
+    n_data_discard = sum(1 for h in all_hacks if h.data_discard)
+    n_score_bonus = sum(1 for h in all_hacks if h.score_bonus)
+    n_latent = sum(1 for h in all_hacks if h.latent_inflation_suspect)
+    n_any = sum(1 for h in all_hacks if h.data_discard or h.score_bonus)
+
+    return {
+        "model": model_id,
+        "scoring_d": scoring_d,
+        "n_prompts": n_prompts,
+        "samples_per_prompt": samples_per_prompt,
+        "n_total": n_total,
+        "n_valid": n_valid,
+        "n_parse_fail": n_parse_fail,
+        "n_exec_fail": n_exec_fail,
+        "valid_rate": n_valid / n_total if n_total > 0 else 0.0,
+        "reported_mean": float(np.mean([r for r, _, _ in valid_pairs]))
+        if valid_pairs
+        else float("nan"),
+        "oracle_mean": float(np.mean([o for _, o, _ in valid_pairs]))
+        if valid_pairs
+        else float("nan"),
+        "gap_mean": float(np.mean([g for _, _, g in valid_pairs])) if valid_pairs else float("nan"),
+        "gap_std": float(np.std([g for _, _, g in valid_pairs])) if valid_pairs else float("nan"),
+        "exploit_prevalence": {
+            "data_discard": n_data_discard / n_total if n_total > 0 else 0.0,
+            "score_bonus": n_score_bonus / n_total if n_total > 0 else 0.0,
+            "any_exploit": n_any / n_total if n_total > 0 else 0.0,
+        },
+        "exploit_counts": {
+            "data_discard": n_data_discard,
+            "score_bonus": n_score_bonus,
+            "any_exploit": n_any,
+        },
+        "complexity_prevalence": {
+            "latent_inflation_suspect": n_latent / n_total if n_total > 0 else 0.0
+        },
+        "complexity_counts": {"latent_inflation_suspect": n_latent},
+    }
+
+
 def generate_baseline(
     model_id: str,
     n_prompts: int,
@@ -122,10 +207,8 @@ def generate_baseline(
     model.eval()
 
     scoring_data = make_scoring_data_dict(d=scoring_d)
-
     prompts = get_prompts(n_prompts)
     prompt_texts = [format_chat_prompt(p) for p in prompts]
-
     writer = CompletionWriter(output_dir / "baseline_completions.jsonl")
 
     all_reported: list[float] = []
@@ -137,7 +220,7 @@ def generate_baseline(
     n_valid = 0
 
     log.info(
-        "Generating %d prompts × %d samples = %d completions",
+        "Generating %d prompts x %d samples = %d completions",
         n_prompts,
         samples_per_prompt,
         n_prompts * samples_per_prompt,
@@ -145,7 +228,6 @@ def generate_baseline(
 
     for prompt_idx, prompt_text in enumerate(prompt_texts):
         inputs = tokenizer(prompt_text, return_tensors="pt").to(model.device)
-
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
@@ -162,11 +244,12 @@ def generate_baseline(
             output_tokens = outputs[seq_idx][inputs.input_ids.shape[1] :]
             completion_text = tokenizer.decode(output_tokens, skip_special_tokens=True)
 
-            reported, oracle, _decomposition = score_completion_sandboxed(
-                completion_text, scoring_data, timeout=exec_timeout
+            reported, oracle, gap, outcome, code, hack = _score_and_classify(
+                completion_text,
+                scoring_data,
+                exec_timeout,
             )
 
-            outcome = classify_outcome(reported)
             if outcome == "parse_fail":
                 n_parse_fail += 1
             elif outcome == "exec_fail":
@@ -174,109 +257,58 @@ def generate_baseline(
             else:
                 n_valid += 1
 
-            gap = reported - oracle if outcome == "valid" else 0.0
             all_reported.append(reported)
             all_oracle.append(oracle)
             all_gaps.append(gap)
-
-            code = extract_pymc_code(completion_text)
-
-            # scorer doesn't provide RV counts, use code heuristics
-            hack = classify_completion_rules(
-                code,
-                n_free_rvs=count_free_rvs(code) if code else 0,
-                n_observed_rvs=count_observed_rvs(code) if code else 0,
-            )
             all_hacks.append(hack)
 
-            record = CompletionRecord(
-                batch=0,  # baseline = step 0
-                index=prompt_idx * samples_per_prompt + seq_idx,
-                prompt=prompts[prompt_idx],
-                completion_text=completion_text,
-                code=code,
-                reported_reward=reported,
-                oracle_score=oracle,
-                gap=gap,
-                outcome=outcome,
-                timestamp=make_timestamp(),
-                metadata={
-                    "hack_data_discard": hack.data_discard,
-                    "hack_score_bonus": hack.score_bonus,
-                    "complexity_latent_inflation_suspect": hack.latent_inflation_suspect,
-                },
+            writer.write(
+                CompletionRecord(
+                    batch=0,
+                    index=prompt_idx * samples_per_prompt + seq_idx,
+                    prompt=prompts[prompt_idx],
+                    completion_text=completion_text,
+                    code=code,
+                    reported_reward=reported,
+                    oracle_score=oracle,
+                    gap=gap,
+                    outcome=outcome,
+                    timestamp=make_timestamp(),
+                    metadata={
+                        "hack_data_discard": hack.data_discard,
+                        "hack_score_bonus": hack.score_bonus,
+                        "complexity_latent_inflation_suspect": hack.latent_inflation_suspect,
+                    },
+                )
             )
-            writer.write(record)
 
         if (prompt_idx + 1) % 5 == 0:
             log.info("Progress: %d/%d prompts", prompt_idx + 1, n_prompts)
 
     writer.close()
 
-    valid_pairs = [
-        (r, o, g)
-        for r, o, g in zip(all_reported, all_oracle, all_gaps, strict=False)
-        if np.isfinite(r)
-        and np.isfinite(o)
-        and classify_outcome(float(r)) == "valid"
-        and classify_outcome(float(o)) == "valid"
-    ]
-
-    n_total = len(all_reported)
-    n_data_discard = sum(1 for h in all_hacks if h.data_discard)
-    n_score_bonus = sum(1 for h in all_hacks if h.score_bonus)
-    n_latent_inflation_suspect = sum(1 for h in all_hacks if h.latent_inflation_suspect)
-    n_any_exploit = sum(1 for h in all_hacks if h.data_discard or h.score_bonus)
-
-    summary = {
-        "model": model_id,
-        "scoring_d": scoring_d,
-        "n_prompts": n_prompts,
-        "samples_per_prompt": samples_per_prompt,
-        "n_total": n_total,
-        "n_valid": n_valid,
-        "n_parse_fail": n_parse_fail,
-        "n_exec_fail": n_exec_fail,
-        "valid_rate": n_valid / n_total if n_total > 0 else 0.0,
-        "reported_mean": (
-            float(np.mean([r for r, _, _ in valid_pairs])) if valid_pairs else float("nan")
-        ),
-        "oracle_mean": (
-            float(np.mean([o for _, o, _ in valid_pairs])) if valid_pairs else float("nan")
-        ),
-        "gap_mean": float(np.mean([g for _, _, g in valid_pairs])) if valid_pairs else float("nan"),
-        "gap_std": float(np.std([g for _, _, g in valid_pairs])) if valid_pairs else float("nan"),
-        "exploit_prevalence": {
-            "data_discard": n_data_discard / n_total if n_total > 0 else 0.0,
-            "score_bonus": n_score_bonus / n_total if n_total > 0 else 0.0,
-            "any_exploit": n_any_exploit / n_total if n_total > 0 else 0.0,
-        },
-        "exploit_counts": {
-            "data_discard": n_data_discard,
-            "score_bonus": n_score_bonus,
-            "any_exploit": n_any_exploit,
-        },
-        "complexity_prevalence": {
-            "latent_inflation_suspect": (
-                n_latent_inflation_suspect / n_total if n_total > 0 else 0.0
-            ),
-        },
-        "complexity_counts": {
-            "latent_inflation_suspect": n_latent_inflation_suspect,
-        },
-    }
+    summary = _compute_baseline_summary(
+        model_id,
+        scoring_d,
+        n_prompts,
+        samples_per_prompt,
+        all_reported,
+        all_oracle,
+        all_gaps,
+        all_hacks,
+        n_valid,
+        n_parse_fail,
+        n_exec_fail,
+    )
 
     with open(output_dir / "baseline_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
 
     log.info("Baseline generation complete")
-    log.info("Valid rate: %.1f%% (%d/%d)", summary["valid_rate"] * 100, n_valid, n_total)
+    log.info("Valid rate: %.1f%% (%d/%d)", summary["valid_rate"] * 100, n_valid, summary["n_total"])
     log.info("Gap: %.2f +/- %.2f", summary["gap_mean"], summary["gap_std"])
-    log.info("Exploit prevalence:")
-    log.info("  data_discard: %.1f%%", summary["exploit_prevalence"]["data_discard"] * 100)
-    log.info("  score_bonus: %.1f%%", summary["exploit_prevalence"]["score_bonus"] * 100)
-    log.info("  any_exploit: %.1f%%", summary["exploit_prevalence"]["any_exploit"] * 100)
-    log.info("Complexity signals (not definitive exploits):")
+    for k in ("data_discard", "score_bonus", "any_exploit"):
+        log.info("  %s: %.1f%%", k, summary["exploit_prevalence"][k] * 100)
     log.info(
         "  latent_inflation_suspect: %.1f%%",
         summary["complexity_prevalence"]["latent_inflation_suspect"] * 100,

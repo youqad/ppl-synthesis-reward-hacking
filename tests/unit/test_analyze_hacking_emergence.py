@@ -31,8 +31,8 @@ def _make_record(**overrides) -> CompletionRecord:
         "batch": 0,
         "index": 0,
         "prompt": "prompt",
-        "completion_text": "import pymc as pm\n" "def model(data): ...",
-        "code": "import pymc as pm\n" "def model(data): ...",
+        "completion_text": "import pymc as pm\ndef model(data): ...",
+        "code": "import pymc as pm\ndef model(data): ...",
         "reported_reward": -10.0,
         "oracle_score": -12.0,
         "gap": 2.0,
@@ -45,7 +45,7 @@ def _make_record(**overrides) -> CompletionRecord:
 
 
 def test_invalid_records_do_not_count_as_hacks():
-    valid = _make_record(code="import pymc as pm\n" "def model(data): ...")
+    valid = _make_record(code="import pymc as pm\ndef model(data): ...")
     invalid = _make_record(
         outcome="parse_fail",
         code=None,

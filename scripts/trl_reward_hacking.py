@@ -15,8 +15,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from dataclasses import asdict
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 try:
     from datasets import Dataset as HFDataset
@@ -34,13 +36,13 @@ from ppl_synthesis_reward_hacking.data.synthstats_loader import (
     make_scoring_data_dict,
     make_scoring_dataset,
 )
-from ppl_synthesis_reward_hacking.experiments.synthstats_reward import (
-    make_synthstats_reward_fn,
-)
 from ppl_synthesis_reward_hacking.experiments.results import (
     compute_trajectory_metrics,
     json_default,
     print_training_summary,
+)
+from ppl_synthesis_reward_hacking.experiments.synthstats_reward import (
+    make_synthstats_reward_fn,
 )
 
 logging.basicConfig(
@@ -49,6 +51,34 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class TRLRewardHackingConfig:
+    model: str = "Qwen/Qwen3-4B-Instruct-2507"
+    n_steps: int = 1000
+    n_prompts: int = 100
+    rollouts_per_prompt: int = 4
+    lora_rank: int = 32
+    lora_dropout: float = 0.1
+    lr: float = 1e-5
+    max_completion_length: int = 1024
+    use_4bit: bool = False
+    exec_timeout: int = 30
+    output_dir: str = "artifacts/grpo_synthstats"
+    resume_from: str | None = None
+    num_generations: int = 8
+    temperature: float = 1.15
+    top_p: float = 0.95
+    top_k: int = 50
+    kl_beta: float = 0.02
+    max_grad_norm: float = 0.1
+    scoring_d: int = 30
+
+
+def config_from_mapping(mapping: Mapping[str, Any]) -> TRLRewardHackingConfig:
+    """Create TRLRewardHackingConfig from a mapping (Hydra-friendly)."""
+    return TRLRewardHackingConfig(**dict(mapping))
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,28 +114,29 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main() -> None:
+def run_training(config: TRLRewardHackingConfig) -> dict[str, Any]:
     if not TRL_AVAILABLE:
-        raise SystemExit("TRL not installed. pip install trl peft datasets transformers accelerate")
+        raise RuntimeError(
+            "TRL not installed. pip install trl peft datasets transformers accelerate"
+        )
 
-    args = parse_args()
-    output_dir = Path(args.output_dir)
+    output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.resume_from:
-        resume_dir = Path(args.resume_from)
+    if config.resume_from:
+        resume_dir = Path(config.resume_from)
         if not resume_dir.exists():
-            raise SystemExit(f"Resume directory not found: {resume_dir}")
+            raise RuntimeError(f"Resume directory not found: {resume_dir}")
         log.info("Resuming from checkpoint: %s", resume_dir)
 
     log.info("Loading synthstats prompts")
-    prompt_dicts = load_synthstats_prompts(max_examples=args.n_prompts)
+    prompt_dicts = load_synthstats_prompts(max_examples=config.n_prompts)
     train_dataset = HFDataset.from_list(prompt_dicts)
     log.info("Loaded %d prompts", len(prompt_dicts))
 
     log.info("Creating scoring dataset and backend")
-    scoring_dataset = make_scoring_dataset(d=args.scoring_d)
-    scoring_data = make_scoring_data_dict(d=args.scoring_d)
+    scoring_dataset = make_scoring_dataset(d=config.scoring_d)
+    scoring_data = make_scoring_data_dict(d=config.scoring_d)
     backend = PyMCBackend()
 
     reward_fn, reward_state = make_synthstats_reward_fn(
@@ -113,20 +144,20 @@ def main() -> None:
         dataset=scoring_dataset,
         scoring_data=scoring_data,
         cache_dir=output_dir / "pymc_cache",
-        exec_timeout=args.exec_timeout,
+        exec_timeout=config.exec_timeout,
         completions_path=output_dir / "completions.jsonl",
     )
 
     peft_config = LoraConfig(
-        r=args.lora_rank,
-        lora_alpha=args.lora_rank * 2,
-        lora_dropout=args.lora_dropout,
+        r=config.lora_rank,
+        lora_alpha=config.lora_rank * 2,
+        lora_dropout=config.lora_dropout,
         target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
         task_type="CAUSAL_LM",
     )
 
     model_init_kwargs = None
-    if args.use_4bit:
+    if config.use_4bit:
         try:
             import torch
             from transformers import BitsAndBytesConfig
@@ -144,19 +175,19 @@ def main() -> None:
 
     training_args = TRLGRPOConfig(
         output_dir=str(output_dir),
-        max_steps=args.n_steps,
+        max_steps=config.n_steps,
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=args.rollouts_per_prompt,
-        learning_rate=args.lr,
-        num_generations=args.num_generations,
-        max_completion_length=args.max_completion_length,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        top_k=args.top_k,
-        beta=args.kl_beta,
-        max_grad_norm=args.max_grad_norm,
+        gradient_accumulation_steps=config.rollouts_per_prompt,
+        learning_rate=config.lr,
+        num_generations=config.num_generations,
+        max_completion_length=config.max_completion_length,
+        temperature=config.temperature,
+        top_p=config.top_p,
+        top_k=config.top_k,
+        beta=config.kl_beta,
+        max_grad_norm=config.max_grad_norm,
         logging_steps=1,
-        save_steps=max(1, args.n_steps // 5),
+        save_steps=max(1, config.n_steps // 5),
         report_to="none",
         remove_unused_columns=False,
         bf16=True,
@@ -165,44 +196,44 @@ def main() -> None:
         model_init_kwargs=model_init_kwargs,
     )
 
-    log.info("Model: %s", args.model)
+    log.info("Model: %s", config.model)
     log.info(
         "Steps: %d, Prompts: %d, Generations/prompt: %d",
-        args.n_steps,
+        config.n_steps,
         len(prompt_dicts),
-        args.num_generations,
+        config.num_generations,
     )
     log.info(
         "LoRA rank=%d, alpha=%d, dropout=%.2f",
-        args.lora_rank,
-        args.lora_rank * 2,
-        args.lora_dropout,
+        config.lora_rank,
+        config.lora_rank * 2,
+        config.lora_dropout,
     )
     log.info(
         "Exploration: temp=%.2f, top_p=%.2f, top_k=%d, kl_beta=%.3f",
-        args.temperature,
-        args.top_p,
-        args.top_k,
-        args.kl_beta,
+        config.temperature,
+        config.top_p,
+        config.top_k,
+        config.kl_beta,
     )
     log.info("Output: %s", output_dir)
 
     trainer = GRPOTrainer(
-        model=args.model,
+        model=config.model,
         reward_funcs=reward_fn,
         args=training_args,
         train_dataset=train_dataset,
         peft_config=peft_config,
     )
 
-    resume_path = args.resume_from if args.resume_from else None
+    resume_path = config.resume_from if config.resume_from else None
     trainer.train(resume_from_checkpoint=resume_path)
 
     trajectory_dicts = [asdict(p) for p in reward_state.trajectory]
     with open(output_dir / "trajectory.json", "w") as f:
         json.dump(trajectory_dicts, f, indent=2, default=json_default)
 
-    results = _compute_results(args, reward_state)
+    results = _compute_results(config, reward_state)
     with open(output_dir / "results.json", "w") as f:
         json.dump(results, f, indent=2, default=json_default)
 
@@ -212,8 +243,10 @@ def main() -> None:
     if reward_state.completion_writer is not None:
         reward_state.completion_writer.close()
 
+    return results
 
-def _compute_results(args: argparse.Namespace, state) -> dict:
+
+def _compute_results(config: TRLRewardHackingConfig, state) -> dict:
     trajectory = state.trajectory
     metrics = compute_trajectory_metrics(trajectory)
     if "error" in metrics:
@@ -222,16 +255,19 @@ def _compute_results(args: argparse.Namespace, state) -> dict:
 
     final = trajectory[-1]
     metrics["config"] = {
-        "model": args.model,
-        "n_steps": args.n_steps,
-        "n_prompts": args.n_prompts,
-        "rollouts_per_prompt": args.rollouts_per_prompt,
-        "lora_rank": args.lora_rank,
-        "use_4bit": args.use_4bit,
+        "model": config.model,
+        "n_steps": config.n_steps,
+        "n_prompts": config.n_prompts,
+        "rollouts_per_prompt": config.rollouts_per_prompt,
+        "lora_rank": config.lora_rank,
+        "use_4bit": config.use_4bit,
     }
     metrics["final_parse_fail_rate"] = final.n_parse_fail / max(final.n_total, 1)
     metrics["final_exec_fail_rate"] = final.n_exec_fail / max(final.n_total, 1)
     metrics["final_safety_flags"] = final.safety_flags
+    metrics["final_gap_mean"] = metrics.get("final_gap")
+    metrics["final_reported_mean"] = metrics.get("final_reported")
+    metrics["final_oracle_mean"] = metrics.get("final_oracle")
     metrics["n_batches"] = len(trajectory)
     return metrics
 
@@ -240,6 +276,37 @@ def _print_summary(results: dict) -> None:
     print_training_summary(results)
     if "error" not in results and results.get("final_safety_flags"):
         log.info("safety flags: %s", results["final_safety_flags"])
+
+
+def main() -> None:
+    if not TRL_AVAILABLE:
+        raise SystemExit("TRL not installed. pip install trl peft datasets transformers accelerate")
+
+    args = parse_args()
+    config = config_from_mapping(
+        {
+            "model": args.model,
+            "n_steps": args.n_steps,
+            "n_prompts": args.n_prompts,
+            "rollouts_per_prompt": args.rollouts_per_prompt,
+            "lora_rank": args.lora_rank,
+            "lora_dropout": args.lora_dropout,
+            "lr": args.lr,
+            "max_completion_length": args.max_completion_length,
+            "use_4bit": args.use_4bit,
+            "exec_timeout": args.exec_timeout,
+            "output_dir": args.output_dir,
+            "resume_from": args.resume_from,
+            "num_generations": args.num_generations,
+            "temperature": args.temperature,
+            "top_p": args.top_p,
+            "top_k": args.top_k,
+            "kl_beta": args.kl_beta,
+            "max_grad_norm": args.max_grad_norm,
+            "scoring_d": args.scoring_d,
+        }
+    )
+    run_training(config)
 
 
 if __name__ == "__main__":

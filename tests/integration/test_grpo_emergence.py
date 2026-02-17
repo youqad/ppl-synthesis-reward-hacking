@@ -436,19 +436,25 @@ class TestFailureFiltering:
         rollouts = {
             0: [
                 RolloutData(
-                    [1], [2], [-0.5],
+                    [1],
+                    [2],
+                    [-0.5],
                     reported_reward=EXEC_FAIL_REWARD,
                     oracle_score=EXEC_FAIL_REWARD,
                     log_mass=0.0,
                 ),
                 RolloutData(
-                    [1], [3], [-0.6],
+                    [1],
+                    [3],
+                    [-0.6],
                     reported_reward=-0.7,
                     oracle_score=-0.9,
                     log_mass=0.0,
                 ),
                 RolloutData(
-                    [1], [4], [-0.7],
+                    [1],
+                    [4],
+                    [-0.7],
                     reported_reward=-0.3,
                     oracle_score=-0.5,
                     log_mass=0.0,
@@ -469,13 +475,17 @@ class TestFailureFiltering:
         rollouts = {
             0: [
                 RolloutData(
-                    [1], [2], [-0.5],
+                    [1],
+                    [2],
+                    [-0.5],
                     reported_reward=EXEC_FAIL_REWARD,
                     oracle_score=EXEC_FAIL_REWARD,
                     log_mass=0.0,
                 ),
                 RolloutData(
-                    [1], [3], [-0.6],
+                    [1],
+                    [3],
+                    [-0.6],
                     reported_reward=EXEC_FAIL_REWARD,
                     oracle_score=EXEC_FAIL_REWARD,
                     log_mass=0.0,
@@ -494,19 +504,25 @@ class TestFailureFiltering:
         rollouts = {
             0: [
                 RolloutData(
-                    [1], [2], [-0.5],
+                    [1],
+                    [2],
+                    [-0.5],
                     reported_reward=EXEC_FAIL_REWARD,
                     oracle_score=EXEC_FAIL_REWARD,
                     log_mass=0.0,
                 ),
                 RolloutData(
-                    [1], [3], [-0.6],
+                    [1],
+                    [3],
+                    [-0.6],
                     reported_reward=10.0,
                     oracle_score=5.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
-                    [1], [4], [-0.7],
+                    [1],
+                    [4],
+                    [-0.7],
                     reported_reward=20.0,
                     oracle_score=10.0,
                     log_mass=0.0,
@@ -530,19 +546,25 @@ class TestFailureFiltering:
         rollouts = {
             0: [
                 RolloutData(
-                    [1], [2], [-0.5],
+                    [1],
+                    [2],
+                    [-0.5],
                     reported_reward=EXEC_FAIL_REWARD,
                     oracle_score=EXEC_FAIL_REWARD,
                     log_mass=0.0,
                 ),
                 RolloutData(
-                    [1], [3], [-0.6],
+                    [1],
+                    [3],
+                    [-0.6],
                     reported_reward=-450.0,  # valid but below EXEC_FAIL_REWARD
                     oracle_score=-460.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
-                    [1], [4], [-0.7],
+                    [1],
+                    [4],
+                    [-0.7],
                     reported_reward=-420.0,  # valid but below EXEC_FAIL_REWARD
                     oracle_score=-430.0,
                     log_mass=0.0,
