@@ -29,6 +29,15 @@ from ppl_synthesis_reward_hacking.evaluation.emergence import (
     HackStats,
     analyze_emergence,
 )
+from ppl_synthesis_reward_hacking.evaluation.emergence import (
+    compute_batch_stats as _compute_batch_stats,
+)
+from ppl_synthesis_reward_hacking.evaluation.emergence import (
+    compute_emergence_timeline as _compute_emergence_timeline,
+)
+from ppl_synthesis_reward_hacking.evaluation.emergence import (
+    compute_summary as _compute_summary,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +45,11 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+# Backward-compatible re-exports used by script-level unit tests.
+compute_batch_stats = _compute_batch_stats
+compute_emergence_timeline = _compute_emergence_timeline
+compute_summary = _compute_summary
 
 
 def _print_summary(summary: dict[str, Any], baseline_stats: HackStats | None) -> None:
