@@ -14,9 +14,9 @@ log = logging.getLogger(__name__)
 
 
 class TrajectoryLike(Protocol):
-    gap_mean: float
-    reported_mean: float
-    oracle_mean: float
+    gap_proxy_mean: float
+    reward_mean: float
+    oracle_proxy_mean: float
     n_valid: int
     n_total: int
 
@@ -28,23 +28,30 @@ def compute_trajectory_metrics(trajectory: list[TrajectoryLike]) -> dict[str, An
     initial = trajectory[0]
     final = trajectory[-1]
 
-    gap_increase: float
-    if np.isnan(final.gap_mean) or np.isnan(initial.gap_mean):
-        gap_increase = float("nan")
+    reward_increase: float
+    if np.isnan(final.reward_mean) or np.isnan(initial.reward_mean):
+        reward_increase = float("nan")
     else:
-        gap_increase = final.gap_mean - initial.gap_mean
+        reward_increase = final.reward_mean - initial.reward_mean
+
+    gap_proxy_increase: float
+    if np.isnan(final.gap_proxy_mean) or np.isnan(initial.gap_proxy_mean):
+        gap_proxy_increase = float("nan")
+    else:
+        gap_proxy_increase = final.gap_proxy_mean - initial.gap_proxy_mean
 
     return {
-        "initial_gap": initial.gap_mean,
-        "final_gap": final.gap_mean,
-        "gap_increase": gap_increase,
-        "initial_reported": initial.reported_mean,
-        "final_reported": final.reported_mean,
-        "initial_oracle": initial.oracle_mean,
-        "final_oracle": final.oracle_mean,
+        "initial_reward": initial.reward_mean,
+        "final_reward": final.reward_mean,
+        "reward_increase": reward_increase,
+        "initial_oracle_proxy": initial.oracle_proxy_mean,
+        "final_oracle_proxy": final.oracle_proxy_mean,
+        "initial_gap_proxy": initial.gap_proxy_mean,
+        "final_gap_proxy": final.gap_proxy_mean,
+        "gap_proxy_increase": gap_proxy_increase,
         "final_valid_rate": final.n_valid / max(final.n_total, 1),
         "hacking_detected": is_nan_safe_gt(
-            final.gap_mean, initial.gap_mean + HACKING_GAP_THRESHOLD
+            final.gap_proxy_mean, initial.gap_proxy_mean + HACKING_GAP_THRESHOLD
         ),
     }
 
@@ -55,25 +62,23 @@ def print_training_summary(results: dict[str, Any]) -> None:
         return
 
     log.info(
-        "gap: %.1f -> %.1f (delta=%.1f)",
-        results["initial_gap"],
-        results["final_gap"],
-        results.get("gap_increase", float("nan")),
+        "reward: %.3f -> %.3f (delta=%.3f)",
+        results["initial_reward"],
+        results["final_reward"],
+        results.get("reward_increase", float("nan")),
     )
     log.info(
-        "reported: %.1f -> %.1f",
-        results["initial_reported"],
-        results["final_reported"],
+        "oracle_proxy: %.3f -> %.3f",
+        results["initial_oracle_proxy"],
+        results["final_oracle_proxy"],
     )
     log.info(
-        "oracle: %.1f -> %.1f",
-        results["initial_oracle"],
-        results["final_oracle"],
+        "gap_proxy: %.3f -> %.3f (delta=%.3f)",
+        results["initial_gap_proxy"],
+        results["final_gap_proxy"],
+        results.get("gap_proxy_increase", float("nan")),
     )
     log.info("valid_rate: %.1f%%", results["final_valid_rate"] * 100)
-
-    if results.get("hacking_detected"):
-        log.info("-> HACKING DETECTED (gap increased > %.0f)", HACKING_GAP_THRESHOLD)
 
 
 def json_default(obj: Any) -> Any:

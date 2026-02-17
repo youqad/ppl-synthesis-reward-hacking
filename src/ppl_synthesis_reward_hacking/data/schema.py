@@ -16,12 +16,6 @@ class Dataset:
 
 @dataclass(frozen=True, slots=True)
 class InterfaceSpec:
-    """Formal scoring/judging interface contract.
-
-    This contract defines what the model is expected to observe and which
-    observation forms are disallowed under a raw-data interface.
-    """
-
     name: str
     y_domain: str
     raw_data_required: bool
