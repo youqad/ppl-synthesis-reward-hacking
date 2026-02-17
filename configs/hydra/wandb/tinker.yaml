@@ -1,0 +1,10 @@
+defaults:
+  - base
+
+enabled: true
+job_type: tinker-sweep
+tags:
+  - tinker
+  - hydra
+  - sweep
+

@@ -1,0 +1,7 @@
+defaults:
+  - common
+  - train: trl
+  - wandb: trl
+  - launcher: slurm
+  - _self_
+

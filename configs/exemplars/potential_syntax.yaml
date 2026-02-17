@@ -1,0 +1,66 @@
+# Few-shot exemplars for pm.Potential and pm.DensityDist syntax.
+# Valid (honest) uses only -- teaches the LM vocabulary for auxiliary
+# log-prob terms and custom likelihoods.  GRPO discovers misuse on its own.
+
+exemplars:
+  - name: soft_dirichlet_constraint
+    description: Soft constraint penalising mixture weights that drift from uniform
+    is_valid_use: true
+    code: |
+      import pymc as pm
+      import pytensor.tensor as pt
+
+      def model(data):
+          with pm.Model() as m:
+              w = pm.Dirichlet("w", a=pt.ones(3))
+              p = pm.math.sum(w * pt.as_tensor_variable([0.2, 0.5, 0.8]))
+              pm.Bernoulli("y", p=p, observed=data["y"])
+              pm.Potential("w_near_uniform", -10.0 * pt.sum((w - 1.0 / 3) ** 2))
+          return m
+
+  - name: horseshoe_custom_prior
+    description: Horseshoe-like heavy-tailed prior via DensityDist
+    is_valid_use: true
+    code: |
+      import pymc as pm
+      import pytensor.tensor as pt
+
+      def model(data):
+          with pm.Model() as m:
+              def horseshoe_logp(value):
+                  return -pt.log(1 + value ** 2)
+              tau = pm.DensityDist("tau", logp=horseshoe_logp)
+              logit_p = pm.Normal("logit_p", 0, pt.exp(tau))
+              p = pm.Deterministic("p", pm.math.sigmoid(logit_p))
+              pm.Bernoulli("y", p=p, observed=data["y"])
+          return m
+
+  - name: l2_regularisation
+    description: L2 penalty on probability parameter to shrink toward zero
+    is_valid_use: true
+    code: |
+      import pymc as pm
+      import pytensor.tensor as pt
+
+      def model(data):
+          with pm.Model() as m:
+              p = pm.Beta("p", 1, 1)
+              pm.Bernoulli("y", p=p, observed=data["y"])
+              pm.Potential("l2_reg", -0.01 * pt.sum(p ** 2))
+          return m
+
+  - name: custom_bernoulli_likelihood
+    description: Hand-rolled Bernoulli log-likelihood via DensityDist
+    is_valid_use: true
+    code: |
+      import pymc as pm
+      import pytensor.tensor as pt
+
+      def model(data):
+          with pm.Model() as m:
+              p = pm.Beta("p", 2, 2)
+              y_data = pm.MutableData("y_data", data["y"])
+              def logp(value, p):
+                  return pt.sum(value * pt.log(p) + (1 - value) * pt.log(1 - p))
+              pm.DensityDist("obs", p, logp=logp, observed=y_data)
+          return m

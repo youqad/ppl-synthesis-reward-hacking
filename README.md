@@ -16,6 +16,43 @@ pixi run -e dev pytest
 pixi run psrh --help
 ```
 
+## Hydra + W&B Sweeps
+
+Hydra entrypoints are provided for both training paths:
+
+- `scripts/hydra_train_tinker.py` (local/CPU launcher by default)
+- `scripts/hydra_train_trl.py` (SLURM launcher by default)
+
+Create a sweep and run agents:
+
+```bash
+wandb sweep configs/sweeps/wandb/tinker_gap.yaml
+python scripts/run_wandb_agent.py --sweep-id <entity/project/sweep_id> --count 20
+```
+
+Programmatic sweep creation helper:
+
+```bash
+python scripts/create_wandb_sweep.py --config configs/sweeps/wandb/tinker_gap.yaml
+```
+
+For TRL sweeps on SLURM:
+
+```bash
+wandb sweep configs/sweeps/wandb/trl_gap.yaml
+python scripts/run_wandb_agent.py --sweep-id <entity/project/sweep_id> --count 10
+```
+
+Hydra launcher profiles now include:
+
+- `launcher=local` (VPS/local)
+- `launcher=slurm` (generic SLURM)
+- `launcher=a100` (A100 partition profile)
+- `launcher=h100` (H100 partition profile)
+- `launcher=cpu-debug` (CPU-only debug profile)
+
+Primary optimization metric is `sweep/final_gap_mean` (maximize).
+
 ## Layout
 
 - `src/ppl_synthesis_reward_hacking/` - Core experiment code

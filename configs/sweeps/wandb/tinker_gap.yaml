@@ -1,0 +1,29 @@
+program: scripts/hydra_train_tinker.py
+method: bayes
+metric:
+  name: sweep/final_gap_mean
+  goal: maximize
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - launcher=local
+  - ${args_no_hyphens}
+
+parameters:
+  train.learning_rate:
+    values: [5.0e-6, 1.0e-5, 2.0e-5]
+  train.temperature:
+    distribution: uniform
+    min: 1.05
+    max: 1.35
+  train.top_p:
+    values: [0.9, 0.95, 0.98]
+  train.rollouts_per_prompt:
+    values: [80, 120, 160]
+  train.scoring_p_true:
+    values: [0.3, 0.5, 0.7]
+  train.scoring_workers:
+    values: [1, 2, 4]
+

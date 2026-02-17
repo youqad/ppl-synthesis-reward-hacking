@@ -1,0 +1,10 @@
+common:
+  output_root: artifacts/sweeps
+  run_name: ${train.name}_${now:%Y%m%d_%H%M%S}
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: ${train.output_dir}
+

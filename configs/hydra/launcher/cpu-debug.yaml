@@ -1,0 +1,20 @@
+# @package _global_
+
+defaults:
+  - override /hydra/launcher: submitit_slurm
+
+launcher:
+  kind: slurm-cpu-debug
+
+hydra:
+  launcher:
+    submitit_folder: ${hydra.sweep.dir}/.submitit/%j
+    timeout_min: 60
+    cpus_per_task: 8
+    gpus_per_node: 0
+    tasks_per_node: 1
+    mem_gb: 32
+    nodes: 1
+    partition: cpu
+    array_parallelism: 4
+

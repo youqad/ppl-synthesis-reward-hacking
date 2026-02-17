@@ -1,0 +1,9 @@
+enabled: false
+project: ppl-synthesis-reward-hacking
+entity: null
+name: ${common.run_name}
+group: null
+job_type: sweep
+tags: []
+mode: online
+

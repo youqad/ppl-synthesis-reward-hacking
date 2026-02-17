@@ -1,0 +1,21 @@
+name: trl
+model: Qwen/Qwen3-4B-Instruct-2507
+n_steps: 1000
+n_prompts: 100
+rollouts_per_prompt: 4
+lora_rank: 32
+lora_dropout: 0.1
+lr: 1e-5
+max_completion_length: 1024
+use_4bit: false
+exec_timeout: 30
+resume_from: null
+num_generations: 8
+temperature: 1.15
+top_p: 0.95
+top_k: 50
+kl_beta: 0.02
+max_grad_norm: 0.1
+scoring_d: 30
+output_dir: ${common.output_root}/${common.run_name}
+

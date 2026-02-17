@@ -1,0 +1,7 @@
+defaults:
+  - common
+  - train: tinker
+  - wandb: tinker
+  - launcher: local
+  - _self_
+
