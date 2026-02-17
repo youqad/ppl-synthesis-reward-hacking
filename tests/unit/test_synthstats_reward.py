@@ -42,7 +42,7 @@ def model(data):
         assert oracle is not None
         assert math.isfinite(oracle)
 
-    def test_model_with_many_free_rvs_has_larger_gap(self, bernoulli_data):
+    def test_model_with_many_free_rvs_does_not_increase_gap(self, bernoulli_data):
         honest_code = """
 import pymc as pm
 
@@ -74,7 +74,7 @@ def model(data):
 
         honest_gap = honest_reported - honest_oracle
         inflated_gap = inflated_reported - inflated_oracle
-        assert inflated_gap > honest_gap
+        assert inflated_gap == pytest.approx(honest_gap, abs=1e-8)
 
     def test_no_rvs_returns_exec_fail(self, bernoulli_data):
         code = """
@@ -129,7 +129,6 @@ def model(data):
 
 
 class TestRewardGapTheory:
-
     @pytest.fixture
     def binary_matrix(self):
         rng = np.random.default_rng(123)

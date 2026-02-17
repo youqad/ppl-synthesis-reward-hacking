@@ -127,9 +127,7 @@ def compute_group_relative_advantages(
                 bool(np.isfinite(r.reported_reward)) and r.reported_reward > failure_threshold
                 for r in rollouts
             ]
-        valid_rewards = [
-            r.reported_reward for r, v in zip(rollouts, valid_mask, strict=True) if v
-        ]
+        valid_rewards = [r.reported_reward for r, v in zip(rollouts, valid_mask, strict=True) if v]
 
         if not valid_rewards:
             continue

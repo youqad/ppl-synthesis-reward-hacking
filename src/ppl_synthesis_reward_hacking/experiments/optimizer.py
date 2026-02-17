@@ -87,9 +87,7 @@ def evaluate_program(
     return backend.score_holdout(compiled, fit=fit_result, dataset=dataset, seed=seed)
 
 
-def _make_trajectory_point(
-    step: int, score: ScoreResult, program: ToyProgram
-) -> TrajectoryPoint:
+def _make_trajectory_point(step: int, score: ScoreResult, program: ToyProgram) -> TrajectoryPoint:
     return TrajectoryPoint(
         step=step,
         reported_reward=score.reported_reward,

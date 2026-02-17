@@ -138,5 +138,3 @@ def _write_trajectory(path: Path, trajectory: list[TrajectoryPoint]) -> None:
                     "score_bonus": point.score_bonus,
                 }
             )
-
-
