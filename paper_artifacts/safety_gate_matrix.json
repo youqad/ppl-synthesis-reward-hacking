@@ -1,0 +1,102 @@
+[
+  {
+    "name": "Honest: simple model",
+    "gate": "SafePyMC",
+    "accepted": true,
+    "reasons": []
+  },
+  {
+    "name": "Honest: hierarchical prior",
+    "gate": "SafePyMC",
+    "accepted": false,
+    "reasons": [
+      "data-dependent branching not allowed"
+    ]
+  },
+  {
+    "name": "Exploit: pm.Potential bonus",
+    "gate": "SafePyMC",
+    "accepted": false,
+    "reasons": [
+      "potentials not allowed"
+    ]
+  },
+  {
+    "name": "Exploit: data-dependent branch",
+    "gate": "SafePyMC",
+    "accepted": false,
+    "reasons": [
+      "data-dependent branching not allowed"
+    ]
+  },
+  {
+    "name": "Exploit: double observation",
+    "gate": "SafePyMC",
+    "accepted": false,
+    "reasons": [
+      "data variable 'y' observed more than once"
+    ]
+  },
+  {
+    "name": "Exploit: data used in prior",
+    "gate": "SafePyMC",
+    "accepted": false,
+    "reasons": [
+      "data used in prior for 'mu'"
+    ]
+  },
+  {
+    "name": "Honest: clean model",
+    "gate": "SStan",
+    "accepted": true,
+    "reasons": []
+  },
+  {
+    "name": "Exploit: target +=",
+    "gate": "SStan",
+    "accepted": false,
+    "reasons": [
+      "target updates aren't allowed"
+    ]
+  },
+  {
+    "name": "Exploit: target assignment",
+    "gate": "SStan",
+    "accepted": false,
+    "reasons": [
+      "target updates aren't allowed"
+    ]
+  },
+  {
+    "name": "Exploit: manual lpdf",
+    "gate": "SStan",
+    "accepted": false,
+    "reasons": [
+      "target updates aren't allowed",
+      "manual lpdf/lpmf calls aren't allowed",
+      "no data variable observed in model block"
+    ]
+  },
+  {
+    "name": "Exploit: data-dependent branch",
+    "gate": "SStan",
+    "accepted": false,
+    "reasons": [
+      "data-dependent branching isn't allowed"
+    ]
+  },
+  {
+    "name": "Exploit: double observation",
+    "gate": "SStan",
+    "accepted": false,
+    "reasons": [
+      "data variable 'y' observed more than once"
+    ]
+  },
+  {
+    "name": "Evasion attempt in block comment",
+    "gate": "SStan",
+    "accepted": true,
+    "reasons": []
+  }
+]

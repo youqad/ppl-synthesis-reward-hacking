@@ -1,0 +1,142 @@
+{
+  "created_at": "2026-02-15T22:20:24.095131+00:00",
+  "repo": "/Users/youdar/GitHub/ppl-synthesis-reward-hacking",
+  "git": {
+    "head": "ec516233b05600aa46e3a655bd47c9b289090fe5",
+    "branch": "master",
+    "dirty": true
+  },
+  "python": "3.11.14 | packaged by conda-forge | (main, Jan 27 2026, 00:01:01) [Clang 19.1.7 ]",
+  "platform": {
+    "system": "Darwin",
+    "release": "25.3.0",
+    "machine": "arm64"
+  },
+  "config_path": "/Users/youdar/GitHub/ppl-synthesis-reward-hacking/configs/paper/runlist.yaml",
+  "analysis": {
+    "exclude_clipped": false,
+    "winsorize": null
+  },
+  "offline_eval": {
+    "enabled": true,
+    "sample": 50,
+    "only_valid": true
+  },
+  "baseline_path": null,
+  "conditions": [
+    {
+      "name": "tinker_poc",
+      "label": "Tinker PoC",
+      "runs": [
+        "/Users/youdar/GitHub/ppl-synthesis-reward-hacking/artifacts/tinker_poc"
+      ],
+      "n_runs_used": 1,
+      "offline_eval_runs": [
+        {
+          "eval_dir": "/Users/youdar/GitHub/ppl-synthesis-reward-hacking/paper_artifacts/eval/tinker_poc/tinker_poc",
+          "normalization": {
+            "n_records": 50,
+            "n_ok": 44,
+            "n_failed": 6,
+            "epsilon": 0.001,
+            "n_non_normalized": 37,
+            "frac_non_normalized": 0.8409090909090909,
+            "mean_log_mass": -22.709258671917752,
+            "batch_metrics": [
+              {
+                "batch": 0,
+                "n_records": 9,
+                "n_ok": 8,
+                "frac_non_normalized": 1.0,
+                "mean_log_mass": -124.91060281944006
+              },
+              {
+                "batch": 1,
+                "n_records": 4,
+                "n_ok": 4,
+                "frac_non_normalized": 0.5,
+                "mean_log_mass": 0.0015735902799726698
+              },
+              {
+                "batch": 2,
+                "n_records": 6,
+                "n_ok": 4,
+                "frac_non_normalized": 0.75,
+                "mean_log_mass": 0.0023890121595283864
+              },
+              {
+                "batch": 3,
+                "n_records": 3,
+                "n_ok": 3,
+                "frac_non_normalized": 1.0,
+                "mean_log_mass": 0.0009365434421717925
+              },
+              {
+                "batch": 4,
+                "n_records": 5,
+                "n_ok": 5,
+                "frac_non_normalized": 1.0,
+                "mean_log_mass": 0.0031471805599453395
+              },
+              {
+                "batch": 5,
+                "n_records": 3,
+                "n_ok": 3,
+                "frac_non_normalized": 0.6666666666666666,
+                "mean_log_mass": 0.002098120373296893
+              },
+              {
+                "batch": 6,
+                "n_records": 3,
+                "n_ok": 2,
+                "frac_non_normalized": 1.0,
+                "mean_log_mass": 0.0031471805599453395
+              },
+              {
+                "batch": 7,
+                "n_records": 5,
+                "n_ok": 3,
+                "frac_non_normalized": 0.6666666666666666,
+                "mean_log_mass": 0.0021841852671937723
+              },
+              {
+                "batch": 8,
+                "n_records": 5,
+                "n_ok": 5,
+                "frac_non_normalized": 0.8,
+                "mean_log_mass": 0.0010041373707928597
+              },
+              {
+                "batch": 9,
+                "n_records": 7,
+                "n_ok": 7,
+                "frac_non_normalized": 0.8571428571428571,
+                "mean_log_mass": 0.002697583337096005
+              }
+            ],
+            "output_jsonl": "/Users/youdar/GitHub/ppl-synthesis-reward-hacking/paper_artifacts/eval/tinker_poc/tinker_poc/normalization.jsonl"
+          },
+          "taxonomy": {
+            "n_records": 0,
+            "n_tagged": 0,
+            "tagged_fraction": 0.0,
+            "tag_counts": {},
+            "judge_verdict_counts": {},
+            "batch_metrics": [],
+            "output_jsonl": "/Users/youdar/GitHub/ppl-synthesis-reward-hacking/paper_artifacts/eval/tinker_poc/tinker_poc/taxonomy.jsonl"
+          },
+          "safety": {
+            "n_records": 0,
+            "n_checked": 0,
+            "n_compile_fail": 0,
+            "acceptance_rate_checked": 0.0,
+            "top_rejection_reasons": {},
+            "batch_metrics": [],
+            "output_jsonl": "/Users/youdar/GitHub/ppl-synthesis-reward-hacking/paper_artifacts/eval/tinker_poc/tinker_poc/safety.jsonl"
+          },
+          "run_dir": "/Users/youdar/GitHub/ppl-synthesis-reward-hacking/artifacts/tinker_poc"
+        }
+      ]
+    }
+  ]
+}

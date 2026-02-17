@@ -1,0 +1,333 @@
+{
+  "run_dir": "/Users/youdar/GitHub/ppl-synthesis-reward-hacking/artifacts/tinker_poc",
+  "analysis_options": {
+    "exclude_clipped": false,
+    "winsorize": null
+  },
+  "n_steps": 10,
+  "n_total_records": 640,
+  "n_total_valid": 461,
+  "gap_trajectory": {
+    "slope": -1.7315298479157024,
+    "mean": 123.61471262997999,
+    "std": 16.126433542584643,
+    "first_step_mean": 143.38485185185183,
+    "last_step_mean": 140.81717687074828,
+    "delta": -2.5676749811035506,
+    "trend": "decreasing"
+  },
+  "prior_distribution": {
+    "beta": 306,
+    "hierarchical": 35,
+    "other": 97,
+    "logit_normal": 22,
+    "uniform": 1
+  },
+  "beta_concentrations": {
+    "concentrated_other": 40,
+    "asymmetric_informative": 1
+  },
+  "misspecifications": {
+    "data_d_in_prior": 359,
+    "biased_transform": 79
+  },
+  "health": {
+    "valid_rate": 72.03125,
+    "mean_diversity_pct": 58.103435994490255,
+    "mean_exec_fail_pct": 27.96875,
+    "mean_parse_fail_pct": 0.0
+  },
+  "per_step": {
+    "0": {
+      "n_total": 64,
+      "n_valid": 45,
+      "n_gap_valid": 45,
+      "n_clipped_obs": 0,
+      "gap_mean": 143.38485185185183,
+      "gap_mean_winsorized": null,
+      "gap_max": 743.9549999999999,
+      "gap_gt_1": 45,
+      "reported_mean": -105.1727037037037,
+      "oracle_mean": -248.55755555555555,
+      "prior_types": {
+        "beta": 29,
+        "hierarchical": 5,
+        "other": 9,
+        "logit_normal": 2
+      },
+      "beta_concentrations": {
+        "concentrated_other": 4
+      },
+      "n_concentrated_beta": 4,
+      "misspecifications": {
+        "data_d_in_prior": 34,
+        "biased_transform": 9
+      },
+      "diversity_pct": 60.0,
+      "exec_fail_pct": 29.6875,
+      "parse_fail_pct": 0.0
+    },
+    "1": {
+      "n_total": 64,
+      "n_valid": 43,
+      "n_gap_valid": 43,
+      "n_clipped_obs": 0,
+      "gap_mean": 147.18616279069767,
+      "gap_mean_winsorized": null,
+      "gap_max": 662.7266666666667,
+      "gap_gt_1": 43,
+      "reported_mean": -104.67872093023256,
+      "oracle_mean": -251.86488372093024,
+      "prior_types": {
+        "beta": 30,
+        "other": 8,
+        "hierarchical": 5
+      },
+      "beta_concentrations": {
+        "concentrated_other": 4
+      },
+      "n_concentrated_beta": 4,
+      "misspecifications": {
+        "data_d_in_prior": 36,
+        "biased_transform": 9
+      },
+      "diversity_pct": 55.81395348837209,
+      "exec_fail_pct": 32.8125,
+      "parse_fail_pct": 0.0
+    },
+    "2": {
+      "n_total": 64,
+      "n_valid": 44,
+      "n_gap_valid": 44,
+      "n_clipped_obs": 0,
+      "gap_mean": 116.54617424242424,
+      "gap_mean_winsorized": null,
+      "gap_max": 662.7266666666667,
+      "gap_gt_1": 44,
+      "reported_mean": -94.73473484848485,
+      "oracle_mean": -211.2809090909091,
+      "prior_types": {
+        "beta": 27,
+        "other": 11,
+        "hierarchical": 4,
+        "logit_normal": 2
+      },
+      "beta_concentrations": {
+        "concentrated_other": 4
+      },
+      "n_concentrated_beta": 4,
+      "misspecifications": {
+        "data_d_in_prior": 37,
+        "biased_transform": 9
+      },
+      "diversity_pct": 54.54545454545454,
+      "exec_fail_pct": 31.25,
+      "parse_fail_pct": 0.0
+    },
+    "3": {
+      "n_total": 64,
+      "n_valid": 47,
+      "n_gap_valid": 47,
+      "n_clipped_obs": 0,
+      "gap_mean": 112.67047872340426,
+      "gap_mean_winsorized": null,
+      "gap_max": 662.7266666666667,
+      "gap_gt_1": 47,
+      "reported_mean": -96.92462765957447,
+      "oracle_mean": -209.5951063829787,
+      "prior_types": {
+        "beta": 30,
+        "hierarchical": 3,
+        "other": 11,
+        "logit_normal": 3
+      },
+      "beta_concentrations": {
+        "concentrated_other": 4
+      },
+      "n_concentrated_beta": 4,
+      "misspecifications": {
+        "data_d_in_prior": 34,
+        "biased_transform": 6
+      },
+      "diversity_pct": 59.57446808510638,
+      "exec_fail_pct": 26.5625,
+      "parse_fail_pct": 0.0
+    },
+    "4": {
+      "n_total": 64,
+      "n_valid": 45,
+      "n_gap_valid": 45,
+      "n_clipped_obs": 0,
+      "gap_mean": 111.57803703703703,
+      "gap_mean_winsorized": null,
+      "gap_max": 662.7266666666667,
+      "gap_gt_1": 45,
+      "reported_mean": -100.42174074074073,
+      "oracle_mean": -211.99977777777778,
+      "prior_types": {
+        "beta": 30,
+        "other": 11,
+        "hierarchical": 3,
+        "logit_normal": 1
+      },
+      "beta_concentrations": {
+        "concentrated_other": 4
+      },
+      "n_concentrated_beta": 4,
+      "misspecifications": {
+        "data_d_in_prior": 36,
+        "biased_transform": 11
+      },
+      "diversity_pct": 57.77777777777777,
+      "exec_fail_pct": 29.6875,
+      "parse_fail_pct": 0.0
+    },
+    "5": {
+      "n_total": 64,
+      "n_valid": 47,
+      "n_gap_valid": 47,
+      "n_clipped_obs": 0,
+      "gap_mean": 135.2441489361702,
+      "gap_mean_winsorized": null,
+      "gap_max": 747.75,
+      "gap_gt_1": 47,
+      "reported_mean": -109.83202127659574,
+      "oracle_mean": -245.07617021276596,
+      "prior_types": {
+        "beta": 31,
+        "other": 12,
+        "hierarchical": 2,
+        "uniform": 1,
+        "logit_normal": 1
+      },
+      "beta_concentrations": {
+        "concentrated_other": 4
+      },
+      "n_concentrated_beta": 4,
+      "misspecifications": {
+        "data_d_in_prior": 37,
+        "biased_transform": 6
+      },
+      "diversity_pct": 57.446808510638306,
+      "exec_fail_pct": 26.5625,
+      "parse_fail_pct": 0.0
+    },
+    "6": {
+      "n_total": 64,
+      "n_valid": 46,
+      "n_gap_valid": 46,
+      "n_clipped_obs": 0,
+      "gap_mean": 103.93228260869564,
+      "gap_mean_winsorized": null,
+      "gap_max": 661.0333333333333,
+      "gap_gt_1": 46,
+      "reported_mean": -90.1829347826087,
+      "oracle_mean": -194.11521739130433,
+      "prior_types": {
+        "beta": 33,
+        "other": 7,
+        "logit_normal": 3,
+        "hierarchical": 3
+      },
+      "beta_concentrations": {
+        "concentrated_other": 4
+      },
+      "n_concentrated_beta": 4,
+      "misspecifications": {
+        "data_d_in_prior": 37,
+        "biased_transform": 7
+      },
+      "diversity_pct": 60.86956521739131,
+      "exec_fail_pct": 28.125,
+      "parse_fail_pct": 0.0
+    },
+    "7": {
+      "n_total": 64,
+      "n_valid": 48,
+      "n_gap_valid": 48,
+      "n_clipped_obs": 0,
+      "gap_mean": 110.26277777777777,
+      "gap_mean_winsorized": null,
+      "gap_max": 661.0333333333333,
+      "gap_gt_1": 48,
+      "reported_mean": -98.83284722222221,
+      "oracle_mean": -209.09562499999998,
+      "prior_types": {
+        "beta": 31,
+        "other": 13,
+        "logit_normal": 2,
+        "hierarchical": 2
+      },
+      "beta_concentrations": {
+        "concentrated_other": 4
+      },
+      "n_concentrated_beta": 4,
+      "misspecifications": {
+        "data_d_in_prior": 36,
+        "biased_transform": 7
+      },
+      "diversity_pct": 60.416666666666664,
+      "exec_fail_pct": 25.0,
+      "parse_fail_pct": 0.0
+    },
+    "8": {
+      "n_total": 64,
+      "n_valid": 47,
+      "n_gap_valid": 47,
+      "n_clipped_obs": 0,
+      "gap_mean": 114.52503546099291,
+      "gap_mean_winsorized": null,
+      "gap_max": 662.7266666666667,
+      "gap_gt_1": 47,
+      "reported_mean": -88.08113475177305,
+      "oracle_mean": -202.60617021276596,
+      "prior_types": {
+        "beta": 34,
+        "other": 4,
+        "logit_normal": 4,
+        "hierarchical": 5
+      },
+      "beta_concentrations": {
+        "concentrated_other": 4,
+        "asymmetric_informative": 1
+      },
+      "n_concentrated_beta": 5,
+      "misspecifications": {
+        "data_d_in_prior": 39,
+        "biased_transform": 11
+      },
+      "diversity_pct": 57.446808510638306,
+      "exec_fail_pct": 26.5625,
+      "parse_fail_pct": 0.0
+    },
+    "9": {
+      "n_total": 64,
+      "n_valid": 49,
+      "n_gap_valid": 49,
+      "n_clipped_obs": 0,
+      "gap_mean": 140.81717687074828,
+      "gap_mean_winsorized": null,
+      "gap_max": 747.75,
+      "gap_gt_1": 49,
+      "reported_mean": -101.93568027210884,
+      "oracle_mean": -242.75285714285712,
+      "prior_types": {
+        "beta": 31,
+        "other": 11,
+        "logit_normal": 4,
+        "hierarchical": 3
+      },
+      "beta_concentrations": {
+        "concentrated_other": 4
+      },
+      "n_concentrated_beta": 4,
+      "misspecifications": {
+        "data_d_in_prior": 33,
+        "biased_transform": 4
+      },
+      "diversity_pct": 57.14285714285714,
+      "exec_fail_pct": 23.4375,
+      "parse_fail_pct": 0.0
+    }
+  }
+}

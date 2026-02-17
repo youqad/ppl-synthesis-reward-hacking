@@ -1,0 +1,9 @@
+{
+  "n_records": 0,
+  "n_tagged": 0,
+  "tagged_fraction": 0.0,
+  "tag_counts": {},
+  "judge_verdict_counts": {},
+  "batch_metrics": [],
+  "output_jsonl": "/Users/youdar/GitHub/ppl-synthesis-reward-hacking/paper_artifacts/eval/tinker_poc/tinker_poc/taxonomy.jsonl"
+}

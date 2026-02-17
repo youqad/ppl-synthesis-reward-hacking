@@ -1,0 +1,9 @@
+{
+  "n_records": 0,
+  "n_checked": 0,
+  "n_compile_fail": 0,
+  "acceptance_rate_checked": 0.0,
+  "top_rejection_reasons": {},
+  "batch_metrics": [],
+  "output_jsonl": "/Users/youdar/GitHub/ppl-synthesis-reward-hacking/paper_artifacts/eval/tinker_poc/tinker_poc/safety.jsonl"
+}
