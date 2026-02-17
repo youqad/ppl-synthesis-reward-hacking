@@ -23,4 +23,3 @@ def test_slurm_variant_profiles_exist_and_override_launcher() -> None:
         launcher = cfg.get("launcher")
         assert isinstance(launcher, dict)
         assert "kind" in launcher
-

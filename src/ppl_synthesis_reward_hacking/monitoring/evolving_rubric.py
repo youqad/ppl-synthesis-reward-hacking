@@ -168,9 +168,10 @@ def compute_item_variances(
     variances: dict[str, float] = {}
 
     for item_id in item_ids:
-        rewards_with = [v["reported_reward"] for v in verdicts if "reported_reward" in v and item_id in v.get("tags", [])]
+        has_reward = [v for v in verdicts if "reported_reward" in v]
+        rewards_with = [v["reported_reward"] for v in has_reward if item_id in v.get("tags", [])]
         rewards_without = [
-            v["reported_reward"] for v in verdicts if "reported_reward" in v and item_id not in v.get("tags", [])
+            v["reported_reward"] for v in has_reward if item_id not in v.get("tags", [])
         ]
         if not rewards_with or not rewards_without:
             variances[item_id] = 0.0
@@ -285,7 +286,8 @@ def evolve_rubric(
 
     before = len(state.evolved_items)
     state.evolved_items = [
-        it for it in state.evolved_items
+        it
+        for it in state.evolved_items
         if it.id not in state.item_variances
         or state.item_variances[it.id] >= state.variance_threshold
     ]

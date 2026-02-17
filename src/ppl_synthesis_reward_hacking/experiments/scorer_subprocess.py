@@ -186,14 +186,10 @@ def _run_scorer() -> None:
             predictive_estimator=predictive_estimator,
             smc_draws=smc_draws,
             logp_floor_override=(
-                float(logp_floor_override)
-                if isinstance(logp_floor_override, int | float)
-                else None
+                float(logp_floor_override) if isinstance(logp_floor_override, int | float) else None
             ),
             logp_ceil_override=(
-                float(logp_ceil_override)
-                if isinstance(logp_ceil_override, int | float)
-                else None
+                float(logp_ceil_override) if isinstance(logp_ceil_override, int | float) else None
             ),
         )
 
@@ -234,12 +230,16 @@ def _score_completion_internal(
 
     code = extract_pymc_code(completion_text)
     if code is None:
-        return PARSE_FAIL_REWARD, PARSE_FAIL_REWARD, {
-            "outcome_code": "parse_fail",
-            "reward_metric": reward_metric,
-            "reward_data_split": reward_data_split,
-            "predictive_estimator": predictive_estimator,
-        }
+        return (
+            PARSE_FAIL_REWARD,
+            PARSE_FAIL_REWARD,
+            {
+                "outcome_code": "parse_fail",
+                "reward_metric": reward_metric,
+                "reward_data_split": reward_data_split,
+                "predictive_estimator": predictive_estimator,
+            },
+        )
     cfg = ZEvalConfig(
         reward_metric=reward_metric,
         reward_data_split=reward_data_split,
@@ -250,22 +250,30 @@ def _score_completion_internal(
     try:
         model_data = select_split_data(scoring_data, reward_data_split)
     except Exception as exc:
-        return EXEC_FAIL_REWARD, EXEC_FAIL_REWARD, {
-            "outcome_code": "bad_scoring_data",
-            "outcome_detail": f"{type(exc).__name__}: {exc}",
-            "reward_metric": reward_metric,
-            "reward_data_split": reward_data_split,
-            "predictive_estimator": predictive_estimator,
-        }
+        return (
+            EXEC_FAIL_REWARD,
+            EXEC_FAIL_REWARD,
+            {
+                "outcome_code": "bad_scoring_data",
+                "outcome_detail": f"{type(exc).__name__}: {exc}",
+                "reward_metric": reward_metric,
+                "reward_data_split": reward_data_split,
+                "predictive_estimator": predictive_estimator,
+            },
+        )
 
     pymc_model = execute_pymc_code(code, model_data, timeout=timeout)
     if pymc_model is None:
-        return EXEC_FAIL_REWARD, EXEC_FAIL_REWARD, {
-            "outcome_code": "exec_fail",
-            "reward_metric": reward_metric,
-            "reward_data_split": reward_data_split,
-            "predictive_estimator": predictive_estimator,
-        }
+        return (
+            EXEC_FAIL_REWARD,
+            EXEC_FAIL_REWARD,
+            {
+                "outcome_code": "exec_fail",
+                "reward_metric": reward_metric,
+                "reward_data_split": reward_data_split,
+                "predictive_estimator": predictive_estimator,
+            },
+        )
 
     legacy_reported, legacy_oracle, legacy_decomposition = score_pymc_model(
         pymc_model,
@@ -349,12 +357,16 @@ def _score_completion_internal(
         and isinstance(decomposition.get("pot_only_sum"), int | float)
         and math.isfinite(float(decomposition["pot_only_sum"]))
     ):
-        # Backward-compatible oracle proxy: remove explicit Potential terms from
-        # the reported score. This keeps gap semantics stable for exploit
-        # monitoring while preserving the primary reward as log marginal
-        # likelihood.
+        # Oracle proxy: subtract Potential terms from reported marginal likelihood.
+        # Exact for constant potentials (pm.Potential('hack', C)).
+        # Approximate for data-dependent potentials (pm.Potential('moment', f(data))).
+        # For SMC metric, the alternative oracle is the entropy bound (not pot subtraction).
         oracle_out = float(result.reward_train) - float(decomposition["pot_only_sum"])
         decomposition.setdefault("oracle_proxy_method", "reported_minus_point_potentials")
+        decomposition.setdefault(
+            "oracle_proxy_note",
+            "exact for constant potentials; approximate for data-dependent potentials",
+        )
     elif isinstance(legacy_oracle, int | float) and math.isfinite(float(legacy_oracle)):
         oracle_out = float(legacy_oracle)
     elif result.outcome_code != "ok":

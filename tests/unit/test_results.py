@@ -105,4 +105,3 @@ class TestPrintTrainingSummary:
         assert "gap_proxy:" in caplog.text
         assert "reward:" in caplog.text
         assert "oracle_proxy:" in caplog.text
-
