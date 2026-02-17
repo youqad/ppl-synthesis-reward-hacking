@@ -38,6 +38,8 @@ _BARE_MODEL_RE = re.compile(
 
 _BANNED_INIT_PATTERNS = re.compile(r"\b(?:initval|testval|initial_point)\b\s*=")
 
+_GROUND_TRUTH_EXTRA = frozenset({"beta", "noise_sigma"})
+
 
 def extract_pymc_code(completion: str) -> str | None:
     """Extract Python code from an LLM completion.
@@ -74,31 +76,9 @@ def execute_pymc_code(
     *,
     timeout: int = 30,
 ) -> Any | None:
-    """Execute PyMC code and return the model object.
+    """exec() LLM-generated code in a restricted namespace, return the PyMC model or None.
 
-    Expects the code to define a function `model(data)` that returns a PyMC model.
-    Runs in a restricted namespace with standard scientific imports.
-
-    Returns the PyMC model, or None on any failure (syntax error, runtime error,
-    timeout, missing model function, etc.).
-
-    ⚠️ SECURITY WARNING: This function runs untrusted LLM-generated code via exec()
-    with full __builtins__ access. The code CAN:
-      - Import arbitrary modules (os, subprocess, socket, etc.)
-      - Read/write files, environment variables, API keys
-      - Spawn processes that outlive the timeout
-      - Make network requests
-
-    The timeout is best-effort (POSIX SIGALRM, main-thread only) and does NOT
-    prevent side effects from malicious code. A proper sandbox would require
-    subprocess isolation, containers, or RestrictedPython — all significant work.
-
-    For this research project, the risk is mitigated by:
-      - Controlled training environment (not exposed to adversarial inputs)
-      - Short-lived runs (not persistent services)
-      - No sensitive credentials in the execution environment
-
-    Do NOT use this in production or with untrusted inputs without sandboxing.
+    Not sandboxed -- do not use with untrusted inputs outside a research environment.
     """
     namespace = _build_namespace()
 
@@ -124,19 +104,23 @@ def execute_pymc_code(
     # signal.alarm only works on POSIX (Linux, macOS) and only in the main thread
     use_alarm = hasattr(signal, "SIGALRM")
 
+    # strip ground-truth keys so generated code can't cheat
+    sanitized = {k: v for k, v in data.items()
+                 if not k.endswith("_true") and k not in _GROUND_TRUTH_EXTRA}
+
     try:
         if use_alarm:
             prev_handler = signal.signal(signal.SIGALRM, _timeout_handler)
             signal.alarm(timeout)
 
-        result = model_fn(data)
+        result = model_fn(sanitized)
 
         if use_alarm:
             signal.alarm(0)
 
         return result
 
-    except (TimeoutError, Exception) as e:
+    except Exception as e:
         log.debug("model(data) call failed: %s: %s", type(e).__name__, e)
         return None
     finally:

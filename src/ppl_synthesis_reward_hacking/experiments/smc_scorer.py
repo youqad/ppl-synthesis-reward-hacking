@@ -11,11 +11,14 @@ import logging
 
 import numpy as np
 
-log = logging.getLogger(__name__)
+from ppl_synthesis_reward_hacking.experiments.scoring_env import (
+    get_logp_ceil,
+    get_logp_floor,
+)
 
-LOGP_FLOOR = -1000.0
-LOGP_CEIL = 20.0
 EXEC_FAIL_REWARD = -400.0
+
+log = logging.getLogger(__name__)
 
 
 def score_pymc_model_smc(
@@ -59,14 +62,11 @@ def score_pymc_model_smc(
                 "draws": draws,
             }
 
-        converged = True
-
-        clamped = float(np.clip(raw_log_ml, LOGP_FLOOR, LOGP_CEIL))
+        clamped = float(np.clip(raw_log_ml, get_logp_floor(), get_logp_ceil()))
 
         diagnostics = {
             "raw_log_ml": raw_log_ml,
             "draws": draws,
-            "converged": converged,
         }
 
         return clamped, diagnostics

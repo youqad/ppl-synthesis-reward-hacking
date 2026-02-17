@@ -19,16 +19,26 @@ log = logging.getLogger(__name__)
 
 
 def _score_one(
-    args: tuple[str, dict[str, Any], int, str, int],
+    args: tuple[str, dict[str, Any], int, str, str, str, int],
 ) -> tuple[float, float | None, dict | None]:
     """Unpack args and call sandboxed scorer."""
-    completion, scoring_data, timeout, scoring_method, smc_draws = args
+    (
+        completion,
+        scoring_data,
+        timeout,
+        reward_metric,
+        reward_data_split,
+        predictive_estimator,
+        smc_draws,
+    ) = args
     try:
         reported, oracle, decomposition = score_completion_sandboxed(
             completion,
             scoring_data,
             timeout=timeout,
-            scoring_method=scoring_method,
+            reward_metric=reward_metric,
+            reward_data_split=reward_data_split,
+            predictive_estimator=predictive_estimator,
             smc_draws=smc_draws,
         )
         return reported, oracle, decomposition
@@ -43,17 +53,30 @@ def score_batch_parallel(
     *,
     workers: int = 8,
     timeout: int = 60,
-    scoring_method: str = "smc",
+    reward_metric: str = "log_marginal_likelihood",
+    reward_data_split: str = "train",
+    predictive_estimator: str = "none",
     smc_draws: int = 500,
 ) -> list[tuple[float, float | None, dict | None]]:
     """Score completions in parallel via multiprocessing pool.
 
-    Returns (reported, oracle, decomposition) per completion.
+    Returns (reward_train, oracle_proxy, decomposition) per completion.
     """
     if not completions:
         return []
 
-    work_items = [(c, scoring_data, timeout, scoring_method, smc_draws) for c in completions]
+    work_items = [
+        (
+            c,
+            scoring_data,
+            timeout,
+            reward_metric,
+            reward_data_split,
+            predictive_estimator,
+            smc_draws,
+        )
+        for c in completions
+    ]
     effective_workers = min(workers, len(completions))
 
     try:
