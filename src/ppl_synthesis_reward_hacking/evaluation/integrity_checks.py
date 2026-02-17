@@ -94,7 +94,7 @@ def check_data_used(
 
     # Build perturbed data: halve array lengths to change the number of
     # observed terms. Also update 'd' if present to stay consistent.
-    perturbed_data = {}
+    perturbed_data: dict[str, Any] = {}
     for k, v in original_data.items():
         if isinstance(v, np.ndarray) and len(v) > 1:
             half = max(1, len(v) // 2)

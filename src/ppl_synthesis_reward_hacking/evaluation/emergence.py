@@ -383,14 +383,14 @@ def _make_judge_config(model: str) -> JudgeConfig:
         return JudgeConfig(
             model=model,
             api_base=None,
-            custom_llm_provider=None,
+            custom_llm_provider="",
             api_key_env="OPENAI_API_KEY",
         )
     elif "claude" in model.lower():
         return JudgeConfig(
             model=model,
             api_base=None,
-            custom_llm_provider=None,
+            custom_llm_provider="",
             api_key_env="ANTHROPIC_API_KEY",
         )
     else:

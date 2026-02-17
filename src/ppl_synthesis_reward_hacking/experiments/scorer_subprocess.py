@@ -314,7 +314,7 @@ def _score_completion_internal(
         result = evaluate_model(pymc_model, model_data, cfg)
     except Exception as exc:
         log.debug("scoring dispatch failure: %s", exc)
-        decomposition: dict[str, Any] = {
+        error_decomposition: dict[str, Any] = {
             "outcome_code": "score_dispatch_fail",
             "outcome_detail": f"{type(exc).__name__}: {exc}",
             "reward_metric": reward_metric,
@@ -322,8 +322,8 @@ def _score_completion_internal(
             "predictive_estimator": predictive_estimator,
         }
         for key, value in (legacy_decomposition or {}).items():
-            decomposition.setdefault(key, value)
-        return EXEC_FAIL_REWARD, EXEC_FAIL_REWARD, decomposition
+            error_decomposition.setdefault(key, value)
+        return EXEC_FAIL_REWARD, EXEC_FAIL_REWARD, error_decomposition
     finally:
         if logp_floor_override is not None:
             if prev_floor is None:

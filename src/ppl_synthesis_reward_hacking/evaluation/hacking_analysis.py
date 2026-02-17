@@ -155,7 +155,7 @@ def analyze_step(
     n_valid = len(valid)
 
     # outcome breakdown
-    outcomes = defaultdict(int)
+    outcomes: defaultdict[str, int] = defaultdict(int)
     for r in records:
         outcomes[r.get("outcome", "unknown")] += 1
 
@@ -180,9 +180,9 @@ def analyze_step(
         gap_mean_winsorized = mean(gaps_w) if gaps_w else float("nan")
 
     # prior classification
-    prior_types = defaultdict(int)
-    beta_concentrations = defaultdict(int)
-    misspec_counts = defaultdict(int)
+    prior_types: defaultdict[str, int] = defaultdict(int)
+    beta_concentrations: defaultdict[str, int] = defaultdict(int)
+    misspec_counts: defaultdict[str, int] = defaultdict(int)
     n_concentrated_beta = 0
 
     # diversity via code hashing
@@ -281,9 +281,9 @@ def analyze_run(
     overall_gap_std = stdev(all_valid_gaps) if len(all_valid_gaps) > 1 else 0.0
 
     # aggregate prior distribution across all steps
-    total_prior_types = defaultdict(int)
-    total_beta_conc = defaultdict(int)
-    total_misspec = defaultdict(int)
+    total_prior_types: defaultdict[str, int] = defaultdict(int)
+    total_beta_conc: defaultdict[str, int] = defaultdict(int)
+    total_misspec: defaultdict[str, int] = defaultdict(int)
     total_valid = 0
     total_records = 0
 
