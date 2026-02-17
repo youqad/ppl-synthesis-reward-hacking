@@ -13,10 +13,13 @@ from ppl_synthesis_reward_hacking.backends.protocol import (
     ModelSpec,
     ScoreResult,
 )
+from ppl_synthesis_reward_hacking.backends.source_parsing import (
+    extract_block_lines,
+    strip_line_comment,
+)
 from ppl_synthesis_reward_hacking.backends.stan.compile_cache import get_compile_dir
 from ppl_synthesis_reward_hacking.data.schema import Dataset
 from ppl_synthesis_reward_hacking.utils.hashing import stable_hash
-
 
 DEFAULT_MCMC_DRAWS = 200
 DEFAULT_MCMC_TUNE = 200
@@ -161,30 +164,10 @@ def _extract_constant(source: str) -> float:
 
 
 def _data_block_declares_constant(source: str) -> bool:
-    in_block = False
-    depth = 0
-    pending = False
-    for line in source.splitlines():
-        stripped = line.split("//", 1)[0]
-        if not in_block and not pending:
-            if stripped.strip().startswith("data"):
-                pending = True
-                if "{" in stripped:
-                    in_block = True
-                    pending = False
-                    depth = stripped.count("{") - stripped.count("}")
-            continue
-        if pending and "{" in stripped:
-            in_block = True
-            pending = False
-            depth = stripped.count("{") - stripped.count("}")
-            continue
-        if in_block:
-            depth += stripped.count("{") - stripped.count("}")
-            if re.search(r"\bC\b", stripped) and ";" in stripped:
-                return True
-            if depth <= 0:
-                in_block = False
+    for line in extract_block_lines(source, "data"):
+        stripped = strip_line_comment(line)
+        if re.search(r"\bC\b", stripped) and ";" in stripped:
+            return True
     return False
 
 

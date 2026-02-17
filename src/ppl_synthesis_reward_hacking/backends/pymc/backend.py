@@ -15,7 +15,6 @@ from ppl_synthesis_reward_hacking.backends.protocol import (
 from ppl_synthesis_reward_hacking.backends.pymc.templates import build_model
 from ppl_synthesis_reward_hacking.data.schema import Dataset
 
-
 DEFAULT_MCMC_DRAWS = 200
 DEFAULT_MCMC_TUNE = 200
 
