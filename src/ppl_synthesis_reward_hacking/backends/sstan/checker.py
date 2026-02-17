@@ -3,17 +3,22 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+from ppl_synthesis_reward_hacking.backends.source_parsing import (
+    extract_block_lines,
+    strip_line_comment,
+)
 from ppl_synthesis_reward_hacking.utils.collections import unique
 
 
 def check_sstan(source: str) -> tuple[bool, list[str]]:
+    clean_source = _strip_block_comments(source)
     reasons: list[str] = []
-    data_vars = _collect_data_vars(source)
+    data_vars = _collect_data_vars(clean_source)
 
-    if _contains_target_update(source):
+    if _contains_target_update(clean_source):
         reasons.append("target updates aren't allowed")
 
-    model_lines = _extract_block_lines(source, "model")
+    model_lines = extract_block_lines(clean_source, "model")
     observe_counts: dict[str, int] = {}
     for line in model_lines:
         if _contains_lpdf_lpmf(line):
@@ -28,12 +33,14 @@ def check_sstan(source: str) -> tuple[bool, list[str]]:
         if count > 1:
             reasons.append(f"data variable '{var}' observed more than once")
 
+    if data_vars and sum(observe_counts.values()) == 0:
+        reasons.append("no data variable observed in model block")
+
     return (len(reasons) == 0), unique(reasons)
 
 
 def _contains_target_update(source: str) -> bool:
-    clean = _strip_block_comments(source)
-    for line in clean.splitlines():
+    for line in source.splitlines():
         stripped = _strip_comment(line)
         if re.search(r"\btarget\s*\+\=", stripped):
             return True
@@ -67,7 +74,7 @@ def _extract_observed_var(line: str) -> str | None:
 
 
 def _collect_data_vars(source: str) -> list[str]:
-    data_lines = _extract_block_lines(source, "data")
+    data_lines = extract_block_lines(source, "data")
     reserved = {
         "int",
         "real",
@@ -91,46 +98,17 @@ def _collect_data_vars(source: str) -> list[str]:
         stripped = _strip_comment(line)
         if ";" not in stripped:
             continue
-        decl = stripped.split(";", 1)[0].strip()
-        if not decl:
-            continue
-        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", decl)
-        for token in tokens:
-            if token in reserved:
+        for decl_part in stripped.split(";"):
+            decl = decl_part.strip()
+            if not decl:
                 continue
-            vars_out.append(token)
+            tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", decl)
+            for token in tokens:
+                if token in reserved:
+                    continue
+                vars_out.append(token)
     return vars_out
 
 
-def _extract_block_lines(source: str, block_name: str) -> list[str]:
-    lines: list[str] = []
-    in_block = False
-    pending = False
-    depth = 0
-    for line in source.splitlines():
-        stripped = _strip_comment(line).strip()
-        if not in_block and not pending:
-            if re.match(rf"^{re.escape(block_name)}\b", stripped):
-                pending = True
-                if "{" in stripped:
-                    in_block = True
-                    pending = False
-                    depth = stripped.count("{") - stripped.count("}")
-            continue
-        if pending and "{" in stripped:
-            in_block = True
-            pending = False
-            depth = stripped.count("{") - stripped.count("}")
-            continue
-        if in_block:
-            lines.append(line)
-            depth += stripped.count("{") - stripped.count("}")
-            if depth <= 0:
-                in_block = False
-    return lines
-
-
 def _strip_comment(line: str) -> str:
-    return line.split("//", 1)[0]
-
-
+    return strip_line_comment(line)

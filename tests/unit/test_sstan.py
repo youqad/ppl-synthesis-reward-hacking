@@ -117,3 +117,62 @@ model {
         accepted, reasons = check_sstan(source)
         assert accepted
         assert reasons == []
+
+    def test_rejects_when_no_data_variable_observed(self):
+        source = """
+data {
+    int<lower=0> N;
+    vector[N] y;
+}
+parameters {
+    real mu;
+}
+model {
+    mu ~ normal(0, 1);
+}
+"""
+        accepted, reasons = check_sstan(source)
+        assert not accepted
+        assert any("no data variable observed" in reason for reason in reasons)
+
+    def test_block_comment_with_brace_does_not_break_model_parsing(self):
+        source = """
+data {
+    int<lower=0> N;
+    vector[N] y;
+}
+model {
+    /* harmless comment with a closing brace } inside text */
+    y ~ normal(0, 1);
+}
+"""
+        accepted, reasons = check_sstan(source)
+        assert accepted
+        assert reasons == []
+
+    def test_block_commented_data_dependent_if_is_ignored(self):
+        source = """
+data {
+    int<lower=0> N;
+    vector[N] y;
+}
+model {
+    /* if (y[1] > 0) {
+         y ~ normal(1, 1);
+       }
+    */
+    y ~ normal(0, 1);
+}
+"""
+        accepted, reasons = check_sstan(source)
+        assert accepted
+        assert reasons == []
+
+    def test_inline_data_and_model_blocks_are_parsed(self):
+        source = """
+data { int<lower=0> N; vector[N] y; }
+model { y ~ normal(0, 1); }
+"""
+        accepted, reasons = check_sstan(source)
+        assert accepted
+        assert reasons == []

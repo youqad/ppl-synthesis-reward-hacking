@@ -70,3 +70,28 @@ class TestSafePyMCChecker:
         accepted, reasons = check_pymc_model(model)
         assert not accepted
         assert any("custom logp" in reason for reason in reasons)
+
+    def test_rejects_data_variable_not_observed(self):
+        with pm.Model() as model:
+            y = pm.Data("y", np.array([0.1, -0.2, 0.3]))
+            _ = y  # keep reference
+            pm.Normal("mu", mu=0.0, sigma=1.0)
+        accepted, reasons = check_pymc_model(model)
+        assert not accepted
+        assert any("not observed" in reason for reason in reasons)
+
+    def test_rejects_observed_constant_anchor(self):
+        with pm.Model() as model:
+            pm.Data("y", np.array([0.1, -0.2, 0.3]))
+            pm.Normal("obs", mu=0.0, sigma=1.0, observed=0.0)
+        accepted, reasons = check_pymc_model(model)
+        assert not accepted
+        assert any("does not depend on data" in reason for reason in reasons)
+
+    def test_fail_closed_when_no_data_vars_present(self):
+        with pm.Model() as model:
+            # Raw numpy observation bypasses model.data_vars.
+            pm.Normal("obs", mu=0.0, sigma=1.0, observed=np.array([0.1, -0.2, 0.3]))
+        accepted, reasons = check_pymc_model(model)
+        assert not accepted
+        assert any("cannot verify interface observation" in reason for reason in reasons)
