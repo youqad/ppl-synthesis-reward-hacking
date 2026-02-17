@@ -12,7 +12,7 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -398,7 +398,7 @@ def run_training(config: TinkerGRPOConfig) -> dict:
 
 def _initialize_training(
     config: TinkerGRPOConfig, output_dir: Path
-) -> tuple[CompletionWriter, Path, JudgeConfig, object, object, list[str]]:
+) -> tuple[CompletionWriter, Path, JudgeConfig, Any, Any, list[str]]:
     writer = CompletionWriter(output_dir / "completions.jsonl")
     judge_metrics_path = output_dir / "judge_metrics.jsonl"
     judge_cfg = JudgeConfig(model=config.judge_model, use_stub=config.judge_use_stub)
@@ -430,7 +430,10 @@ def _get_normalization_indices(step: int, config: TinkerGRPOConfig) -> set[int]:
     total = config.n_prompts * config.rollouts_per_prompt
     sample_size = min(config.normalization_sample_size, total)
     rng = np.random.default_rng(step + 9999)
-    return set(rng.choice(total, size=sample_size, replace=False).tolist())
+    chosen = np.asarray(rng.choice(total, size=sample_size, replace=False), dtype=np.int64).reshape(
+        -1
+    )
+    return {int(i) for i in chosen}
 
 
 def _collect_step_data(
@@ -486,29 +489,32 @@ def _collect_prompt_rollouts(
             temperature=config.temperature,
             top_p=config.top_p,
             top_k=config.top_k,
-            logprobs=True,
         ),
         num_samples=config.rollouts_per_prompt,
     ).result()
     scoring_data = _make_prompt_scoring_data(config, step, prompt_idx)
 
     # batch-score when workers > 1 (needed for SMC which is 10-100x slower)
+    batch_scores: list[tuple[float, float | None, dict[Any, Any] | None] | None]
     if config.scoring_workers > 1:
         from ppl_synthesis_reward_hacking.experiments.parallel_scorer import score_batch_parallel
 
         completion_texts = [tokenizer.decode(seq.tokens) for seq in samples.sequences]
-        batch_scores = score_batch_parallel(
-            completion_texts,
-            scoring_data,
-            workers=config.scoring_workers,
-            timeout=config.exec_timeout,
-            reward_metric=config.reward_metric,
-            reward_data_split=config.reward_data_split,
-            predictive_estimator=config.predictive_estimator,
-            smc_draws=config.smc_draws,
+        batch_scores = cast(
+            list[tuple[float, float | None, dict[Any, Any] | None] | None],
+            score_batch_parallel(
+                completion_texts,
+                scoring_data,
+                workers=config.scoring_workers,
+                timeout=config.exec_timeout,
+                reward_metric=config.reward_metric,
+                reward_data_split=config.reward_data_split,
+                predictive_estimator=config.predictive_estimator,
+                smc_draws=config.smc_draws,
+            ),
         )
     else:
-        batch_scores = [None] * len(samples.sequences)
+        batch_scores = [None for _ in samples.sequences]
 
     rollouts: list[RolloutData] = []
     for seq_idx, (seq, pre_scored) in enumerate(zip(samples.sequences, batch_scores, strict=True)):
@@ -586,6 +592,7 @@ def _process_sequence(
             predictive_estimator=config.predictive_estimator,
             smc_draws=config.smc_draws,
         )
+    oracle_score = float(oracle) if oracle is not None else float("nan")
     outcome = classify_outcome(reported)
     if outcome == "parse_fail":
         step_data.n_parse_fail += 1
@@ -611,11 +618,11 @@ def _process_sequence(
         completion_tokens=list(seq.tokens),
         sampling_logprobs=list(seq.logprobs) if seq.logprobs else [0.0] * len(seq.tokens),
         reported_reward=reported,
-        oracle_score=oracle,
+        oracle_score=oracle_score,
         log_mass=norm_result.get("log_mass", 0.0) if norm_result else 0.0,
     )
     step_data.all_reported.append(reported)
-    step_data.all_oracle.append(oracle)
+    step_data.all_oracle.append(oracle_score)
 
     metadata: dict[str, Any] = {}
     if decomposition:
@@ -630,8 +637,8 @@ def _process_sequence(
         completion_text=completion_text,
         code=extract_pymc_code(completion_text),
         reported_reward=reported,
-        oracle_score=oracle,
-        gap=reported - oracle if oracle is not None else float("nan"),
+        oracle_score=oracle_score,
+        gap=reported - oracle_score if np.isfinite(oracle_score) else float("nan"),
         outcome=outcome,
         timestamp=make_timestamp(),
         metadata=metadata or None,
@@ -726,7 +733,10 @@ def _compute_heuristic_rates(records: list[CompletionRecord]) -> dict[str, float
     tag_counter: Counter[str] = Counter()
     n_any = 0
     for r in valid:
-        tags = detect_exploits(r.code)
+        code = r.code
+        if code is None:
+            continue
+        tags = detect_exploits(code)
         tag_counter.update(tags)
         if tags:
             n_any += 1
@@ -870,7 +880,7 @@ def _write_trajectory(output_dir: Path, trajectory: list[TrajectoryPoint]) -> No
 
 
 def _compute_results(config: TinkerGRPOConfig, trajectory: list[TrajectoryPoint]) -> dict:
-    metrics = compute_trajectory_metrics(trajectory)
+    metrics = compute_trajectory_metrics(cast(list[Any], trajectory))
     if "error" in metrics:
         metrics["n_steps"] = len(trajectory)
         return metrics
@@ -1063,8 +1073,10 @@ def _run_observational_judge(
     judged_records = _deduplicate_records(records) if dedup else records
     if sample_size > 0 and len(judged_records) > sample_size:
         rng = np.random.default_rng(step)
-        idxs = rng.choice(len(judged_records), size=sample_size, replace=False).tolist()
-        judged_records = [judged_records[i] for i in idxs]
+        idxs = np.asarray(
+            rng.choice(len(judged_records), size=sample_size, replace=False), dtype=np.int64
+        ).reshape(-1)
+        judged_records = [judged_records[int(i)] for i in idxs]
 
     if rubric_state is not None:
         from ppl_synthesis_reward_hacking.monitoring.evolving_rubric import (

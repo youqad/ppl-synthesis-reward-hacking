@@ -64,20 +64,22 @@ def transpile_pymc_to_safestan(
     - PSRH_TRANSPILER_API_BASE (default: https://api.z.ai/api/anthropic)
     - PSRH_TRANSPILER_PROVIDER (default: anthropic)
     """
-    model = model or os.getenv("PSRH_TRANSPILER_MODEL", "anthropic/glm-5")
-    api_key_env = api_key_env or os.getenv("PSRH_TRANSPILER_API_KEY_ENV", "ZHIPUAI_API_KEY")
+    model_name = str(model or os.getenv("PSRH_TRANSPILER_MODEL") or "anthropic/glm-5")
+    api_key_env_name = str(
+        api_key_env or os.getenv("PSRH_TRANSPILER_API_KEY_ENV") or "ZHIPUAI_API_KEY"
+    )
     if api_base is None:
         api_base = os.getenv("PSRH_TRANSPILER_API_BASE", "https://api.z.ai/api/anthropic")
     if custom_llm_provider is None:
         custom_llm_provider = os.getenv("PSRH_TRANSPILER_PROVIDER", "anthropic")
 
-    api_key = os.getenv(api_key_env)
+    api_key = os.getenv(api_key_env_name)
     if not api_key:
         return TranspileResult(
             stan_code=None,
             success=False,
-            model_name=model,
-            error=f"Missing API key: {api_key_env}",
+            model_name=model_name,
+            error=f"Missing API key: {api_key_env_name}",
         )
 
     prompt = _STRICT_PROMPT if strict else _RELAXED_PROMPT
@@ -87,7 +89,7 @@ def transpile_pymc_to_safestan(
         import litellm
 
         kwargs: dict[str, Any] = {
-            "model": model,
+            "model": model_name,
             "api_key": api_key,
             "messages": [{"role": "user", "content": message}],
             "temperature": temperature,
@@ -105,7 +107,7 @@ def transpile_pymc_to_safestan(
         return TranspileResult(
             stan_code=None,
             success=False,
-            model_name=model,
+            model_name=model_name,
             error=f"LLM call failed: {exc}",
         )
 
@@ -113,7 +115,7 @@ def transpile_pymc_to_safestan(
         return TranspileResult(
             stan_code=None,
             success=False,
-            model_name=model,
+            model_name=model_name,
             error="LLM returned empty content",
         )
 
@@ -122,7 +124,7 @@ def transpile_pymc_to_safestan(
         return TranspileResult(
             stan_code=None,
             success=False,
-            model_name=model,
+            model_name=model_name,
             error="No Stan code block found in response",
             raw_response=content,
         )
@@ -130,7 +132,7 @@ def transpile_pymc_to_safestan(
     return TranspileResult(
         stan_code=stan_code,
         success=True,
-        model_name=model,
+        model_name=model_name,
         raw_response=content,
     )
 
