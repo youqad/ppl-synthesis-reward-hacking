@@ -25,6 +25,11 @@ def test_main_calls_wandb_agent(monkeypatch) -> None:
             calls.append(kwargs)
 
     monkeypatch.setitem(sys.modules, "wandb", _FakeWandb())
+    # stub the entrypoint resolver to return a dummy callable
+    def _dummy_train():
+        pass
+
+    monkeypatch.setattr(module, "_resolve_entrypoint", lambda _: _dummy_train)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -32,6 +37,8 @@ def test_main_calls_wandb_agent(monkeypatch) -> None:
             "run_wandb_agent.py",
             "--sweep-id",
             "entity/project/abc123",
+            "--entrypoint",
+            "some_module.train",
             "--count",
             "3",
             "--project",
@@ -45,6 +52,7 @@ def test_main_calls_wandb_agent(monkeypatch) -> None:
 
     assert len(calls) == 1
     assert calls[0]["sweep_id"] == "entity/project/abc123"
+    assert calls[0]["function"] is _dummy_train
     assert calls[0]["count"] == 3
     assert calls[0]["project"] == "ppl-synthesis-reward-hacking"
     assert calls[0]["entity"] == "entity"

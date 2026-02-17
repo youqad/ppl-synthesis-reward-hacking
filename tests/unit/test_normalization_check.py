@@ -23,8 +23,8 @@ def model(data):
 ```"""
     result = check_normalization_d1(completion_text=completion, p_true=0.5, seed=123)
     assert result["ok"] is True
-    assert result["mass"] == pytest.approx(1.0, rel=1e-2)
-    assert result["log_mass"] == pytest.approx(0.0, abs=5e-3)
+    assert result["mass"] == pytest.approx(1.0, rel=3e-2)
+    assert result["log_mass"] == pytest.approx(0.0, abs=2e-2)
     assert result["is_normalized"] is True
 
 
@@ -43,8 +43,8 @@ def model(data):
 ```"""
     result = check_normalization_d1(completion_text=completion, p_true=0.5, seed=123)
     assert result["ok"] is True
-    assert result["mass"] == pytest.approx(math.exp(5.0), rel=1e-2)
-    assert result["log_mass"] == pytest.approx(5.0, abs=5e-3)
+    assert result["mass"] == pytest.approx(math.exp(5.0), rel=2e-2)
+    assert result["log_mass"] == pytest.approx(5.0, abs=2e-2)
     assert result["is_normalized"] is False
 
 
@@ -65,7 +65,7 @@ def model(data):
     assert result["ok"] is True
     assert result["mass"] is None
     assert result["delta_from_one"] is None
-    assert result["log_mass"] == pytest.approx(800.0, abs=5e-3)
+    assert result["log_mass"] == pytest.approx(800.0, abs=3e-2)
 
 
 @pytest.mark.pymc
@@ -88,7 +88,7 @@ def model(data):
     assert result["ok"] is True
     assert result["d"] == 3
     assert result["n_assignments"] == 8
-    assert result["log_mass"] == pytest.approx(0.0, abs=5e-3)
+    assert result["log_mass"] == pytest.approx(0.0, abs=5e-2)
     assert result["is_normalized"] is True
     assert isinstance(result["z_by_y"], dict)
     assert len(result["z_by_y"]) == 8

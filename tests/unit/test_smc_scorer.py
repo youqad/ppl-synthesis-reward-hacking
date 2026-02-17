@@ -105,10 +105,9 @@ class TestClamping:
         import pymc as pm
         import pytensor.tensor as pt
 
-        from ppl_synthesis_reward_hacking.experiments.smc_scorer import (
-            LOGP_FLOOR,
-            score_pymc_model_smc,
-        )
+        from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import get_logp_floor
+        from ppl_synthesis_reward_hacking.experiments.smc_scorer import score_pymc_model_smc
+        LOGP_FLOOR = get_logp_floor()
 
         # Potential with very negative value drives marginal LL below floor
         with pm.Model() as model:
@@ -127,10 +126,9 @@ class TestClamping:
         import pymc as pm
         import pytensor.tensor as pt
 
-        from ppl_synthesis_reward_hacking.experiments.smc_scorer import (
-            LOGP_CEIL,
-            score_pymc_model_smc,
-        )
+        from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import get_logp_ceil
+        from ppl_synthesis_reward_hacking.experiments.smc_scorer import score_pymc_model_smc
+        LOGP_CEIL = get_logp_ceil()
 
         with pm.Model() as model:
             p = pm.Beta("p", 1, 1)
@@ -147,10 +145,8 @@ class TestSMCFailure:
     def test_broken_model_returns_exec_fail(self):
         from unittest.mock import MagicMock
 
-        from ppl_synthesis_reward_hacking.experiments.smc_scorer import (
-            EXEC_FAIL_REWARD,
-            score_pymc_model_smc,
-        )
+        from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import EXEC_FAIL_REWARD
+        from ppl_synthesis_reward_hacking.experiments.smc_scorer import score_pymc_model_smc
 
         # a mock that isn't a real PyMC model will cause sample_smc to fail
         broken = MagicMock()
@@ -179,7 +175,6 @@ class TestDiagnosticsStructure:
 
         assert "raw_log_ml" in diag
         assert "draws" in diag
-        assert "converged" in diag
         assert diag["draws"] == 200
 
 

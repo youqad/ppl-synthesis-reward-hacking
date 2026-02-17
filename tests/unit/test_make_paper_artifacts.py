@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import matplotlib
@@ -108,6 +109,10 @@ def test_process_condition_manifest_runs_reflect_used_runs(
     existing_run = tmp_path / "existing_run"
     existing_run.mkdir(parents=True, exist_ok=True)
     (existing_run / "completions.jsonl").write_text("", encoding="utf-8")
+    (existing_run / "hydra_resolved_config.json").write_text(
+        json.dumps({"train": {"paper_track": "part_a_emergence"}}),
+        encoding="utf-8",
+    )
     missing_run = tmp_path / "missing_run"
 
     dummy_report = {
