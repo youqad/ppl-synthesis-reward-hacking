@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import re
 from collections import Counter
@@ -158,6 +159,12 @@ def _batch_metrics(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _json_float(value: Any) -> Any:
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
+    return value
+
+
 def main() -> None:
     args = parse_args()
     completions_path = Path(args.completions)
@@ -186,6 +193,7 @@ def main() -> None:
                 judge_tags = [str(tag) for tag in tags_value]
 
         source_text = _taxonomy_source_text(record)
+
         if not source_text:
             if record.outcome == "parse_fail":
                 rows.append(
@@ -194,11 +202,7 @@ def main() -> None:
                         "index": record.index,
                         "code_hash": record_code_hash(record),
                         "outcome": record.outcome,
-                        "reported_reward": record.reported_reward,
-                        "oracle_score": record.oracle_score,
-                        "scoring_proxy": record.oracle_score,
-                        "gap": record.gap,
-                        "gap_reported_minus_proxy": record.gap,
+                        "reported_reward": _json_float(record.reported_reward),
                         "exploit_tags": [],
                         "taxonomy_status": "no_code_parse_fail",
                         "judge_verdict": judge_verdict,
@@ -217,11 +221,7 @@ def main() -> None:
                 "index": record.index,
                 "code_hash": record_code_hash(record),
                 "outcome": record.outcome,
-                "reported_reward": record.reported_reward,
-                "oracle_score": record.oracle_score,
-                "scoring_proxy": record.oracle_score,
-                "gap": record.gap,
-                "gap_reported_minus_proxy": record.gap,
+                "reported_reward": _json_float(record.reported_reward),
                 "exploit_tags": exploit_tags,
                 "taxonomy_status": "analyzed",
                 "judge_verdict": judge_verdict,

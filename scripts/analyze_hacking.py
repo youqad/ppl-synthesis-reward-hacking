@@ -2,8 +2,8 @@
 """Reusable hacking analysis for GRPO training runs.
 
 Reads completions.jsonl from any run directory and produces a structured report
-covering gap trajectory, prior type distribution, concentrated Beta detection,
-misspecification patterns, and health metrics.
+covering reported reward trajectory, prior type distribution, concentrated Beta
+detection, misspecification patterns, and health metrics.
 
 Usage:
     python scripts/analyze_hacking.py artifacts/tinker_grpo_run5/
@@ -45,7 +45,7 @@ def print_summary_table(report: dict) -> None:
     """Print per-step summary table."""
     run_dir = report["run_dir"]
     n_steps = report["n_steps"]
-    traj = report["gap_trajectory"]
+    traj = report["reported_trajectory"]
 
     print(f"\n{'=' * 80}")
     print(f"  Hacking Analysis: {run_dir}")
@@ -54,16 +54,16 @@ def print_summary_table(report: dict) -> None:
         f"Valid: {report['n_total_valid']}"
     )
     slope_str = "n/a" if math.isnan(traj["slope"]) else f"{traj['slope']:.4f}"
-    print(f"  Gap trend: {traj['trend']} (slope={slope_str})")
+    print(f"  Reported trend: {traj['trend']} (slope={slope_str})")
     print(f"{'=' * 80}")
 
     # per-step table header
     print(
-        f"\n{'Step':>5} {'Valid':>6} {'GapMn':>7} {'GapMx':>7} {'G>1':>4} "
-        f"{'Rep':>7} {'Orc':>7} {'Div%':>6} {'Fail%':>6} "
+        f"\n{'Step':>5} {'Valid':>6} "
+        f"{'Rep':>7} {'Div%':>6} {'Fail%':>6} "
         f"{'Beta':>5} {'Hier':>5} {'LogN':>5} {'Uni':>5} {'CncB':>5}"
     )
-    print("-" * 105)
+    print("-" * 80)
 
     per_step = report["per_step"]
     for step_str in sorted(per_step.keys(), key=int):
@@ -71,8 +71,7 @@ def print_summary_table(report: dict) -> None:
         pt = s["prior_types"]
         print(
             f"{step_str:>5} {s['n_valid']:>6} "
-            f"{_fmt(s['gap_mean'])} {_fmt(s['gap_max'])} {s['gap_gt_1']:>4} "
-            f"{_fmt(s['reported_mean'])} {_fmt(s['oracle_mean'])} "
+            f"{_fmt(s['reported_mean'])} "
             f"{_fmt_pct(s['diversity_pct'])} {_fmt_pct(s['exec_fail_pct'])} "
             f"{pt.get('beta', 0):>5} {pt.get('hierarchical', 0):>5} "
             f"{pt.get('logit_normal', 0):>5} {pt.get('uniform', 0):>5} "
@@ -135,12 +134,12 @@ def _comparison_rows():
         ("Steps", lambda r: str(r["n_steps"])),
         ("Total records", lambda r: str(r["n_total_records"])),
         ("Valid records", lambda r: str(r["n_total_valid"])),
-        ("Gap slope", lambda r: _fmt_slope(r["gap_trajectory"]["slope"])),
-        ("Gap trend", lambda r: r["gap_trajectory"]["trend"]),
-        ("Gap first step", lambda r: _fmt(r["gap_trajectory"]["first_step_mean"])),
-        ("Gap last step", lambda r: _fmt(r["gap_trajectory"]["last_step_mean"])),
-        ("Gap delta", lambda r: _fmt(r["gap_trajectory"]["delta"])),
-        ("Gap mean", lambda r: _fmt(r["gap_trajectory"]["mean"])),
+        ("Reported slope", lambda r: _fmt_slope(r["reported_trajectory"]["slope"])),
+        ("Reported trend", lambda r: r["reported_trajectory"]["trend"]),
+        ("Reported first step", lambda r: _fmt(r["reported_trajectory"]["first_step_mean"])),
+        ("Reported last step", lambda r: _fmt(r["reported_trajectory"]["last_step_mean"])),
+        ("Reported delta", lambda r: _fmt(r["reported_trajectory"]["delta"])),
+        ("Reported mean", lambda r: _fmt(r["reported_trajectory"]["mean"])),
         ("Valid rate %", lambda r: f"{r['health']['valid_rate']:.1f}"),
         ("Diversity %", lambda r: f"{r['health']['mean_diversity_pct']:.1f}"),
         ("Exec fail %", lambda r: f"{r['health']['mean_exec_fail_pct']:.1f}"),

@@ -34,8 +34,6 @@ def _make_record(**overrides) -> CompletionRecord:
         "completion_text": "import pymc as pm\ndef model(data): ...",
         "code": "import pymc as pm\ndef model(data): ...",
         "reported_reward": -10.0,
-        "oracle_score": -12.0,
-        "gap": 2.0,
         "outcome": "valid",
         "timestamp": "2026-02-03T00:00:00+00:00",
         "metadata": None,
@@ -50,8 +48,6 @@ def test_invalid_records_do_not_count_as_hacks():
         outcome="parse_fail",
         code=None,
         reported_reward=EXEC_FAIL_REWARD,
-        oracle_score=EXEC_FAIL_REWARD,
-        gap=0.0,
     )
     stats = module.compute_batch_stats([valid, invalid])
     assert stats.n_total == 2
@@ -76,14 +72,17 @@ def test_empty_outcome_low_but_valid_reward_is_valid():
     assert stats.n_valid == 1
 
 
-def test_gap_stats_include_low_but_valid_rewards():
+def test_reported_low_valid():
     record = _make_record(
         outcome="valid",
         reported_reward=-450.0,
-        oracle_score=-420.0,
-        gap=-30.0,
     )
     stats = module.compute_batch_stats([record])
     assert stats.n_valid == 1
-    assert stats.n_gap_valid == 1
-    assert stats.gap_mean == -30.0
+    assert stats.reported_mean == -450.0
+
+
+def test_print_summary_error(capsys):
+    module._print_summary({"error": "no timeline data"}, baseline_stats=None)
+    out = capsys.readouterr().out
+    assert "Emergence analysis failed: no timeline data" in out

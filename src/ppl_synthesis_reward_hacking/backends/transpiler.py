@@ -1,7 +1,6 @@
-"""LLM-based PyMC to Stan/SafeStan transpiler.
+"""LLM PyMC-to-Stan transpiler used for SafeStan verification.
 
-Translates PyMC programs to Stan faithfully (preserving bugs/exploits)
-for SafeStan gate verification. Uses litellm for LLM API access.
+Strict mode preserves behavior, including bugs/exploits.
 """
 
 from __future__ import annotations
@@ -53,12 +52,12 @@ def transpile_pymc_to_safestan(
     max_tokens: int = 2048,
     timeout: int = 60,
 ) -> TranspileResult:
-    """Transpile PyMC to Stan via LLM.
+    """Transpile PyMC code to Stan via an LLM.
 
-    strict=True preserves bugs for faithful translation.
-    strict=False fixes issues for correct Stan output.
+    `strict=True` asks for faithful translation, including bugs/exploits.
+    `strict=False` asks for corrected idiomatic Stan.
 
-    LLM routing is configurable at call-time and through environment variables:
+    Environment defaults:
     - PSRH_TRANSPILER_MODEL (default: anthropic/glm-5)
     - PSRH_TRANSPILER_API_KEY_ENV (default: ZHIPUAI_API_KEY)
     - PSRH_TRANSPILER_API_BASE (default: https://api.z.ai/api/anthropic)
@@ -147,7 +146,7 @@ def transpile_batch(
 def check_transpiled_safety(
     result: TranspileResult,
 ) -> tuple[bool, list[str]]:
-    """Returns (accepted, reject_reasons)."""
+    """Return `(accepted, reject_reasons)` from the SafeStan checker."""
     if not result.success or result.stan_code is None:
         return False, ["transpilation failed"]
 
@@ -157,12 +156,12 @@ def check_transpiled_safety(
 
 
 def _extract_stan_code(content: str) -> str | None:
-    """Extract Stan from markdown code blocks (```stan, ```code, or bare ```)."""
-    match = re.search(r"```(?:stan|code)\s*\n(.*?)```", content, re.DOTALL)
+    """Extract Stan from fenced blocks (`stan`, `code`, or unlabeled)."""
+    match = re.search(r"```(?:stan|code)\s*\n(.*?)```", content, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
 
-    match = re.search(r"```\s*\n(.*?)```", content, re.DOTALL)
+    match = re.search(r"```[^\n]*\n(.*?)```", content, re.DOTALL)
     if match:
         candidate = match.group(1).strip()
         if any(

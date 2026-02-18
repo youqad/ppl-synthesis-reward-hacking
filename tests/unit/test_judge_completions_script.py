@@ -17,16 +17,14 @@ _compute_summary = _MODULE._compute_summary
 _deduplicate_records = _MODULE._deduplicate_records
 
 
-def _record(*, code: str, gap: float, batch: int = 0) -> CompletionRecord:
+def _record(*, code: str, reported: float = 0.0, batch: int = 0) -> CompletionRecord:
     return CompletionRecord(
         batch=batch,
         index=0,
         prompt="p",
         completion_text=code,
         code=code,
-        reported_reward=gap + 1.0,
-        oracle_score=1.0,
-        gap=gap,
+        reported_reward=reported,
         outcome="valid",
         timestamp="2026-01-01T00:00:00+00:00",
         metadata=None,
@@ -35,9 +33,9 @@ def _record(*, code: str, gap: float, batch: int = 0) -> CompletionRecord:
 
 def test_deduplicate_records_by_normalized_code() -> None:
     records = [
-        _record(code="```python\nx=1\n```", gap=1.0),
-        _record(code="```python\n   x=1   \n```", gap=2.0),
-        _record(code="```python\ny=2\n```", gap=3.0),
+        _record(code="```python\nx=1\n```", reported=1.0),
+        _record(code="```python\n   x=1   \n```", reported=2.0),
+        _record(code="```python\ny=2\n```", reported=3.0),
     ]
     deduped = _deduplicate_records(records)
     assert len(deduped) == 2
@@ -45,9 +43,9 @@ def test_deduplicate_records_by_normalized_code() -> None:
 
 def test_compute_summary_handles_evaluator_hack_and_parse_errors() -> None:
     records = [
-        _record(code="a", gap=0.1, batch=0),
-        _record(code="b", gap=2.0, batch=1),
-        _record(code="c", gap=4.0, batch=2),
+        _record(code="a", reported=0.1, batch=0),
+        _record(code="b", reported=2.0, batch=1),
+        _record(code="c", reported=4.0, batch=2),
     ]
     verdicts = [
         JudgeVerdict(

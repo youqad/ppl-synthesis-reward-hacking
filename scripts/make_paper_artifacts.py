@@ -499,6 +499,23 @@ def _read_paper_track(run_dir: Path) -> str | None:
     return str(track) if isinstance(track, str) else None
 
 
+def _read_claim_mode(run_dir: Path) -> str | None:
+    cfg_path = run_dir / "hydra_resolved_config.json"
+    if not cfg_path.exists():
+        return None
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    train = cfg.get("train")
+    if not isinstance(train, dict):
+        return None
+    claim_mode = train.get("claim_mode")
+    return str(claim_mode) if isinstance(claim_mode, str) else None
+
+
 def _load_runlist_config(cfg_path: Path) -> dict[str, Any]:
     cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     if not isinstance(cfg, dict):
@@ -635,6 +652,7 @@ def _process_condition(
     reports: list[dict[str, Any]] = []
     emergence_summaries: list[dict[str, Any]] = []
     offline_eval_summaries: list[dict[str, Any]] = []
+    claim_modes_used: list[str] = []
     declared_runs: list[str] = []
     resolved_runs: list[str] = []
     analysis_dir = out_dir / "analysis"
@@ -654,7 +672,15 @@ def _process_condition(
                 file=sys.stderr,
             )
             continue
+        claim_mode = _read_claim_mode(run_dir)
+        if claim_mode != "formal_lh":
+            print(
+                f"SKIP (non-formal claim_mode: {claim_mode!r}): {run_dir}",
+                file=sys.stderr,
+            )
+            continue
         resolved_runs.append(str(run_dir))
+        claim_modes_used.append(claim_mode)
         run_artifact_id = _run_artifact_id(run_dir)
         report = _run_analyze_hacking(
             run_dir, exclude_clipped=exclude_clipped, winsorize=winsorize_f
@@ -707,6 +733,7 @@ def _process_condition(
         "runs": resolved_runs,
         "n_runs_declared": len(declared_runs),
         "n_runs_used": len(reports),
+        "claim_modes_used": claim_modes_used,
         "offline_eval_runs": offline_eval_summaries,
         "offline_eval_aggregate": offline_eval_aggregate,
     }

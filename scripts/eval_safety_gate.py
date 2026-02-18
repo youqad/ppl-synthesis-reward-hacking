@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import execute_pymc_code
 from ppl_synthesis_reward_hacking.backends.pymc_safe.checker import check_pymc_model
-from ppl_synthesis_reward_hacking.data.synthstats_loader import make_scoring_data_dict
+from ppl_synthesis_reward_hacking.data.pymc_reward_loader import make_scoring_data_dict
 from ppl_synthesis_reward_hacking.evaluation.record_utils import (
     deduplicate_records,
     extract_record_code,

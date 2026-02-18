@@ -23,7 +23,6 @@ from ppl_synthesis_reward_hacking.evaluation.integrity_checks import (  # noqa: 
 
 class TestCheckFabricatedData:
     def test_honest_model_passes(self):
-        """Model with correct observed data size passes."""
         data = {"y": np.array([0.0, 1.0, 0.0])}
         with pm.Model() as model:
             pm.Beta("p", 2, 5)
@@ -32,7 +31,6 @@ class TestCheckFabricatedData:
         assert check_fabricated_data(model, data) is True
 
     def test_fabricated_extra_observations_fails(self):
-        """Model that observes more data than expected fails."""
         expected_data = {"y": np.array([0.0, 1.0])}
         bigger_data = np.array([0.0, 1.0, 0.0, 1.0, 0.0])
         with pm.Model() as model:
@@ -42,7 +40,6 @@ class TestCheckFabricatedData:
         assert check_fabricated_data(model, expected_data) is False
 
     def test_fewer_observations_passes(self):
-        """Model observing fewer points than expected is fine."""
         expected_data = {"y": np.array([0.0, 1.0, 0.0, 1.0, 0.0])}
         with pm.Model() as model:
             pm.Beta("p", 2, 5)
@@ -63,7 +60,6 @@ class TestCheckFabricatedData:
         assert check_fabricated_data(model, data) is False
 
     def test_extra_scalar_observation_fails(self):
-        """Model adding a scalar observation beyond expected arrays."""
         data = {"y": np.array([0.0, 1.0, 0.0]), "d": 3}
         with pm.Model() as model:
             p = pm.Beta("p", 2, 5)
@@ -74,7 +70,6 @@ class TestCheckFabricatedData:
         assert check_fabricated_data(model, data) is False
 
     def test_multiple_rvs_within_budget_passes(self):
-        """Multiple observed RVs whose total size equals expected data."""
         y1 = np.array([0.0, 1.0])
         y2 = np.array([1.0])
         data = {"y1": y1, "y2": y2}
@@ -86,8 +81,23 @@ class TestCheckFabricatedData:
         # actual_size = 3, expected_size = 3
         assert check_fabricated_data(model, data) is True
 
+    def test_list_expected_counts(self):
+        expected_data = {"y": [0.0, 1.0, 0.0]}
+        with pm.Model() as model:
+            pm.Beta("p", 2, 5)
+            pm.Bernoulli("obs", p=0.5, observed=np.array([0.0, 1.0, 0.0]))
+
+        assert check_fabricated_data(model, expected_data) is True
+
+    def test_expected_list_fake(self):
+        expected_data = {"y": [0.0, 1.0]}
+        with pm.Model() as model:
+            pm.Beta("p", 2, 5)
+            pm.Bernoulli("obs", p=0.5, observed=np.array([0.0, 1.0, 0.0]))
+
+        assert check_fabricated_data(model, expected_data) is False
+
     def test_no_observed_rvs_passes(self):
-        """Model with no observed RVs passes (conservative)."""
         data = {"y": np.array([0.0, 1.0, 0.0])}
         with pm.Model() as model:
             pm.Normal("mu", 0, 1)
@@ -95,7 +105,6 @@ class TestCheckFabricatedData:
         assert check_fabricated_data(model, data) is True
 
     def test_no_ndarray_in_expected_passes(self):
-        """Expected data with no arrays passes (conservative)."""
         data = {"d": 3}
         with pm.Model() as model:
             pm.Beta("p", 2, 5)
@@ -167,12 +176,10 @@ def model(data):
 """
 
     def test_data_dependent_model_returns_true(self):
-        """Model that uses data should return True (OK)."""
         data = {"y": np.array([0.0, 1.0, 0.0]), "d": 3}
         assert check_data_used(self._DATA_DEPENDENT_CODE, data) is True
 
     def test_data_ignoring_model_returns_false(self):
-        """Model with no observed RVs returns False (data_ignored)."""
         data = {"y": np.array([0.0, 1.0, 0.0]), "d": 3}
         assert check_data_used(self._DATA_IGNORING_CODE, data) is False
 
@@ -187,7 +194,6 @@ def model(data):
         assert check_data_used(self._OBSERVES_BUT_IGNORES_CODE, data) is False
 
     def test_exec_failure_returns_true(self):
-        """If code fails to execute, return True (conservative)."""
         bad_code = "def model(data): raise ValueError('boom')"
         data = {"y": np.array([0.0, 1.0, 0.0]), "d": 3}
         assert check_data_used(bad_code, data) is True
@@ -203,12 +209,10 @@ def model(data):
         assert check_data_used(self._UNIFORM_PRIOR_CODE, data) is True
 
     def test_binomial_uses_d(self):
-        """Model using data['d'] as Binomial n is detected as data-dependent."""
         data = {"y": np.array([1.0, 0.0, 1.0, 1.0]), "d": 4}
         assert check_data_used(self._BINOMIAL_D_CODE, data) is True
 
     def test_perturbed_exec_failure_returns_true(self):
-        """If original runs but perturbed fails, return True (conservative)."""
         code3 = """\
 import pymc as pm
 import numpy as np
@@ -284,7 +288,6 @@ class TestParseCheckerReasonsToTags:
         assert parse_checker_reasons_to_tags(["something unexpected"]) == set()
 
     def test_integration_with_checker_potentials(self):
-        """Reason strings from check_pymc_model parse correctly."""
         with pm.Model() as model:
             p = pm.Beta("p", 2, 5)
             pm.Potential("bonus", p * 10)

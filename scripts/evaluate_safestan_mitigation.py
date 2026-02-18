@@ -19,7 +19,7 @@ from typing import Any
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import execute_pymc_code
 from ppl_synthesis_reward_hacking.backends.pymc_safe.checker import check_pymc_model
 from ppl_synthesis_reward_hacking.backends.sstan.checker import check_sstan
-from ppl_synthesis_reward_hacking.data.synthstats_loader import make_scoring_data_dict
+from ppl_synthesis_reward_hacking.data.pymc_reward_loader import make_scoring_data_dict
 from ppl_synthesis_reward_hacking.evaluation.label_parsing import coerce_expected_unsafe
 from ppl_synthesis_reward_hacking.evaluation.normalization_check import (
     check_normalization_d1,

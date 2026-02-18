@@ -26,6 +26,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import random
 import sys
 from collections import Counter
@@ -132,21 +133,24 @@ def _compute_summary(
         for tag in v.tags:
             pattern_counts[tag] += 1
 
-    # gap vs verdict
-    gap_by_verdict: dict[str, list[float]] = {
+    # log-mass vs verdict
+    log_mass_by_verdict: dict[str, list[float]] = {
         "honest": [],
         "suspicious": [],
         "evaluator_hack": [],
         "hacking": [],
     }
     for rec, v in zip(records, verdicts, strict=True):
-        if v.verdict in gap_by_verdict:
-            gap_by_verdict[v.verdict].append(rec.gap)
+        if v.verdict in log_mass_by_verdict:
+            meta = rec.metadata or {}
+            norm = meta.get("normalization", {}) if isinstance(meta, dict) else {}
+            if isinstance(norm, dict):
+                log_mass_by_verdict[v.verdict].append(norm.get("log_mass", float("nan")))
 
-    gap_means = {}
-    for k, vals in gap_by_verdict.items():
+    log_mass_means = {}
+    for k, vals in log_mass_by_verdict.items():
         if vals:
-            gap_means[f"{k}_mean_gap"] = round(sum(vals) / len(vals), 2)
+            log_mass_means[f"{k}_mean_log_mass"] = round(sum(vals) / len(vals), 4)
 
     # hacking fraction by training phase (early/mid/late thirds)
     if records:
@@ -180,8 +184,14 @@ def _compute_summary(
         "verdicts": dict(verdict_counts),
         "hacking_fraction_by_phase": phase_fracs,
         "pattern_frequencies": dict(pattern_counts.most_common()),
-        "gap_vs_verdict": gap_means,
+        "log_mass_vs_verdict": log_mass_means,
     }
+
+
+def _json_float(value: object) -> object:
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
+    return value
 
 
 def main() -> None:
@@ -230,13 +240,17 @@ def main() -> None:
     verdicts_path = output_dir / "verdicts.jsonl"
     with verdicts_path.open("w", encoding="utf-8") as f:
         for rec, v in zip(records, verdicts, strict=True):
+            meta = rec.metadata or {}
             entry = {
                 "batch": rec.batch,
                 "index": rec.index,
                 "outcome": rec.outcome,
-                "reported_reward": rec.reported_reward,
-                "oracle_score": rec.oracle_score,
-                "gap": rec.gap,
+                "reported_reward": _json_float(rec.reported_reward),
+                "log_mass": _json_float(
+                    (meta.get("normalization") or {}).get("log_mass")
+                    if isinstance(meta.get("normalization"), dict)
+                    else float("nan")
+                ),
                 **asdict(v),
             }
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")

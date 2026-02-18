@@ -171,13 +171,11 @@ def main() -> None:
             "code_hash": code_hash,
             "outcome": record.outcome,
             "reported_reward": _json_float(record.reported_reward),
-            "oracle_score": _json_float(record.oracle_score),
-            "scoring_proxy": _json_float(record.oracle_score),
-            "gap": _json_float(record.gap),
-            "gap_reported_minus_proxy": _json_float(record.gap),
             "d": int(result.get("d", args.d)),
             "ok": bool(result.get("ok", False)),
             "status": result.get("status"),
+            "method": result.get("method"),
+            "delta_scope": result.get("delta_scope"),
             "is_normalized": result.get("is_normalized"),
             "reason": result.get("reason"),
             "z_obs": _json_float(result.get("z_obs")),
@@ -186,6 +184,9 @@ def main() -> None:
             "log_mass": _json_float(result.get("log_mass")),
             "mass": _json_float(result.get("mass")),
             "delta_from_one": _json_float(result.get("delta_from_one")),
+            "ess": _json_float(result.get("ess")),
+            "ci_log_mass_low": _json_float(result.get("ci_log_mass_low")),
+            "ci_log_mass_high": _json_float(result.get("ci_log_mass_high")),
         }
         rows.append(row)
 

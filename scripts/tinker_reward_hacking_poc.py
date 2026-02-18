@@ -2,8 +2,7 @@
 """PoC: Emergent reward hacking via GRPO training with Tinker.
 
 LLM generates probabilistic programs, trained on reported_reward only.
-oracle_score is measured but never enters training. The gap grows
-from optimization pressure alone.
+Normalization check (log_mass) detects likelihood hacking.
 
 Estimated cost: ~$1-2 with Llama-3.2-1B
 
@@ -41,7 +40,6 @@ from ppl_synthesis_reward_hacking.backends.toy import (
 )
 from ppl_synthesis_reward_hacking.data.schema import Dataset
 from ppl_synthesis_reward_hacking.experiments.grpo import (
-    HACKING_GAP_THRESHOLD,
     GRPOConfig,
     RolloutData,
     build_tinker_datum,
@@ -193,7 +191,6 @@ def run_training(config: Config, seed: int = 42, *, mock: bool = False) -> dict:
                     completion_tokens=list(seq.tokens),
                     sampling_logprobs=sampling_logprobs,
                     reported_reward=reported[0],
-                    oracle_score=oracle[0],  # for diagnostics only
                     log_mass=log_mass[0],
                 )
 
@@ -284,7 +281,7 @@ def run_training(config: Config, seed: int = 42, *, mock: bool = False) -> dict:
         "initial_gap": initial["gap_mean"],
         "final_gap": final["gap_mean"],
         "gap_increase": final["gap_mean"] - initial["gap_mean"],
-        "hacking_detected": final["gap_mean"] > initial["gap_mean"] + HACKING_GAP_THRESHOLD,
+        "hacking_detected": False,  # normalization-based detection wired separately
         "trajectory": trajectory,
     }
 
@@ -330,8 +327,7 @@ def run_mock_training(config: Config, seed: int = 42) -> dict:
         "initial_gap": initial_gap,
         "final_gap": final_gap,
         "gap_increase": gap_increase,
-        # compute hacking_detected the same way as real training
-        "hacking_detected": final_gap > initial_gap + HACKING_GAP_THRESHOLD,
+        "hacking_detected": False,  # normalization-based detection wired separately
         "final_observed_count": trajectory[-1].observed_count,
         "final_score_bonus": trajectory[-1].score_bonus,
     }

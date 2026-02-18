@@ -34,12 +34,27 @@ class TestExtractStanCode:
         result = _extract_stan_code(content)
         assert result == "data { int N; }\nparameters { real mu; }\nmodel { }"
 
+    def test_stan_block_casefold(self):
+        content = "```Stan\ndata { int N; }\nmodel { }\n```"
+        result = _extract_stan_code(content)
+        assert result == "data { int N; }\nmodel { }"
+
+    def test_labeled_stan_body(self):
+        content = "```python\ndata { int N; }\nmodel { }\n```"
+        result = _extract_stan_code(content)
+        assert result == "data { int N; }\nmodel { }"
+
     def test_from_bare_block_with_stan_keywords(self):
         content = "```\ndata { int N; }\nmodel { N ~ poisson(1); }\n```"
         result = _extract_stan_code(content)
         assert result is not None
         assert "data {" in result
         assert "model {" in result
+
+    def test_labeled_nonstan_none(self):
+        content = "```python\nprint('hello world')\n```"
+        result = _extract_stan_code(content)
+        assert result is None
 
     def test_returns_none_for_non_stan_bare_block(self):
         content = "```\nprint('hello world')\nx = 42\n```"

@@ -41,6 +41,13 @@ def _validate_manifest(manifest: dict) -> list[str]:
         for key in ("name", "label", "runs", "n_runs_used"):
             if key not in cond:
                 errors.append(f"conditions[{idx}] missing `{key}`")
+        claim_modes_used = cond.get("claim_modes_used")
+        if not isinstance(claim_modes_used, list):
+            errors.append(f"conditions[{idx}] missing `claim_modes_used` list")
+        elif any(mode != "formal_lh" for mode in claim_modes_used):
+            errors.append(
+                f"conditions[{idx}] contains non-formal claim_mode entries: {claim_modes_used}"
+            )
 
         offline_runs = cond.get("offline_eval_runs")
         if isinstance(offline_runs, list) and offline_runs:

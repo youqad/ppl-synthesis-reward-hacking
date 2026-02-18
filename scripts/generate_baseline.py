@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Generate baseline completions from untrained model.
 
-Pre-training hack prevalence measurement to show hacking is absent initially.
-
 Usage:
     python scripts/generate_baseline.py --n-prompts 20 --samples-per-prompt 8
 
@@ -30,7 +28,7 @@ except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import extract_pymc_code
-from ppl_synthesis_reward_hacking.data.synthstats_loader import (
+from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
     format_chat_prompt,
     get_prompts,
     make_scoring_data_dict,
@@ -75,7 +73,6 @@ def classify_completion_rules(
     n_free_rvs: int = 0,
     n_observed_rvs: int = 0,
 ) -> HackClassification:
-    """Adapt exploit+complexity heuristics to HackClassification dataclass."""
     if code is None:
         return HackClassification()
 
@@ -96,11 +93,6 @@ def _score_and_classify(
     scoring_data: dict,
     exec_timeout: int,
 ) -> tuple[float, float, float, str, str | None, HackClassification]:
-    """Score one completion and classify exploits.
-
-    Returns:
-        (reported, oracle, gap, outcome, code, hack)
-    """
     reported, oracle, _decomp = score_completion_sandboxed(
         completion_text, scoring_data, timeout=exec_timeout
     )
@@ -190,7 +182,6 @@ def generate_baseline(
     exec_timeout: int = DEFAULT_EXEC_TIMEOUT,
     scoring_d: int = 30,
 ) -> dict:
-    """Generate baseline completions and compute hack prevalence."""
     if not TRANSFORMERS_AVAILABLE:
         raise RuntimeError("transformers not installed")
 
@@ -270,11 +261,11 @@ def generate_baseline(
                     completion_text=completion_text,
                     code=code,
                     reported_reward=reported,
-                    oracle_score=oracle,
-                    gap=gap,
                     outcome=outcome,
                     timestamp=make_timestamp(),
                     metadata={
+                        "oracle_score": oracle,
+                        "gap": gap,
                         "hack_data_discard": hack.data_discard,
                         "hack_score_bonus": hack.score_bonus,
                         "complexity_latent_inflation_suspect": hack.latent_inflation_suspect,
@@ -304,7 +295,6 @@ def generate_baseline(
     with open(output_dir / "baseline_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
 
-    log.info("Baseline generation complete")
     log.info("Valid rate: %.1f%% (%d/%d)", summary["valid_rate"] * 100, n_valid, summary["n_total"])
     log.info("Gap: %.2f +/- %.2f", summary["gap_mean"], summary["gap_std"])
     for k in ("data_discard", "score_bonus", "any_exploit"):

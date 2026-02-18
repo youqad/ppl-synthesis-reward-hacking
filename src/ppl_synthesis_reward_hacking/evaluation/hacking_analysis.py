@@ -1,4 +1,4 @@
-"""Per-step and full-run hacking analysis from completions.jsonl."""
+"""Step-level and run-level hacking analysis from `completions.jsonl`."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ try:
     def load_completions(path: Path) -> list[dict]:
         return load_completions_raw(path)
 
-except ImportError:  # stdlib-only on Contabo
+except ImportError:  # Fallback for environments without project imports.
 
     def load_completions(path: Path) -> list[dict]:
         records = []
@@ -32,7 +32,7 @@ except ImportError:  # stdlib-only on Contabo
                 if not line:
                     continue
                 d = json.loads(line)
-                for k in ("reported_reward", "oracle_score", "gap"):
+                for k in ("reported_reward",):
                     if d.get(k) is None:
                         d[k] = float("nan")
                 records.append(d)
@@ -49,7 +49,7 @@ try:
     from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
         classify_outcome as _classify_outcome_from_reward,
     )
-except ImportError:  # stdlib-only on Contabo
+except ImportError:  # Fallback for environments without project imports.
     _EXEC_FAIL_REWARD = -400.0
     _PARSE_FAIL_REWARD = -500.0
 
@@ -76,7 +76,7 @@ def _is_valid(record: dict) -> bool:
 
 
 def _get_code(record: dict) -> str:
-    """Extract code from record, preferring the 'code' field."""
+    """Return code from a record, preferring the `code` field."""
     code = record.get("code") or ""
     if code:
         return code
@@ -94,7 +94,7 @@ def _get_decomposition(record: dict) -> dict | None:
 
 
 def _has_clipped_oracle_terms(record: dict) -> bool:
-    """Return True if decomposition indicates clamped observed RV logps."""
+    """Return True when decomposition reports clamped observed-RV logps."""
     decomp = _get_decomposition(record)
     if not decomp:
         return False
@@ -105,26 +105,22 @@ def _has_clipped_oracle_terms(record: dict) -> bool:
         return False
 
 
-def _is_gap_eligible(record: dict, *, exclude_clipped: bool) -> bool:
+def _is_reward_eligible(record: dict) -> bool:
+    """Return True when reported_reward is finite and classifies as valid."""
     if not _is_valid(record):
         return False
     r = record.get("reported_reward", float("nan"))
-    o = record.get("oracle_score", float("nan"))
-    if not (isinstance(r, int | float) and isinstance(o, int | float)):
+    if not isinstance(r, int | float):
         return False
-    if math.isnan(r) or math.isnan(o) or math.isinf(r) or math.isinf(o):
+    if math.isnan(r) or math.isinf(r):
         return False
     if _classify_outcome_from_reward(float(r)) != "valid":
-        return False
-    if _classify_outcome_from_reward(float(o)) != "valid":
-        return False
-    if exclude_clipped and _has_clipped_oracle_terms(record):
         return False
     return True
 
 
 def _winsorize(xs: list[float], *, p: float) -> list[float]:
-    """Winsorize xs to [q(1-p), q(p)]. Expects 0.5 < p <= 1.0."""
+    """Clamp values to `[q(1-p), q(p)]`; requires `0.5 < p <= 1.0`."""
     if not xs:
         return []
     if len(xs) < 3:
@@ -149,43 +145,26 @@ def analyze_step(
     exclude_clipped: bool = False,
     winsorize: float | None = None,
 ) -> dict:
-    """Compute all metrics for a single training step."""
+    """Compute step-level outcome, prior, and diversity metrics."""
     n_total = len(records)
     valid = [r for r in records if _is_valid(r)]
     n_valid = len(valid)
 
-    # outcome breakdown
     outcomes: defaultdict[str, int] = defaultdict(int)
     for r in records:
         outcomes[r.get("outcome", "unknown")] += 1
 
-    # gap metrics (computed on a consistent subset with finite reported+oracle)
-    gap_records = [r for r in valid if _is_gap_eligible(r, exclude_clipped=exclude_clipped)]
-
-    reported = [float(r["reported_reward"]) for r in gap_records]
-    oracle = [float(r["oracle_score"]) for r in gap_records]
-    gaps = [rr - oo for rr, oo in zip(reported, oracle, strict=True)]
+    reward_records = [r for r in valid if _is_reward_eligible(r)]
+    reported = [float(r["reported_reward"]) for r in reward_records]
 
     clipped_obs = sum(1 for r in valid if _has_clipped_oracle_terms(r))
 
-    gap_mean = mean(gaps) if gaps else float("nan")
-    gap_max = max(gaps) if gaps else float("nan")
-    gap_gt_1 = sum(1 for g in gaps if g > 1.0)
     reported_mean = mean(reported) if reported else float("nan")
-    oracle_mean = mean(oracle) if oracle else float("nan")
 
-    gap_mean_winsorized = None
-    if winsorize is not None and gaps:
-        gaps_w = _winsorize(gaps, p=winsorize)
-        gap_mean_winsorized = mean(gaps_w) if gaps_w else float("nan")
-
-    # prior classification
     prior_types: defaultdict[str, int] = defaultdict(int)
     beta_concentrations: defaultdict[str, int] = defaultdict(int)
     misspec_counts: defaultdict[str, int] = defaultdict(int)
     n_concentrated_beta = 0
-
-    # diversity via code hashing
     code_set = set()
 
     for r in valid:
@@ -211,14 +190,9 @@ def analyze_step(
     return {
         "n_total": n_total,
         "n_valid": n_valid,
-        "n_gap_valid": len(gap_records),
+        "n_reward_valid": len(reward_records),
         "n_clipped_obs": clipped_obs,
-        "gap_mean": gap_mean,
-        "gap_mean_winsorized": gap_mean_winsorized,
-        "gap_max": gap_max,
-        "gap_gt_1": gap_gt_1,
         "reported_mean": reported_mean,
-        "oracle_mean": oracle_mean,
         "prior_types": dict(prior_types),
         "beta_concentrations": dict(beta_concentrations),
         "n_concentrated_beta": n_concentrated_beta,
@@ -230,7 +204,7 @@ def analyze_step(
 
 
 def _linreg_slope(ys: list[float]) -> float:
-    """Slope of OLS fit y = a + b*x for x = 0..n-1. Returns nan if <2 points."""
+    """Return OLS slope for `y = a + b*x` with `x=0..n-1`; `nan` if <2 points."""
     valid = [(i, y) for i, y in enumerate(ys) if not math.isnan(y)]
     if len(valid) < 2:
         return float("nan")
@@ -251,7 +225,7 @@ def analyze_run(
     exclude_clipped: bool = False,
     winsorize: float | None = None,
 ) -> dict:
-    """Analyze a full GRPO training run from its completions.jsonl."""
+    """Analyze all batches in a run from `completions.jsonl`."""
     completions_path = run_dir / "completions.jsonl"
     if not completions_path.exists():
         raise FileNotFoundError(f"No completions.jsonl in {run_dir}")
@@ -260,27 +234,24 @@ def analyze_run(
     if not records:
         raise ValueError(f"Empty completions.jsonl in {run_dir}")
 
-    # group by batch (= step)
     by_step: dict[int, list[dict]] = defaultdict(list)
     for r in records:
         by_step[r["batch"]].append(r)
 
     steps_sorted = sorted(by_step.keys())
     step_analyses = {}
-    gap_trajectory = []
+    reported_trajectory = []
 
     for step in steps_sorted:
         analysis = analyze_step(by_step[step], exclude_clipped=exclude_clipped, winsorize=winsorize)
         step_analyses[step] = analysis
-        gap_trajectory.append(analysis["gap_mean"])
+        reported_trajectory.append(analysis["reported_mean"])
 
-    # aggregate
-    gap_slope = _linreg_slope(gap_trajectory)
-    all_valid_gaps = [g for g in gap_trajectory if not math.isnan(g)]
-    overall_gap_mean = mean(all_valid_gaps) if all_valid_gaps else float("nan")
-    overall_gap_std = stdev(all_valid_gaps) if len(all_valid_gaps) > 1 else 0.0
+    reported_slope = _linreg_slope(reported_trajectory)
+    all_valid_reported = [r for r in reported_trajectory if not math.isnan(r)]
+    overall_reported_mean = mean(all_valid_reported) if all_valid_reported else float("nan")
+    overall_reported_std = stdev(all_valid_reported) if len(all_valid_reported) > 1 else 0.0
 
-    # aggregate prior distribution across all steps
     total_prior_types: defaultdict[str, int] = defaultdict(int)
     total_beta_conc: defaultdict[str, int] = defaultdict(int)
     total_misspec: defaultdict[str, int] = defaultdict(int)
@@ -297,13 +268,12 @@ def analyze_run(
         for k, v in sa["misspecifications"].items():
             total_misspec[k] += v
 
-    # first/last step for delta
     first = step_analyses[steps_sorted[0]]
     last = step_analyses[steps_sorted[-1]]
 
-    gap_delta = (
-        last["gap_mean"] - first["gap_mean"]
-        if not (math.isnan(first["gap_mean"]) or math.isnan(last["gap_mean"]))
+    reported_delta = (
+        last["reported_mean"] - first["reported_mean"]
+        if not (math.isnan(first["reported_mean"]) or math.isnan(last["reported_mean"]))
         else float("nan")
     )
 
@@ -316,20 +286,20 @@ def analyze_run(
         "n_steps": len(steps_sorted),
         "n_total_records": total_records,
         "n_total_valid": total_valid,
-        "gap_trajectory": {
-            "slope": gap_slope,
-            "mean": overall_gap_mean,
-            "std": overall_gap_std,
-            "first_step_mean": first["gap_mean"],
-            "last_step_mean": last["gap_mean"],
-            "delta": gap_delta,
+        "reported_trajectory": {
+            "slope": reported_slope,
+            "mean": overall_reported_mean,
+            "std": overall_reported_std,
+            "first_step_mean": first["reported_mean"],
+            "last_step_mean": last["reported_mean"],
+            "delta": reported_delta,
             "trend": (
                 "unknown"
-                if math.isnan(gap_slope)
+                if math.isnan(reported_slope)
                 else "increasing"
-                if gap_slope > 0.01
+                if reported_slope > 0.01
                 else "decreasing"
-                if gap_slope < -0.01
+                if reported_slope < -0.01
                 else "flat"
             ),
         },
