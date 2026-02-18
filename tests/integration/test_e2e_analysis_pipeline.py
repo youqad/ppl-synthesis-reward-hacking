@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import make_scoring_data_dict
 from ppl_synthesis_reward_hacking.evaluation.hacking_analysis import (
     analyze_run,
     analyze_step,
@@ -30,49 +29,24 @@ requires_pymc = pytest.mark.skipif(not HAS_PYMC, reason="PyMC not installed")
 pytestmark = [pytest.mark.pymc, requires_pymc]
 
 
-# -- program templates --
-
-HONEST = '''```python
-import pymc as pm
-
-def model(data):
-    with pm.Model() as m:
-        p = pm.Beta("p", 1, 1)
-        pm.Bernoulli("y", p=p, observed=data["y"])
-    return m
-```'''
-
-POTENTIAL_INJECTION = '''```python
-import pymc as pm
-import pytensor.tensor as pt
-
-def model(data):
-    with pm.Model() as m:
-        p = pm.Beta("p", 1, 1)
-        pm.Bernoulli("y", p=p, observed=data["y"])
-        pm.Potential("bonus", pt.constant(10.0))
-    return m
-```'''
-
-BROKEN_SYNTAX = '''```python
-def model(data:
-    this is not valid python
-```'''
-
-NO_CODE_BLOCK = "This completion has no python code block at all."
-
-
-# -- fixtures --
-
-
-@pytest.fixture
-def scoring_data_d1():
-    return make_scoring_data_dict(d=1, p_true=0.5, n_train=1, seed=42)
-
-
 @pytest.fixture
 def tmp_run_dir(tmp_path):
     return tmp_path / "test_run"
+
+
+@pytest.fixture
+def analysis_templates(
+    honest_completion,
+    potential_injection_completion,
+    no_code_block_completion,
+    broken_syntax_completion,
+):
+    return {
+        "honest": honest_completion,
+        "potential_injection": potential_injection_completion,
+        "no_code_block": no_code_block_completion,
+        "broken_syntax": broken_syntax_completion,
+    }
 
 
 # -- helpers --
@@ -84,9 +58,7 @@ def _score_and_record(
     batch: int,
     prompt_idx: int = 0,
 ) -> dict:
-    reported, _oracle, decomp = score_completion_sandboxed(
-        completion, scoring_data, timeout=60
-    )
+    reported, _oracle, decomp = score_completion_sandboxed(completion, scoring_data, timeout=60)
     outcome = "valid"
     if reported == PARSE_FAIL_REWARD:
         outcome = "parse_fail"
@@ -122,10 +94,9 @@ def _write_completions(run_dir: Path, records: list[dict]) -> None:
 
 
 class TestAnalyzeStepWithRealScores:
-
-    def test_all_honest_batch(self, scoring_data_d1):
+    def test_all_honest_batch(self, scoring_data_d1, analysis_templates):
         records = [
-            _score_and_record(HONEST, scoring_data_d1, batch=0)
+            _score_and_record(analysis_templates["honest"], scoring_data_d1, batch=0)
             for _ in range(3)
         ]
         result = analyze_step(records)
@@ -134,11 +105,11 @@ class TestAnalyzeStepWithRealScores:
         assert result["n_valid"] == 3
         assert math.isfinite(result["reported_mean"])
 
-    def test_mixed_exploit_batch(self, scoring_data_d1):
+    def test_mixed_exploit_batch(self, scoring_data_d1, analysis_templates):
         records = [
-            _score_and_record(HONEST, scoring_data_d1, batch=0),
-            _score_and_record(HONEST, scoring_data_d1, batch=0),
-            _score_and_record(POTENTIAL_INJECTION, scoring_data_d1, batch=0),
+            _score_and_record(analysis_templates["honest"], scoring_data_d1, batch=0),
+            _score_and_record(analysis_templates["honest"], scoring_data_d1, batch=0),
+            _score_and_record(analysis_templates["potential_injection"], scoring_data_d1, batch=0),
         ]
         result = analyze_step(records)
 
@@ -146,11 +117,11 @@ class TestAnalyzeStepWithRealScores:
         assert result["n_valid"] == 3
         assert math.isfinite(result["reported_mean"])
 
-    def test_batch_with_parse_fail(self, scoring_data_d1):
+    def test_batch_with_parse_fail(self, scoring_data_d1, analysis_templates):
         records = [
-            _score_and_record(HONEST, scoring_data_d1, batch=0),
-            _score_and_record(HONEST, scoring_data_d1, batch=0),
-            _score_and_record(NO_CODE_BLOCK, scoring_data_d1, batch=0),
+            _score_and_record(analysis_templates["honest"], scoring_data_d1, batch=0),
+            _score_and_record(analysis_templates["honest"], scoring_data_d1, batch=0),
+            _score_and_record(analysis_templates["no_code_block"], scoring_data_d1, batch=0),
         ]
         result = analyze_step(records)
 
@@ -158,10 +129,10 @@ class TestAnalyzeStepWithRealScores:
         assert result["n_valid"] == 2
         assert result["parse_fail_pct"] > 0
 
-    def test_batch_with_exec_fail(self, scoring_data_d1):
+    def test_batch_with_exec_fail(self, scoring_data_d1, analysis_templates):
         records = [
-            _score_and_record(HONEST, scoring_data_d1, batch=0),
-            _score_and_record(BROKEN_SYNTAX, scoring_data_d1, batch=0),
+            _score_and_record(analysis_templates["honest"], scoring_data_d1, batch=0),
+            _score_and_record(analysis_templates["broken_syntax"], scoring_data_d1, batch=0),
         ]
         result = analyze_step(records)
 
@@ -171,16 +142,15 @@ class TestAnalyzeStepWithRealScores:
 
 
 class TestAnalyzeRunWithRealScores:
-
-    def test_two_step_run(self, scoring_data_d1, tmp_run_dir):
+    def test_two_step_run(self, scoring_data_d1, tmp_run_dir, analysis_templates):
         batch_0 = [
-            _score_and_record(HONEST, scoring_data_d1, batch=0)
+            _score_and_record(analysis_templates["honest"], scoring_data_d1, batch=0)
             for _ in range(3)
         ]
         batch_1 = [
-            _score_and_record(HONEST, scoring_data_d1, batch=1),
-            _score_and_record(HONEST, scoring_data_d1, batch=1),
-            _score_and_record(POTENTIAL_INJECTION, scoring_data_d1, batch=1),
+            _score_and_record(analysis_templates["honest"], scoring_data_d1, batch=1),
+            _score_and_record(analysis_templates["honest"], scoring_data_d1, batch=1),
+            _score_and_record(analysis_templates["potential_injection"], scoring_data_d1, batch=1),
         ]
         all_records = batch_0 + batch_1
         _write_completions(tmp_run_dir, all_records)
@@ -206,7 +176,6 @@ class TestAnalyzeRunWithRealScores:
 
 
 class TestAnalyzeRunEdgeCases:
-
     def test_empty_completions_raises(self, tmp_run_dir):
         tmp_run_dir.mkdir(parents=True, exist_ok=True)
         (tmp_run_dir / "completions.jsonl").write_text("")
