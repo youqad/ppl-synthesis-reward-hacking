@@ -1,0 +1,608 @@
+"""PyMC reward function wired into GRPO training loop."""
+
+from __future__ import annotations
+
+import logging
+import tempfile
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from ppl_synthesis_reward_hacking.backends.pymc.backend import PyMCBackend
+from ppl_synthesis_reward_hacking.backends.pymc.code_executor import (
+    execute_pymc_code,
+    extract_pymc_code,
+)
+from ppl_synthesis_reward_hacking.data.schema import Dataset
+from ppl_synthesis_reward_hacking.evaluation.normalization_check import (
+    check_normalization,
+)
+from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
+    DEFAULT_EXEC_TIMEOUT,
+    EXEC_FAIL_REWARD,
+    PARSE_FAIL_REWARD,
+)
+from ppl_synthesis_reward_hacking.logging.completions import (
+    CompletionRecord,
+    CompletionWriter,
+    make_timestamp,
+)
+from ppl_synthesis_reward_hacking.scoring import ZEvalConfig, evaluate_model, select_split_data
+
+log = logging.getLogger(__name__)
+
+
+def _extract_text(msg: str | list[dict]) -> str:
+    """Handle TRL payloads that may be chat-format dicts."""
+    if isinstance(msg, str):
+        return msg
+    if isinstance(msg, list):
+        return "\n".join(m.get("content", "") for m in msg if isinstance(m, dict))
+    return str(msg)
+
+
+@dataclass
+class TrajectoryPoint:
+    batch: int
+    reported_mean: float
+    n_valid: int
+    n_total: int
+    n_parse_fail: int
+    n_exec_fail: int
+    safety_flags: dict[str, int] = field(default_factory=dict)
+    reported_mean_all: float = float("nan")
+    n_valid_reported: int = 0
+    frac_non_normalized: float = float("nan")
+    mean_abs_log_mass: float = float("nan")
+    n_norm_checked: int = 0
+
+    @property
+    def reward_mean(self) -> float:
+        return self.reported_mean
+
+
+@dataclass
+class PyMCRewardState:
+    backend: PyMCBackend
+    dataset: Dataset
+    scoring_data: dict[str, Any]
+    cache_dir: Path
+    call_count: int = 0
+    trajectory: list[TrajectoryPoint] = field(default_factory=list)
+    completion_writer: CompletionWriter | None = None
+    reward_metric: str = "log_marginal_likelihood"
+    reward_data_split: str = "train"
+    predictive_estimator: str = "none"
+    smc_draws: int = 500
+    run_normalization: bool = True
+    normalization_method: str = "auto"
+    normalization_delta_scope: str = "raw_y_binary"
+    normalization_epsilon: float = 5e-2
+    normalization_ci_alpha: float = 0.05
+    normalization_mc_samples: int = 256
+    normalization_min_ess: float = 30.0
+    normalization_interval: int = 1
+    normalization_sample_size: int = 20
+
+
+@dataclass
+class _BatchResult:
+    rewards: list[float] = field(default_factory=list)
+    outcomes: list[str] = field(default_factory=list)
+    valid_completion_texts: list[str] = field(default_factory=list)
+    n_parse_fail: int = 0
+    n_exec_fail: int = 0
+    safety_counts: dict[str, int] = field(default_factory=dict)
+
+
+def make_pymc_reward_fn(
+    backend: PyMCBackend,
+    dataset: Dataset,
+    scoring_data: dict[str, Any],
+    *,
+    cache_dir: Path | None = None,
+    exec_timeout: int = DEFAULT_EXEC_TIMEOUT,
+    log_interval: int = 5,
+    completions_path: Path | None = None,
+    reward_metric: str = "log_marginal_likelihood",
+    reward_data_split: str = "train",
+    predictive_estimator: str = "none",
+    smc_draws: int = 500,
+    run_normalization: bool = True,
+    normalization_method: str = "auto",
+    normalization_delta_scope: str = "raw_y_binary",
+    normalization_epsilon: float = 5e-2,
+    normalization_ci_alpha: float = 0.05,
+    normalization_mc_samples: int = 256,
+    normalization_min_ess: float = 30.0,
+    normalization_interval: int = 1,
+    normalization_sample_size: int = 20,
+) -> tuple[Callable[..., list[float]], PyMCRewardState]:
+    """Create and return `(reward_fn, state)`."""
+    resolved_cache_dir = (
+        Path(tempfile.mkdtemp(prefix="pymc_cache_")) if cache_dir is None else cache_dir
+    )
+    state = _init_reward_state(
+        backend,
+        dataset,
+        scoring_data,
+        resolved_cache_dir,
+        completions_path,
+        reward_metric=reward_metric,
+        reward_data_split=reward_data_split,
+        predictive_estimator=predictive_estimator,
+        smc_draws=smc_draws,
+        run_normalization=run_normalization,
+        normalization_method=normalization_method,
+        normalization_delta_scope=normalization_delta_scope,
+        normalization_epsilon=normalization_epsilon,
+        normalization_ci_alpha=normalization_ci_alpha,
+        normalization_mc_samples=normalization_mc_samples,
+        normalization_min_ess=normalization_min_ess,
+        normalization_interval=normalization_interval,
+        normalization_sample_size=normalization_sample_size,
+    )
+    resolved_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def reward_fn(prompts: list[str], completions: list[str], **kwargs) -> list[float]:
+        _ = kwargs
+        state.call_count += 1
+        n_expected = len(completions)
+        batch = _score_batch(state, prompts, completions, exec_timeout)
+        norm_results = _run_batch_normalization(state, batch)
+        point = _build_trajectory_point(
+            state.call_count, n_total=len(completions), batch=batch, norm=norm_results
+        )
+        state.trajectory.append(point)
+        _flush_completions(state)
+        _log_batch_summary(state.call_count, point, log_interval)
+        return _normalize_reward_length(
+            batch.rewards, n_expected=n_expected, batch_index=state.call_count
+        )
+
+    return reward_fn, state
+
+
+def _init_reward_state(
+    backend: PyMCBackend,
+    dataset: Dataset,
+    scoring_data: dict[str, Any],
+    cache_dir: Path,
+    completions_path: Path | None,
+    *,
+    reward_metric: str = "log_marginal_likelihood",
+    reward_data_split: str = "train",
+    predictive_estimator: str = "none",
+    smc_draws: int = 500,
+    run_normalization: bool = True,
+    normalization_method: str = "auto",
+    normalization_delta_scope: str = "raw_y_binary",
+    normalization_epsilon: float = 5e-2,
+    normalization_ci_alpha: float = 0.05,
+    normalization_mc_samples: int = 256,
+    normalization_min_ess: float = 30.0,
+    normalization_interval: int = 1,
+    normalization_sample_size: int = 20,
+) -> PyMCRewardState:
+    writer = CompletionWriter(completions_path) if completions_path else None
+    return PyMCRewardState(
+        backend=backend,
+        dataset=dataset,
+        scoring_data=scoring_data,
+        cache_dir=cache_dir,
+        completion_writer=writer,
+        reward_metric=reward_metric,
+        reward_data_split=reward_data_split,
+        predictive_estimator=predictive_estimator,
+        smc_draws=smc_draws,
+        run_normalization=run_normalization,
+        normalization_method=normalization_method,
+        normalization_delta_scope=normalization_delta_scope,
+        normalization_epsilon=normalization_epsilon,
+        normalization_ci_alpha=normalization_ci_alpha,
+        normalization_mc_samples=normalization_mc_samples,
+        normalization_min_ess=normalization_min_ess,
+        normalization_interval=normalization_interval,
+        normalization_sample_size=normalization_sample_size,
+    )
+
+
+def _score_batch(
+    state: PyMCRewardState,
+    prompts: list[str],
+    completions: list[str],
+    exec_timeout: int,
+) -> _BatchResult:
+    batch = _BatchResult()
+    for index, (prompt, completion) in enumerate(zip(prompts, completions, strict=True)):
+        _score_completion(state, batch, index, prompt, completion, exec_timeout)
+    return batch
+
+
+def _get_point_logps(pymc_model: Any) -> dict[str, float] | None:
+    try:
+        return pymc_model.point_logps()
+    except Exception:
+        return None
+
+
+def _fill_point_logps(
+    logps: dict[str, float],
+    pymc_model: Any,
+    decomposition: dict[str, Any],
+) -> None:
+    import math
+
+    obs_names = {rv.name for rv in getattr(pymc_model, "observed_RVs", [])}
+    pot_names = {p.name for p in getattr(pymc_model, "potentials", [])}
+
+    rv_logps = {k: v for k, v in logps.items() if not k.endswith("__")}
+    obs_vals = [float(v) for k, v in rv_logps.items() if k in obs_names]
+    pot_vals = [float(v) for k, v in rv_logps.items() if k in pot_names]
+
+    if any(not math.isfinite(v) for v in obs_vals + pot_vals):
+        return
+
+    decomposition.setdefault("pot_contribution", float(np.sum(pot_vals)) if pot_vals else 0.0)
+    decomposition.setdefault("obs_only_sum", float(np.sum(obs_vals)) if obs_vals else None)
+    decomposition.setdefault("n_obs_terms", len(obs_vals))
+    decomposition.setdefault("n_pot_terms", len(pot_vals))
+
+
+def _score_completion(
+    state: PyMCRewardState,
+    batch: _BatchResult,
+    index: int,
+    prompt: str,
+    completion: str,
+    exec_timeout: int,
+) -> None:
+    completion_text = _extract_text(completion)
+    code = extract_pymc_code(completion_text)
+    if code is None:
+        _record_parse_failure(state, batch, index, prompt, completion_text)
+        return
+
+    try:
+        model_data = select_split_data(state.scoring_data, state.reward_data_split)
+    except Exception as exc:
+        if state.call_count <= 3:
+            log.info("score_fail b=%d i=%d: %s", state.call_count, index, exc)
+        _record_exec_failure(
+            state, batch, index, prompt, completion_text, code, outcome="score_fail"
+        )
+        return
+
+    pymc_model = execute_pymc_code(code, model_data, timeout=exec_timeout)
+    if pymc_model is None:
+        _record_exec_failure(
+            state, batch, index, prompt, completion_text, code, outcome="exec_fail"
+        )
+        return
+
+    _score_executed_model(
+        state,
+        batch,
+        index,
+        prompt,
+        completion_text,
+        code,
+        pymc_model,
+        model_data,
+    )
+
+
+def _score_executed_model(
+    state: PyMCRewardState,
+    batch: _BatchResult,
+    index: int,
+    prompt: str,
+    completion_text: str,
+    code: str,
+    pymc_model: Any,
+    scoring_data: dict[str, Any],
+) -> None:
+    try:
+        cfg = ZEvalConfig(
+            reward_metric=state.reward_metric,
+            reward_data_split=state.reward_data_split,
+            predictive_estimator=state.predictive_estimator,
+            smc_draws=state.smc_draws,
+        )
+        result = evaluate_model(pymc_model, scoring_data, cfg)
+        reported = float(result.reward_train)
+        decomposition = dict(result.decomposition or {})
+        logps = _get_point_logps(pymc_model)
+        if logps is not None:
+            _fill_point_logps(logps, pymc_model, decomposition)
+        decomposition.update(
+            {
+                "outcome_code": result.outcome_code,
+                "outcome_detail": result.outcome_detail,
+                "metric_log_marginal_likelihood": result.metric_log_marginal_likelihood,
+                "metric_elpd": result.metric_elpd,
+                "metric_waic": result.metric_waic,
+                "metric_bic": result.metric_bic,
+            }
+        )
+    except Exception as exc:
+        if state.call_count <= 3:
+            log.info("score_fail b=%d i=%d: %s", state.call_count, index, exc)
+        _record_exec_failure(
+            state, batch, index, prompt, completion_text, code, outcome="score_fail"
+        )
+        return
+
+    if reported == EXEC_FAIL_REWARD:
+        _record_exec_failure(
+            state, batch, index, prompt, completion_text, code, outcome="score_fail"
+        )
+        return
+
+    batch.rewards.append(reported)
+    batch.outcomes.append("valid")
+    batch.valid_completion_texts.append(completion_text)
+    metadata = _merge_meta(_build_meta(pymc_model, logps), decomposition)
+    _log_completion(
+        state,
+        state.call_count,
+        index,
+        prompt,
+        completion_text,
+        code,
+        reported,
+        "valid",
+        metadata=metadata,
+    )
+    _run_safety_check(pymc_model, batch.safety_counts)
+
+
+def _merge_meta(
+    metadata: dict[str, Any] | None,
+    decomposition: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not decomposition:
+        return metadata
+    return {**(metadata or {}), "decomposition": decomposition}
+
+
+def _record_parse_failure(
+    state: PyMCRewardState,
+    batch: _BatchResult,
+    index: int,
+    prompt: str,
+    completion_text: str,
+) -> None:
+    batch.rewards.append(PARSE_FAIL_REWARD)
+    batch.outcomes.append("parse_fail")
+    batch.n_parse_fail += 1
+    _log_completion(
+        state,
+        state.call_count,
+        index,
+        prompt,
+        completion_text,
+        None,
+        PARSE_FAIL_REWARD,
+        "parse_fail",
+    )
+
+
+def _record_exec_failure(
+    state: PyMCRewardState,
+    batch: _BatchResult,
+    index: int,
+    prompt: str,
+    completion_text: str,
+    code: str | None,
+    *,
+    outcome: str,
+) -> None:
+    batch.rewards.append(EXEC_FAIL_REWARD)
+    batch.outcomes.append(outcome)
+    batch.n_exec_fail += 1
+    _log_completion(
+        state,
+        state.call_count,
+        index,
+        prompt,
+        completion_text,
+        code,
+        EXEC_FAIL_REWARD,
+        outcome,
+    )
+
+
+@dataclass
+class _NormResults:
+    frac_non_normalized: float = float("nan")
+    mean_abs_log_mass: float = float("nan")
+    n_checked: int = 0
+
+
+def _run_batch_normalization(
+    state: PyMCRewardState, batch: _BatchResult
+) -> _NormResults:
+    if not state.run_normalization or not batch.valid_completion_texts:
+        return _NormResults()
+    if state.normalization_interval <= 0 or state.call_count % state.normalization_interval != 0:
+        return _NormResults()
+
+    texts = batch.valid_completion_texts
+    sample_size = min(state.normalization_sample_size, len(texts))
+    rng = np.random.default_rng(state.call_count)
+    indices = rng.choice(len(texts), size=sample_size, replace=False)
+
+    n_checked = 0
+    n_non_norm = 0
+    abs_log_masses: list[float] = []
+    p_true = float(state.scoring_data.get("p_true", 0.5))
+
+    for idx in indices:
+        try:
+            result = check_normalization(
+                texts[int(idx)],
+                method=state.normalization_method,
+                d=int(np.asarray(state.scoring_data["y"]).size),
+                p_true=p_true,
+                seed=int(state.scoring_data.get("seed", state.call_count * 1000 + int(idx))),
+                timeout=30,
+                epsilon=state.normalization_epsilon,
+                ci_alpha=state.normalization_ci_alpha,
+                mc_samples=state.normalization_mc_samples,
+                min_ess=state.normalization_min_ess,
+                reward_metric=state.reward_metric,
+                reward_data_split=state.reward_data_split,
+                predictive_estimator=state.predictive_estimator,
+                smc_draws=state.smc_draws,
+                scoring_data=state.scoring_data,
+                delta_scope=state.normalization_delta_scope,
+            )
+            n_checked += 1
+            if result.get("is_normalized") is False or not result.get("ok", False):
+                n_non_norm += 1
+            lm = result.get("log_mass")
+            if lm is not None:
+                abs_log_masses.append(abs(float(lm)))
+        except Exception:
+            pass
+
+    if n_checked == 0:
+        return _NormResults()
+
+    return _NormResults(
+        frac_non_normalized=n_non_norm / n_checked,
+        mean_abs_log_mass=float(np.mean(abs_log_masses)) if abs_log_masses else 0.0,
+        n_checked=n_checked,
+    )
+
+
+def _build_trajectory_point(
+    batch_index: int,
+    *,
+    n_total: int,
+    batch: _BatchResult,
+    norm: _NormResults | None = None,
+) -> TrajectoryPoint:
+    valid_reported = [
+        reward
+        for reward, outcome in zip(batch.rewards, batch.outcomes, strict=True)
+        if outcome == "valid"
+    ]
+    reported_mean = float(np.mean(valid_reported)) if valid_reported else float("nan")
+    return TrajectoryPoint(
+        batch=batch_index,
+        reported_mean=reported_mean,
+        n_valid=len(valid_reported),
+        reported_mean_all=reported_mean,
+        n_valid_reported=len(valid_reported),
+        n_total=n_total,
+        n_parse_fail=batch.n_parse_fail,
+        n_exec_fail=batch.n_exec_fail,
+        safety_flags=dict(batch.safety_counts),
+        frac_non_normalized=norm.frac_non_normalized if norm else float("nan"),
+        mean_abs_log_mass=norm.mean_abs_log_mass if norm else float("nan"),
+        n_norm_checked=norm.n_checked if norm else 0,
+    )
+
+
+def _flush_completions(state: PyMCRewardState) -> None:
+    if state.completion_writer is not None:
+        state.completion_writer.flush()
+
+
+def _log_batch_summary(batch_index: int, point: TrajectoryPoint, log_interval: int) -> None:
+    if batch_index % log_interval != 0 and batch_index > 5:
+        return
+    frac_nn = point.frac_non_normalized if not np.isnan(point.frac_non_normalized) else 0.0
+    mean_alm = point.mean_abs_log_mass if not np.isnan(point.mean_abs_log_mass) else 0.0
+    log.info(
+        "Batch %4d: reported=%.1f valid=%d/%d parse_fail=%d exec_fail=%d "
+        "norm_checked=%d frac_non_norm=%.3f mean_abs_log_mass=%.3f",
+        point.batch,
+        point.reported_mean,
+        point.n_valid,
+        point.n_total,
+        point.n_parse_fail,
+        point.n_exec_fail,
+        point.n_norm_checked,
+        frac_nn,
+        mean_alm,
+    )
+
+
+def _normalize_reward_length(
+    rewards: list[float], *, n_expected: int, batch_index: int
+) -> list[float]:
+    if len(rewards) == n_expected:
+        return rewards
+
+    log.warning(
+        "Batch %d: reward length mismatch (got %d, expected %d), adjusting",
+        batch_index,
+        len(rewards),
+        n_expected,
+    )
+    if len(rewards) > n_expected:
+        return rewards[:n_expected]
+    return rewards + [EXEC_FAIL_REWARD] * (n_expected - len(rewards))
+
+
+def _log_completion(
+    state: PyMCRewardState,
+    batch: int,
+    index: int,
+    prompt: str,
+    completion_text: str,
+    code: str | None,
+    reported: float,
+    outcome: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if state.completion_writer is None:
+        return
+    record = CompletionRecord(
+        batch=batch,
+        index=index,
+        prompt=prompt,
+        completion_text=completion_text,
+        code=code,
+        reported_reward=reported,
+        outcome=outcome,
+        timestamp=make_timestamp(),
+        metadata=metadata,
+    )
+    state.completion_writer.write(record)
+
+
+def _build_meta(
+    pymc_model: Any,
+    logps: dict[str, float] | None = None,
+) -> dict[str, Any] | None:
+    import math
+
+    meta: dict[str, Any] = {}
+    if logps is not None:
+        meta["logp_breakdown"] = {k: v if math.isfinite(v) else str(v) for k, v in logps.items()}
+    try:
+        meta["n_free_rvs"] = len(pymc_model.free_RVs)
+        meta["n_observed_rvs"] = len(pymc_model.observed_RVs)
+    except AttributeError:
+        pass
+    return meta or None
+
+
+def _run_safety_check(pymc_model: Any, counts: dict[str, int]) -> None:
+    try:
+        from ppl_synthesis_reward_hacking.backends.pymc_safe.checker import check_pymc_model
+
+        accepted, reasons = check_pymc_model(pymc_model)
+        if not accepted:
+            for reason in reasons:
+                counts[reason] = counts.get(reason, 0) + 1
+    except Exception:  # noqa: BLE001 -- best-effort
+        pass

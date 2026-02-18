@@ -1,6 +1,0 @@
-name: synthstats_jsonl
-format: jsonl
-paths:
-  train: data/synthstats/synthstats_train.jsonl
-  val: data/synthstats/synthstats_val.jsonl
-  test: data/synthstats/synthstats_test.jsonl

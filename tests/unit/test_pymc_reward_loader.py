@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ppl_synthesis_reward_hacking.data.synthstats_loader import (
+from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
     SYSTEM_PROMPT,
     make_scoring_data_dict,
     make_scoring_dataset,
