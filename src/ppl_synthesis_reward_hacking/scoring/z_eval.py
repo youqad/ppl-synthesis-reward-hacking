@@ -11,6 +11,7 @@ from ppl_synthesis_reward_hacking.scoring.metrics import (
     PredictiveEstimator,
     RewardDataSplit,
     RewardMetric,
+    validate_metric_estimator,
 )
 from ppl_synthesis_reward_hacking.scoring.result import ScoreResult
 
@@ -25,19 +26,7 @@ class ZEvalConfig:
     smc_draws: int = 500
 
     def validate(self) -> None:
-        metric = RewardMetric(self.reward_metric)
-        estimator = PredictiveEstimator(self.predictive_estimator)
-        if (
-            metric is RewardMetric.LOG_MARGINAL_LIKELIHOOD
-            and estimator is not PredictiveEstimator.NONE
-        ):
-            raise ValueError("log_marginal_likelihood requires predictive_estimator=none")
-        if metric is RewardMetric.ELPD and estimator is not PredictiveEstimator.PSIS_LOO:
-            raise ValueError("elpd requires predictive_estimator=psis_loo")
-        if metric is RewardMetric.WAIC and estimator is not PredictiveEstimator.WAIC:
-            raise ValueError("waic requires predictive_estimator=waic")
-        if metric is RewardMetric.BIC and estimator is not PredictiveEstimator.BIC_APPROX:
-            raise ValueError("bic requires predictive_estimator=bic_approx")
+        validate_metric_estimator(self.reward_metric, self.predictive_estimator)
 
 
 def select_split_data(scoring_data: dict[str, Any], split: str) -> dict[str, Any]:
@@ -58,7 +47,21 @@ def select_split_data(scoring_data: dict[str, Any], split: str) -> dict[str, Any
 
     y_arr = np.asarray(y_selected, dtype=np.float64)
     data["y"] = y_arr
-    data["d"] = int(y_arr.size)
+    data["n"] = int(y_arr.shape[0])
+    if "d" not in scoring_data:
+        data["d"] = int(y_arr.size)
+
+    x_train = scoring_data.get("X_train")
+    x_holdout = scoring_data.get("X_holdout")
+    x_raw = scoring_data.get("X")
+    if x_raw is not None or x_train is not None:
+        if split_enum is RewardDataSplit.TRAIN:
+            x_selected = x_train if x_train is not None else x_raw
+        else:
+            x_selected = x_holdout if x_holdout is not None else x_raw
+        if x_selected is not None:
+            data["X"] = np.asarray(x_selected, dtype=np.float64)
+
     return data
 
 
@@ -79,7 +82,7 @@ def _observed_loglik_sum(pymc_model: Any) -> float:
     obs_names = {rv.name for rv in getattr(pymc_model, "observed_RVs", [])}
     vals = [float(v) for k, v in logps.items() if k in obs_names]
     if not vals:
-        raise ValueError("no observed log-likelihood terms available")
+        raise ValueError("no observed log-likelihood terms")
     total = float(np.sum(vals))
     if not math.isfinite(total):
         raise ValueError("non-finite observed log-likelihood")
@@ -105,7 +108,25 @@ def evaluate_model(
         marginal_ll, diagnostics = score_pymc_model_smc(
             pymc_model,
             draws=cfg.smc_draws,
+            seed=int(split_data.get("seed", 0)),
         )
+        if (
+            not math.isfinite(float(marginal_ll))
+            or float(marginal_ll) == EXEC_FAIL_REWARD
+            or ("error" in diagnostics)
+        ):
+            detail = diagnostics.get("error", "smc_failed")
+            return ScoreResult(
+                reward_train=EXEC_FAIL_REWARD,
+                outcome_code="smc_fail",
+                outcome_detail=str(detail),
+                decomposition={
+                    "reward_metric": metric.value,
+                    "reward_data_split": cfg.reward_data_split,
+                    "predictive_estimator": cfg.predictive_estimator,
+                    **diagnostics,
+                },
+            )
         return ScoreResult(
             reward_train=float(marginal_ll),
             outcome_code="ok",
@@ -120,7 +141,7 @@ def evaluate_model(
         )
 
     if _has_potential(pymc_model):
-        # ArviZ pointwise estimators do not safely account for global potentials.
+        # pointwise estimators can't account for global potentials
         return ScoreResult(
             reward_train=EXEC_FAIL_REWARD,
             outcome_code="estimator_inapplicable",
@@ -164,12 +185,12 @@ def evaluate_model(
 
     if metric is RewardMetric.WAIC:
         waic_res = az.waic(idata, pointwise=False)
-        waic = float(waic_res.waic)
+        elpd_waic = float(waic_res.elpd_waic)
         return ScoreResult(
-            reward_train=-waic,
+            reward_train=elpd_waic,
             outcome_code="ok",
             outcome_detail=None,
-            metric_waic=waic,
+            metric_waic=elpd_waic,
             decomposition={
                 "reward_metric": metric.value,
                 "reward_data_split": cfg.reward_data_split,

@@ -78,7 +78,7 @@ class TestSerialization:
 class TestSandboxedScorer:
     @pytest.fixture
     def scoring_data(self):
-        from ppl_synthesis_reward_hacking.data.synthstats_loader import make_scoring_data_dict
+        from ppl_synthesis_reward_hacking.data.pymc_reward_loader import make_scoring_data_dict
 
         data = make_scoring_data_dict(d=1, p_true=0.5, seed=0)
         data["y_train"] = data["y"]

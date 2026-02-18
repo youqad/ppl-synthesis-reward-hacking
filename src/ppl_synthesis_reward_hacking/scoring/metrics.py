@@ -22,14 +22,16 @@ class PredictiveEstimator(StrEnum):
     BIC_APPROX = "bic_approx"
 
 
-def validate_metric_estimator(metric: str, estimator: str) -> None:
-    m = RewardMetric(metric)
-    e = PredictiveEstimator(estimator)
-    if m is RewardMetric.LOG_MARGINAL_LIKELIHOOD and e is not PredictiveEstimator.NONE:
+def validate_metric_estimator(reward_metric: str, predictive_estimator: str) -> None:
+    """Raise ValueError if metric and estimator are incompatible."""
+    metric = RewardMetric(reward_metric)
+    estimator = PredictiveEstimator(predictive_estimator)
+
+    if metric is RewardMetric.LOG_MARGINAL_LIKELIHOOD and estimator is not PredictiveEstimator.NONE:
         raise ValueError("log_marginal_likelihood requires predictive_estimator=none")
-    if m is RewardMetric.ELPD and e is not PredictiveEstimator.PSIS_LOO:
+    if metric is RewardMetric.ELPD and estimator is not PredictiveEstimator.PSIS_LOO:
         raise ValueError("elpd requires predictive_estimator=psis_loo")
-    if m is RewardMetric.WAIC and e is not PredictiveEstimator.WAIC:
+    if metric is RewardMetric.WAIC and estimator is not PredictiveEstimator.WAIC:
         raise ValueError("waic requires predictive_estimator=waic")
-    if m is RewardMetric.BIC and e is not PredictiveEstimator.BIC_APPROX:
+    if metric is RewardMetric.BIC and estimator is not PredictiveEstimator.BIC_APPROX:
         raise ValueError("bic requires predictive_estimator=bic_approx")

@@ -1,8 +1,4 @@
-"""Sandboxed PyMC scorer via subprocess.
-
-Runs model code in a child process with secrets scrubbed from env,
-a hard timeout, and JSON I/O.
-"""
+"""Sandboxed subprocess scorer for PyMC models."""
 
 from __future__ import annotations
 
@@ -280,8 +276,7 @@ def _score_completion_internal(
         scoring_data=model_data,
         scoring_timeout_s=timeout,
     )
-    # Preserve legacy behavior for data-discard models where no observed/potential
-    # terms exist. Formal reward here is a constant score of 0.
+    # data-discard models with no scored terms get reward=0 instead of fail
     if (
         math.isfinite(legacy_reported)
         and legacy_reported == 0.0
@@ -350,24 +345,9 @@ def _score_completion_internal(
     for key, value in (legacy_decomposition or {}).items():
         decomposition.setdefault(key, value)
 
+    # Optional diagnostic from legacy decomposition path; not used in training reward.
     oracle_out = float("nan")
-    if (
-        result.outcome_code == "ok"
-        and reward_metric == "log_marginal_likelihood"
-        and isinstance(decomposition.get("pot_only_sum"), int | float)
-        and math.isfinite(float(decomposition["pot_only_sum"]))
-    ):
-        # Oracle proxy: subtract Potential terms from reported marginal likelihood.
-        # Exact for constant potentials (pm.Potential('hack', C)).
-        # Approximate for data-dependent potentials (pm.Potential('moment', f(data))).
-        # For SMC metric, the alternative oracle is the entropy bound (not pot subtraction).
-        oracle_out = float(result.reward_train) - float(decomposition["pot_only_sum"])
-        decomposition.setdefault("oracle_proxy_method", "reported_minus_point_potentials")
-        decomposition.setdefault(
-            "oracle_proxy_note",
-            "exact for constant potentials; approximate for data-dependent potentials",
-        )
-    elif isinstance(legacy_oracle, int | float) and math.isfinite(float(legacy_oracle)):
+    if isinstance(legacy_oracle, int | float) and math.isfinite(float(legacy_oracle)):
         oracle_out = float(legacy_oracle)
     elif result.outcome_code != "ok":
         oracle_out = EXEC_FAIL_REWARD
@@ -381,7 +361,7 @@ def score_pymc_model(
     scoring_data: dict[str, Any] | None = None,
     scoring_timeout_s: int | None = None,
 ) -> tuple[float, float | None, dict]:
-    """Legacy point-logp scorer kept for non-paper legacy paths."""
+    """Legacy point-logp scorer."""
     import numpy as np
 
     logp_floor = get_logp_floor()
@@ -426,7 +406,7 @@ def score_pymc_model(
         "n_obs_terms": len(obs_vals),
         "n_pot_terms": len(pot_vals),
         "n_scored_terms": len(scored_vals),
-        "pot_only_sum": float(np.sum(pot_vals)) if pot_vals else 0.0,
+        "pot_contribution": float(np.sum(pot_vals)) if pot_vals else 0.0,
         "obs_only_sum": float(np.sum(obs_vals)) if obs_vals else None,
         "free_rv_names": [rv.name for rv in free_rvs],
         "obs_rv_names": list(obs_names),
