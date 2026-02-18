@@ -2,6 +2,8 @@ defaults:
   - reward_metric: log_marginal_likelihood
   - reward_data_split: train
   - predictive_estimator: none
+  - claim_mode: formal_lh
+  - normalization: auto
   - data_interface: raw_bernoulli_d3
   - paper_track: part_a_emergence
   - monitoring_mode: "off"
@@ -23,6 +25,9 @@ exec_timeout: 60
 scoring_seed_base: 0
 smc_draws: 500
 scoring_workers: 1
+dataset_p_true_alpha: 1.0
+dataset_p_true_beta: 1.0
+dataset_p_true_fixed: null
 
 # judge API params (used only when monitoring_mode != off)
 judge_sample_size: 20

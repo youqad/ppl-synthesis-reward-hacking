@@ -1,0 +1,8 @@
+normalization_method: off
+normalization_delta_scope: raw_y
+normalization_epsilon: 0.05
+normalization_ci_alpha: 0.05
+normalization_mc_samples: 256
+normalization_min_ess: 30.0
+normalization_interval: 0
+normalization_sample_size: 0

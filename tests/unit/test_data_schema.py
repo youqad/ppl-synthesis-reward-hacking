@@ -14,7 +14,7 @@ def test_bernoulli_raw_interface_contract_fields() -> None:
         "observe(y_data) where y_data = pm.MutableData('y_data', data['y'])",
         "observe(data['y'][i]) for indexed likelihood terms",
     )
-    assert spec.forbidden_observation_forms == (
+    assert spec.forbidden_obs_forms == (
         "observe(constant literal)",
         "observe(summary statistics like sum/mean/var of data['y'])",
         "observe data['y'] more than once",
