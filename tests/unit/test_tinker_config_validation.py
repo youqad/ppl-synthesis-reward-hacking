@@ -57,6 +57,6 @@ def test_invalid_reward_split_fails() -> None:
         config_from_mapping({**_base_mapping(), "reward_data_split": "dev"})
 
 
-def test_invalid_p_true_mode_fails() -> None:
+def test_bad_dataset_fails() -> None:
     with pytest.raises(ValueError):
-        config_from_mapping({**_base_mapping(), "p_true_mode": "random"})
+        config_from_mapping({**_base_mapping(), "dataset_name": "nonexistent_dataset"})

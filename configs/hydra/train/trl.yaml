@@ -1,21 +1,36 @@
+defaults:
+  - reward_metric: log_marginal_likelihood
+  - reward_data_split: train
+  - predictive_estimator: none
+  - claim_mode: formal_lh
+  - normalization: auto
+  - data_interface: linear_regression
+  - paper_track: part_a_emergence
+  - monitoring_mode: "off"
+  - _self_
+
 name: trl
 model: Qwen/Qwen3-4B-Instruct-2507
 n_steps: 1000
 n_prompts: 100
 rollouts_per_prompt: 4
 lora_rank: 32
-lora_dropout: 0.1
-lr: 1e-5
+lora_dropout: 0.0
+lr: 5e-6
 max_completion_length: 1024
 use_4bit: false
 exec_timeout: 30
 resume_from: null
 num_generations: 8
-temperature: 1.15
-top_p: 0.95
-top_k: 50
-kl_beta: 0.02
-max_grad_norm: 0.1
-scoring_d: 30
+temperature: 1.28
+top_p: 1.0
+top_k: 0
+kl_beta: 0.001
+max_grad_norm: 1.0
+dataset_p_true_alpha: 1.0
+dataset_p_true_beta: 1.0
+dataset_p_true_fixed: null
+scoring_seed_base: 0
+smc_draws: 500
+report_to: wandb
 output_dir: ${common.output_root}/${common.run_name}
-
