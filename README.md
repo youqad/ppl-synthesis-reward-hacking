@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/pixi-package%20manager-yellow?logo=anaconda" alt="Pixi">
 </p>
 
-Experiments for reward hacking in probabilistic programming synthesis and automated science workflows.
+Experiments on likelihood hacking in probabilistic-program synthesis (PyMC/Stan), with scoring, normalization checks, and safety gates.
 
 ## Quickstart
 
@@ -26,21 +26,27 @@ Hydra entrypoints are provided for both training paths:
 Create a sweep and run agents:
 
 ```bash
-wandb sweep configs/sweeps/wandb/tinker_gap.yaml
-python scripts/run_wandb_agent.py --sweep-id <entity/project/sweep_id> --count 20
+wandb sweep configs/sweeps/wandb/tinker_lh_emergence.yaml
+python scripts/run_wandb_agent.py \
+  --sweep-id <entity/project/sweep_id> \
+  --entrypoint hydra_train_tinker.main \
+  --count 20
 ```
 
 Programmatic sweep creation helper:
 
 ```bash
-python scripts/create_wandb_sweep.py --config configs/sweeps/wandb/tinker_gap.yaml
+python scripts/create_wandb_sweep.py --config configs/sweeps/wandb/tinker_lh_emergence.yaml
 ```
 
 For TRL sweeps on SLURM:
 
 ```bash
-wandb sweep configs/sweeps/wandb/trl_gap.yaml
-python scripts/run_wandb_agent.py --sweep-id <entity/project/sweep_id> --count 10
+wandb sweep configs/sweeps/wandb/trl_lh_emergence.yaml
+python scripts/run_wandb_agent.py \
+  --sweep-id <entity/project/sweep_id> \
+  --entrypoint hydra_train_trl.main \
+  --count 10
 ```
 
 Hydra launcher profiles now include:
@@ -51,34 +57,48 @@ Hydra launcher profiles now include:
 - `launcher=h100` (H100 partition profile)
 - `launcher=cpu-debug` (CPU-only debug profile)
 
-Primary optimization metric is `sweep/final_gap_mean` (maximize).
+Primary optimization metric is `paper/lh_formal_signal_final` (maximize).
+Paper-track LH evidence is reported via normalization keys such as
+`paper/frac_non_normalized_final` and `paper/lh_formal_signal_final`.
+
+## RunPod launcher
+
+`scripts/runpod/launch.py` manages the full pod lifecycle: creating, waiting for SSH, rsyncing the repo, starting training in a tmux session, and prompting you to terminate when you detach. Billing stops only when the pod is terminated (Ctrl+C or answering "Y" at the prompt).
+
+Setup:
+
+```bash
+pip install -e '.[runpod-launcher]'
+cp .env.example .env  # fill in RUNPOD_API_KEY
+```
+
+Usage:
+
+```bash
+# TRL GRPO training (args after -- go to trl_reward_hacking.py)
+python scripts/runpod/launch.py --mode trl --name psrh-run7 -- --n-steps 1000
+
+# Tinker API server on the pod
+python scripts/runpod/launch.py --mode tinker_api --name psrh-tinker \
+    --base-model Qwen/Qwen3-0.6B --backend fsdp
+```
+
+Training output stays on the pod under `/workspace/ppl-synthesis-reward-hacking/`. Pull artifacts with `scp -P <port> root@<ip>:/workspace/ppl-synthesis-reward-hacking/artifacts/ ./artifacts/`. Use `--identity-file` if your SSH key isn't in the default location. RunPod remaps container port 22 to a random public port; the launcher handles this transparently.
+
+See the `launch.py` module docstring for operational details.
 
 ## Layout
 
-- `src/ppl_synthesis_reward_hacking/` - Core experiment code
-- `tests/` - Test suite
-- `configs/` - Experiment configs (Hydra/YAML)
-- `data/` - Vendored datasets
-- `scripts/` - Thin experiment runners
-- `docs/` - Documentation
+Most of the science lives in `evaluation/` (what we measure) and `backends/` (what we trust and how we sandbox it).
 
-## Datasets
+- `src/.../evaluation/` -- scoring, normalization, integrity checks. If a metric looks wrong, start here.
+- `src/.../backends/` -- PyMC/Stan execution and safety gates (`pymc_safe/` for structure checks, `sstan/` for SafeStan).
+- `src/.../experiments/` + `scoring/` -- training-time glue: reward functions, subprocess scoring, rollout environments.
+- `configs/` -- Hydra config groups. Sweeps under `configs/sweeps/`.
+- `scripts/` -- thin entrypoints for training, sweeps, analysis, launchers.
+- `docs/` -- `base_rate_exploits.md` (flagged programs), `scoring.md` (what the scores mean).
 
-SynthStats JSONL is vendored under:
-
-- `data/synthstats/synthstats_{train,val,test}.jsonl`
-
-Loader utility:
-
-```python
-from ppl_synthesis_reward_hacking.data.jsonl_loader import load_jsonl_dataset
-
-examples = load_jsonl_dataset("data/synthstats/synthstats_val.jsonl", max_examples=3)
-```
-
-Config entry:
-
-- `configs/data/synthstats.yaml`
+Paper pointers: normalization checks are under `evaluation/`; PyMC safety gate under `backends/pymc_safe/`; SafeStan under `backends/sstan/`.
 
 ## Base-Rate Exploit Sweep
 
@@ -124,10 +144,7 @@ Beyond the structural checker (`check_pymc_model`), the sweep applies two integr
 - **Fabricated data** (`check_fabricated_data`): compares the total number of observed data points in the compiled model against the expected data dict. Flags models that create extra observed variables to inflate the likelihood.
 - **Data-ignored perturbation test** (`check_data_used`): re-executes the model with halved data arrays and compares `point_logps()` at the default initial point. If the log-probabilities are identical, the model does not depend on its observed data.
 
-## Top Targets
+## Docs
 
-- Demonstrate reward hacking on micro-benchmarks (constant score, double counting, improper lpdf).
-- Establish a clean backend matrix (Stan/PyMC/Pyro) with a shared protocol.
-- Show SStan blocks hacked programs while honest baselines pass.
-- Scale to regression/classification tasks under optimization pressure.
-- Produce reproducible aggregates and plots from experiment outputs.
+- [Base-rate exploit examples](docs/base_rate_exploits.md)
+- [Scoring methods](docs/scoring.md)

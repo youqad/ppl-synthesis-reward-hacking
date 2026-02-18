@@ -51,7 +51,6 @@ mkdir -p "$OUTPUT_DIR"
 #   Fallback:  Qwen/Qwen3-1.7B (~15-20 GB) if OOM
 python scripts/trl_reward_hacking.py \
     --model Qwen/Qwen3-4B-Instruct-2507 \
-    --dataset data/synthstats/synthstats_train.jsonl \
     --n-steps 1000 \
     --n-prompts 100 \
     --num-generations 8 \
