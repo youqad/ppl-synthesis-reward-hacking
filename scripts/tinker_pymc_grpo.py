@@ -50,11 +50,11 @@ def parse_args() -> argparse.Namespace:
         default="none",
     )
 
-    p.add_argument("--interface-d", type=int, default=1)
-    p.add_argument("--p-true-mode", choices=["sampled_beta", "fixed"], default="sampled_beta")
-    p.add_argument("--p-true-fixed", type=float, default=0.5)
-    p.add_argument("--p-true-beta-alpha", type=float, default=1.0)
-    p.add_argument("--p-true-beta-beta", type=float, default=1.0)
+    p.add_argument("--dataset-name", default="linear_regression")
+    p.add_argument("--dataset-n-features", type=int, default=3)
+    p.add_argument("--dataset-noise-sigma", type=float, default=1.0)
+    p.add_argument("--dataset-n-train", type=int, default=20)
+    p.add_argument("--dataset-n-holdout", type=int, default=256)
     p.add_argument("--scoring-seed-base", type=int, default=0)
     p.add_argument("--smc-draws", type=int, default=500)
     p.add_argument("--scoring-workers", type=int, default=1)
@@ -63,6 +63,11 @@ def parse_args() -> argparse.Namespace:
         "--paper-track",
         choices=["part_a_emergence", "part_b_mitigation"],
         default="part_a_emergence",
+    )
+    p.add_argument(
+        "--claim-mode",
+        choices=["formal_lh", "predictive_quality", "legacy_exploratory"],
+        default="formal_lh",
     )
     p.add_argument("--monitoring-mode", choices=["off", "judge_evolving"], default="off")
 
@@ -74,8 +79,22 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--judge-env-file", default=None)
     p.add_argument("--rubric-evolution-interval", type=int, default=0)
 
-    p.add_argument("--normalization-interval", type=int, default=5)
-    p.add_argument("--normalization-sample-size", type=int, default=10)
+    p.add_argument(
+        "--normalization-method",
+        choices=["auto", "exact_binary", "importance_mc", "off"],
+        default="auto",
+    )
+    p.add_argument(
+        "--normalization-delta-scope",
+        choices=["raw_y_binary", "raw_y_fixed_x", "raw_y"],
+        default="raw_y_binary",
+    )
+    p.add_argument("--normalization-epsilon", type=float, default=0.05)
+    p.add_argument("--normalization-ci-alpha", type=float, default=0.05)
+    p.add_argument("--normalization-mc-samples", type=int, default=256)
+    p.add_argument("--normalization-min-ess", type=float, default=30.0)
+    p.add_argument("--normalization-interval", type=int, default=1)
+    p.add_argument("--normalization-sample-size", type=int, default=20)
 
     p.add_argument("--output-dir", default="artifacts/tinker_pymc_grpo")
     p.add_argument("--exemplar-config", default=None)
@@ -107,16 +126,23 @@ def main() -> None:
             "reward_metric": args.reward_metric,
             "reward_data_split": args.reward_data_split,
             "predictive_estimator": args.predictive_estimator,
-            "interface_d": args.interface_d,
-            "p_true_mode": args.p_true_mode,
-            "p_true_fixed": args.p_true_fixed,
-            "p_true_beta_alpha": args.p_true_beta_alpha,
-            "p_true_beta_beta": args.p_true_beta_beta,
+            "dataset_name": args.dataset_name,
+            "dataset_n_features": args.dataset_n_features,
+            "dataset_noise_sigma": args.dataset_noise_sigma,
+            "dataset_n_train": args.dataset_n_train,
+            "dataset_n_holdout": args.dataset_n_holdout,
             "scoring_seed_base": args.scoring_seed_base,
             "smc_draws": args.smc_draws,
             "scoring_workers": args.scoring_workers,
             "paper_track": args.paper_track,
+            "claim_mode": args.claim_mode,
             "monitoring_mode": args.monitoring_mode,
+            "normalization_method": args.normalization_method,
+            "normalization_delta_scope": args.normalization_delta_scope,
+            "normalization_epsilon": args.normalization_epsilon,
+            "normalization_ci_alpha": args.normalization_ci_alpha,
+            "normalization_mc_samples": args.normalization_mc_samples,
+            "normalization_min_ess": args.normalization_min_ess,
             "judge_interval": args.judge_interval,
             "judge_sample_size": args.judge_sample_size,
             "judge_dedup": args.judge_dedup,

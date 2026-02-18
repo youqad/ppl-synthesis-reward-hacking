@@ -5,9 +5,9 @@ from pathlib import Path
 from ppl_synthesis_reward_hacking.data.jsonl_loader import load_jsonl_dataset
 
 
-def test_load_synthstats_val_dataset() -> None:
+def test_load_pymc_val() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    dataset_path = repo_root / "data" / "synthstats" / "synthstats_val.jsonl"
+    dataset_path = repo_root / "data" / "pymc_reward" / "pymc_reward_val.jsonl"
 
     examples = load_jsonl_dataset(dataset_path, max_examples=3)
 

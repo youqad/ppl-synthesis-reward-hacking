@@ -1,7 +1,7 @@
 """GRPO (Group Relative Policy Optimization) components.
 
-Training uses only reported_reward. oracle_score is logged for diagnostics
-but never enters the gradient computation.
+Training uses only reported_reward. Normalization check (∫ Z_p ≠ 1)
+is the sole hacking detection signal.
 """
 
 from __future__ import annotations
@@ -10,8 +10,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-
-HACKING_GAP_THRESHOLD = 10.0
 
 
 @dataclass
@@ -42,7 +40,6 @@ class RolloutData:
     completion_tokens: list[int]
     sampling_logprobs: list[float]
     reported_reward: float
-    oracle_score: float  # diagnostics only
     log_mass: float
 
 

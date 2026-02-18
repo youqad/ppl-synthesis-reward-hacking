@@ -14,8 +14,6 @@ def _record(
     batch: int = 0,
     index: int = 0,
     reported: float = 0.0,
-    oracle: float = 0.0,
-    gap: float = 0.0,
     outcome: str = "valid",
     metadata: dict | None = None,
 ) -> CompletionRecord:
@@ -26,8 +24,6 @@ def _record(
         completion_text="c",
         code="def model(data): pass",
         reported_reward=reported,
-        oracle_score=oracle,
-        gap=gap,
         outcome=outcome,
         timestamp="2026-01-01T00:00:00Z",
         metadata=metadata,
@@ -39,8 +35,6 @@ def test_compute_step_wandb_metrics_aggregates_outcomes_and_metric_fields() -> N
         _record(
             index=0,
             reported=1.0,
-            oracle=0.5,
-            gap=0.5,
             outcome="valid",
             metadata={
                 "decomposition": {
@@ -54,8 +48,6 @@ def test_compute_step_wandb_metrics_aggregates_outcomes_and_metric_fields() -> N
         _record(
             index=1,
             reported=2.0,
-            oracle=1.0,
-            gap=1.0,
             outcome="valid",
             metadata={
                 "decomposition": {
@@ -134,8 +126,6 @@ def test_build_wandb_final_summary_includes_paper_and_sweep_keys() -> None:
     )
     results = {
         "final_reward_mean": 1.25,
-        "final_oracle_proxy_mean": -0.8,
-        "final_gap_proxy_mean": 2.05,
         "final_valid_rate": 0.91,
     }
     norm_payload = {"frac_non_normalized": 0.35}
@@ -151,12 +141,12 @@ def test_build_wandb_final_summary_includes_paper_and_sweep_keys() -> None:
     )
 
     assert summary["sweep/run_status"] == "success"
-    assert summary["sweep/final_reward_mean"] == 1.25
-    assert summary["sweep/final_gap_proxy_mean"] == 2.05
+    assert summary["sweep/final_lh_formal_signal"] == 0.35
     assert summary["paper/track"] == "part_a_emergence"
     assert summary["paper/reward_metric"] == "log_marginal_likelihood"
     assert summary["paper/reward_data_split"] == "train"
     assert summary["paper/predictive_estimator"] == "none"
     assert summary["paper/frac_non_normalized_final"] == 0.35
+    assert summary["paper/lh_formal_signal_final"] == 0.35
     assert summary["paper/judge_hacking_rate_final"] == 0.7
     assert summary["paper/lh_family_prevalence_final"] == 0.62

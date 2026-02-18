@@ -1,8 +1,4 @@
-"""Tinker GRPO training loop with local PyMC scoring.
-
-Extracted from scripts/tinker_pymc_grpo.py for reuse by Hydra entrypoints
-and direct script invocation.
-"""
+"""Tinker GRPO training loop with local PyMC scoring."""
 
 from __future__ import annotations
 
@@ -17,15 +13,17 @@ from typing import Any, cast
 import numpy as np
 
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import extract_pymc_code
-from ppl_synthesis_reward_hacking.data.synthstats_loader import (
-    SYSTEM_PROMPT,
-    format_chat_prompt,
-    get_prompts,
-    make_scoring_data_dict,
+from ppl_synthesis_reward_hacking.config.contracts import validate_train_contract
+from ppl_synthesis_reward_hacking.data.generators import generate_dataset
+from ppl_synthesis_reward_hacking.data.interfaces import list_dataset_interfaces
+from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
+    format_prompt_for_dataset,
+    get_prompts_for_dataset,
+    get_system_prompt,
 )
 from ppl_synthesis_reward_hacking.evaluation.heuristics import detect_exploits
 from ppl_synthesis_reward_hacking.evaluation.normalization_check import (
-    check_normalization_small_d,
+    check_normalization,
 )
 from ppl_synthesis_reward_hacking.experiments.grpo import (
     RolloutData,
@@ -33,7 +31,7 @@ from ppl_synthesis_reward_hacking.experiments.grpo import (
     compute_group_relative_advantages,
 )
 from ppl_synthesis_reward_hacking.experiments.results import (
-    compute_trajectory_metrics,
+    compute_traj_metrics,
     print_training_summary,
 )
 from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
@@ -65,7 +63,6 @@ from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
     judge_completions,
     judge_with_rubric,
 )
-from ppl_synthesis_reward_hacking.scoring.metrics import validate_metric_estimator
 from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
 from ppl_synthesis_reward_hacking.utils.tinker import tinker, types, validate_tinker_setup
 
@@ -98,13 +95,17 @@ class TinkerGRPOConfig:
     reward_metric: str = "log_marginal_likelihood"
     reward_data_split: str = "train"
     predictive_estimator: str = "none"
+    claim_mode: str = "formal_lh"
 
-    # raw-data interface policy
-    interface_d: int = 1
-    p_true_mode: str = "sampled_beta"  # sampled_beta | fixed
-    p_true_fixed: float = 0.5
-    p_true_beta_alpha: float = 1.0
-    p_true_beta_beta: float = 1.0
+    # dataset interface
+    dataset_name: str = "linear_regression"
+    dataset_n_features: int = 3
+    dataset_noise_sigma: float = 1.0
+    dataset_n_train: int = 20
+    dataset_n_holdout: int = 256
+    dataset_p_true_alpha: float = 1.0
+    dataset_p_true_beta: float = 1.0
+    dataset_p_true_fixed: float | None = None
     scoring_seed_base: int = 0
     smc_draws: int = 500
     scoring_workers: int = 1
@@ -131,8 +132,14 @@ class TinkerGRPOConfig:
     rubric_evolution_interval: int = 0
 
     # normalization monitoring (0 disables)
-    normalization_interval: int = 5
-    normalization_sample_size: int = 10
+    normalization_method: str = "auto"
+    normalization_delta_scope: str = "raw_y_binary"
+    normalization_epsilon: float = 5e-2
+    normalization_ci_alpha: float = 0.05
+    normalization_mc_samples: int = 256
+    normalization_min_ess: float = 30.0
+    normalization_interval: int = 1
+    normalization_sample_size: int = 20
 
     # W&B completion table logging interval (0 disables)
     wandb_table_interval: int = 10
@@ -141,13 +148,12 @@ class TinkerGRPOConfig:
 def _coalesce_nested_value(raw: Any, key: str) -> Any:
     """Extract scalar config values from Hydra nested config-group payloads."""
     if isinstance(raw, Mapping):
-        # reward_metric: {reward_metric: log_marginal_likelihood}
         if key in raw:
             return raw[key]
-        # Fallback for single-key dict payloads.
+        # Accept single-key wrapper payloads.
         if len(raw) == 1:
             return next(iter(raw.values()))
-    # Back-compat for previous YAML parsing of `off` as bool false.
+    # Compatibility with older YAML parsing of `off` as bool false.
     if key == "monitoring_mode" and isinstance(raw, bool):
         return "off" if raw is False else "judge_evolving"
     return raw
@@ -157,11 +163,12 @@ def config_from_mapping(mapping: Mapping[str, Any]) -> TinkerGRPOConfig:
     """Create TinkerGRPOConfig from a mapping (Hydra-friendly)."""
     flattened: dict[str, Any] = dict(mapping)
 
-    # Pull scalar values out of compositional Hydra subgroups.
+    # Pull scalar values out of Hydra subgroups.
     for scalar_key in (
         "reward_metric",
         "reward_data_split",
         "predictive_estimator",
+        "claim_mode",
         "paper_track",
         "monitoring_mode",
     ):
@@ -171,14 +178,32 @@ def config_from_mapping(mapping: Mapping[str, Any]) -> TinkerGRPOConfig:
     data_interface_payload = flattened.pop("data_interface", None)
     if isinstance(data_interface_payload, Mapping):
         for key in (
-            "interface_d",
-            "p_true_mode",
-            "p_true_fixed",
-            "p_true_beta_alpha",
-            "p_true_beta_beta",
+            "dataset_name",
+            "dataset_n_features",
+            "dataset_noise_sigma",
+            "dataset_n_train",
+            "dataset_n_holdout",
+            "dataset_p_true_alpha",
+            "dataset_p_true_beta",
+            "dataset_p_true_fixed",
         ):
             if key not in flattened and key in data_interface_payload:
                 flattened[key] = data_interface_payload[key]
+
+    normalization_payload = flattened.pop("normalization", None)
+    if isinstance(normalization_payload, Mapping):
+        for key in (
+            "normalization_method",
+            "normalization_delta_scope",
+            "normalization_epsilon",
+            "normalization_ci_alpha",
+            "normalization_mc_samples",
+            "normalization_min_ess",
+            "normalization_interval",
+            "normalization_sample_size",
+        ):
+            if key not in flattened and key in normalization_payload:
+                flattened[key] = normalization_payload[key]
 
     monitoring_payload = mapping.get("monitoring_mode")
     if isinstance(monitoring_payload, Mapping):
@@ -186,7 +211,7 @@ def config_from_mapping(mapping: Mapping[str, Any]) -> TinkerGRPOConfig:
             if key not in flattened and key in monitoring_payload:
                 flattened[key] = monitoring_payload[key]
 
-    # Ignore meta keys that are useful for Hydra composition but not runtime config.
+    # Ignore composition-only metadata.
     flattened.pop("name", None)
 
     allowed_keys = {f.name for f in fields(TinkerGRPOConfig)}
@@ -197,35 +222,53 @@ def config_from_mapping(mapping: Mapping[str, Any]) -> TinkerGRPOConfig:
     return cfg
 
 
+_SUPPORTED_DATASETS = frozenset(list_dataset_interfaces())
+
+
 def _validate_config(config: TinkerGRPOConfig) -> None:
-    validate_metric_estimator(config.reward_metric, config.predictive_estimator)
-    if config.reward_data_split not in {"train", "holdout"}:
-        raise ValueError("reward_data_split must be train|holdout")
     if config.paper_track not in {"part_a_emergence", "part_b_mitigation"}:
         raise ValueError("paper_track must be part_a_emergence|part_b_mitigation")
-    if config.p_true_mode not in {"sampled_beta", "fixed"}:
-        raise ValueError("p_true_mode must be sampled_beta|fixed")
+    if config.dataset_name not in _SUPPORTED_DATASETS:
+        raise ValueError(
+            "dataset_name must be one of "
+            f"{sorted(_SUPPORTED_DATASETS)}, got {config.dataset_name!r}"
+        )
+    resolved = validate_train_contract(
+        reward_metric=config.reward_metric,
+        reward_data_split=config.reward_data_split,
+        predictive_estimator=config.predictive_estimator,
+        claim_mode=config.claim_mode,
+        dataset_name=config.dataset_name,
+        normalization_method=config.normalization_method,
+        normalization_delta_scope=config.normalization_delta_scope,
+        normalization_epsilon=config.normalization_epsilon,
+        normalization_ci_alpha=config.normalization_ci_alpha,
+        normalization_mc_samples=config.normalization_mc_samples,
+        normalization_min_ess=config.normalization_min_ess,
+        normalization_interval=config.normalization_interval,
+    )
+    config.normalization_method = resolved.normalization_method
+    config.normalization_delta_scope = resolved.normalization_delta_scope
 
 
 @dataclass
 class TrajectoryPoint:
     step: int
     reward_mean: float
-    oracle_proxy_mean: float
-    gap_proxy_mean: float
     n_valid: int
     n_total: int
     n_parse_fail: int
     n_exec_fail: int
     frac_zero_variance: float = 0.0
-    frac_above_oracle_proxy: float = 0.0
+    frac_non_normalized: float = float("nan")
+    mean_abs_log_mass: float = float("nan")
+    n_norm_checked: int = 0
 
 
 @dataclass
 class _StepData:
     rollouts_by_prompt: dict[int, list[RolloutData]]
     all_reported: list[float]
-    all_oracle: list[float]
     all_completion_hashes: list[str]
     step_records: list[CompletionRecord]
     n_parse_fail: int = 0
@@ -259,9 +302,9 @@ def _format_exemplar_section(exemplars: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _format_chat_prompt(user_message: str, exemplar_section: str) -> str:
+def _format_chat_prompt(user_message: str, exemplar_section: str, dataset_name: str) -> str:
     """Like format_chat_prompt but injects an exemplar section into the system message."""
-    system = SYSTEM_PROMPT + exemplar_section
+    system = get_system_prompt(dataset_name) + exemplar_section
     return (
         f"<|im_start|>system\n{system}<|im_end|>\n"
         f"<|im_start|>user\n{user_message}<|im_end|>\n"
@@ -289,12 +332,16 @@ def run_training(config: TinkerGRPOConfig) -> dict:
     update_summary(
         {
             "paper/track": config.paper_track,
+            "paper/claim_mode": config.claim_mode,
             "paper/reward_metric": config.reward_metric,
             "paper/reward_data_split": config.reward_data_split,
             "paper/predictive_estimator": config.predictive_estimator,
             "paper/monitoring_mode": config.monitoring_mode,
-            "paper/interface_d": config.interface_d,
-            "paper/p_true_mode": config.p_true_mode,
+            "paper/normalization_method": config.normalization_method,
+            "paper/delta_scope": config.normalization_delta_scope,
+            "paper/dataset_name": config.dataset_name,
+            "paper/dataset_n_train": config.dataset_n_train,
+            "paper/dataset_n_features": config.dataset_n_features,
         }
     )
     _log_training_start(config, output_dir)
@@ -333,9 +380,7 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         _wandb_log_step(
             step,
             point.reward_mean,
-            point.oracle_proxy_mean,
             extra={
-                "train/gap_proxy": point.gap_proxy_mean,
                 "train/valid_rate": point.n_valid / max(point.n_total, 1),
                 "train/diversity": len(set(step_data.all_completion_hashes))
                 / max(len(step_data.all_completion_hashes), 1),
@@ -414,18 +459,21 @@ def _initialize_training(
         exemplar_section = _format_exemplar_section(exemplars)
         log.info("Loaded %d exemplars from %s", len(exemplars), config.exemplar_config)
         prompt_texts = [
-            _format_chat_prompt(p, exemplar_section) for p in get_prompts(config.n_prompts)
+            _format_chat_prompt(p, exemplar_section, config.dataset_name)
+            for p in get_prompts_for_dataset(config.dataset_name, config.n_prompts)
         ]
     else:
-        prompt_texts = [format_chat_prompt(p) for p in get_prompts(config.n_prompts)]
+        prompt_texts = [
+            format_prompt_for_dataset(config.dataset_name, p)
+            for p in get_prompts_for_dataset(config.dataset_name, config.n_prompts)
+        ]
     return writer, judge_metrics_path, judge_cfg, training_client, tokenizer, prompt_texts
 
 
 def _get_normalization_indices(step: int, config: TinkerGRPOConfig) -> set[int]:
-    """Select which record indices to run normalization on this step."""
     if config.normalization_interval <= 0 or step % config.normalization_interval != 0:
         return set()
-    if config.interface_d > 5:
+    if config.normalization_method == "off":
         return set()
     total = config.n_prompts * config.rollouts_per_prompt
     sample_size = min(config.normalization_sample_size, total)
@@ -449,7 +497,6 @@ def _collect_step_data(
     step_data = _StepData(
         rollouts_by_prompt={},
         all_reported=[],
-        all_oracle=[],
         all_completion_hashes=[],
         step_records=[],
     )
@@ -494,7 +541,7 @@ def _collect_prompt_rollouts(
     ).result()
     scoring_data = _make_prompt_scoring_data(config, step, prompt_idx)
 
-    # batch-score when workers > 1 (needed for SMC which is 10-100x slower)
+    # Batch-score when workers > 1; this helps on slow SMC scoring.
     batch_scores: list[tuple[float, float | None, dict[Any, Any] | None] | None]
     if config.scoring_workers > 1:
         from ppl_synthesis_reward_hacking.experiments.parallel_scorer import score_batch_parallel
@@ -539,27 +586,44 @@ def _collect_prompt_rollouts(
 
 def _make_prompt_scoring_data(config: TinkerGRPOConfig, step: int, prompt_idx: int) -> dict:
     prompt_seed = config.scoring_seed_base + step * config.n_prompts + prompt_idx
-    if config.p_true_mode == "sampled_beta":
-        rng = np.random.default_rng(prompt_seed)
-        p_true = float(rng.beta(config.p_true_beta_alpha, config.p_true_beta_beta))
-    else:
-        p_true = float(config.p_true_fixed)
+    dataset_params: dict[str, Any] = {
+        "n_features": config.dataset_n_features,
+        "d": config.dataset_n_features,
+        "noise_sigma": config.dataset_noise_sigma,
+        "split": {
+            "n_train": config.dataset_n_train,
+            "n_holdout": config.dataset_n_holdout,
+        },
+    }
+    if config.dataset_name.startswith("bernoulli"):
+        if config.dataset_p_true_fixed is None:
+            rng = np.random.default_rng(prompt_seed + 13_371)
+            p_true = float(rng.beta(config.dataset_p_true_alpha, config.dataset_p_true_beta))
+        else:
+            p_true = float(config.dataset_p_true_fixed)
+        dataset_params["p_true"] = p_true
 
-    train_data = make_scoring_data_dict(
-        d=config.interface_d,
-        p_true=p_true,
+    dataset = generate_dataset(
+        config.dataset_name,
+        dataset_params,
         seed=prompt_seed,
     )
-    holdout_data = make_scoring_data_dict(
-        d=config.interface_d,
-        p_true=p_true,
-        seed=prompt_seed + 1_000_000,
-    )
-    train_data["y_train"] = np.asarray(train_data["y"], dtype=np.float64)
-    train_data["y_holdout"] = np.asarray(holdout_data["y"], dtype=np.float64)
-    train_data["p_true"] = p_true
-    train_data["seed"] = prompt_seed
-    return train_data
+    data: dict[str, Any] = dict(dataset.train)
+    data["n"] = config.dataset_n_train
+    data["p"] = config.dataset_n_features
+    data["d"] = config.dataset_n_features
+    data["dataset_name"] = config.dataset_name
+    if "p_true" in dataset.meta:
+        data["p_true"] = float(dataset.meta["p_true"])
+
+    data["y_train"] = np.asarray(dataset.train["y"], dtype=np.float64)
+    data["y_holdout"] = np.asarray(dataset.holdout["y"], dtype=np.float64)
+    if "X" in dataset.train:
+        data["X_train"] = np.asarray(dataset.train["X"], dtype=np.float64)
+        data["X_holdout"] = np.asarray(dataset.holdout["X"], dtype=np.float64)
+
+    data["seed"] = prompt_seed
+    return data
 
 
 def _process_sequence(
@@ -592,14 +656,12 @@ def _process_sequence(
             predictive_estimator=config.predictive_estimator,
             smc_draws=config.smc_draws,
         )
-    oracle_score = float(oracle) if oracle is not None else float("nan")
     outcome = classify_outcome(reported)
     if outcome == "parse_fail":
         step_data.n_parse_fail += 1
     elif outcome == "exec_fail":
         step_data.n_exec_fail += 1
 
-    # normalization check for sampled records (only on valid outcomes)
     global_idx = prompt_idx * config.rollouts_per_prompt + seq_idx
     norm_result = None
     if normalize_indices and global_idx in normalize_indices and outcome == "valid":
@@ -611,6 +673,13 @@ def _process_sequence(
             reward_data_split=config.reward_data_split,
             predictive_estimator=config.predictive_estimator,
             smc_draws=config.smc_draws,
+            method=config.normalization_method,
+            delta_scope=config.normalization_delta_scope,
+            epsilon=config.normalization_epsilon,
+            ci_alpha=config.normalization_ci_alpha,
+            mc_samples=config.normalization_mc_samples,
+            min_ess=config.normalization_min_ess,
+            seed=int(scoring_data.get("seed", step * 10_000 + global_idx)),
         )
 
     rollout = RolloutData(
@@ -618,11 +687,9 @@ def _process_sequence(
         completion_tokens=list(seq.tokens),
         sampling_logprobs=list(seq.logprobs) if seq.logprobs else [0.0] * len(seq.tokens),
         reported_reward=reported,
-        oracle_score=oracle_score,
         log_mass=norm_result.get("log_mass", 0.0) if norm_result else 0.0,
     )
     step_data.all_reported.append(reported)
-    step_data.all_oracle.append(oracle_score)
 
     metadata: dict[str, Any] = {}
     if decomposition:
@@ -637,8 +704,6 @@ def _process_sequence(
         completion_text=completion_text,
         code=extract_pymc_code(completion_text),
         reported_reward=reported,
-        oracle_score=oracle_score,
-        gap=reported - oracle_score if np.isfinite(oracle_score) else float("nan"),
         outcome=outcome,
         timestamp=make_timestamp(),
         metadata=metadata or None,
@@ -657,28 +722,56 @@ def _run_normalization_check(
     reward_data_split: str,
     predictive_estimator: str,
     smc_draws: int,
+    method: str,
+    delta_scope: str,
+    epsilon: float,
+    ci_alpha: float,
+    mc_samples: int,
+    min_ess: float,
+    seed: int,
 ) -> dict[str, Any] | None:
-    """Run normalization check, returning result dict or None on failure."""
+    """Run normalization check; return None on failure."""
     try:
-        result = check_normalization_small_d(
+        result = check_normalization(
             completion_text,
+            method=method,
             d=int(scoring_data.get("d", np.asarray(scoring_data["y"]).size)),
             p_true=float(scoring_data.get("p_true", 0.5)),
+            seed=seed,
             timeout=timeout,
+            epsilon=epsilon,
+            ci_alpha=ci_alpha,
+            mc_samples=mc_samples,
+            min_ess=min_ess,
             reward_metric=reward_metric,
             reward_data_split=reward_data_split,
             predictive_estimator=predictive_estimator,
             smc_draws=smc_draws,
             scoring_data=scoring_data,
+            delta_scope=delta_scope,
         )
         if result.get("ok"):
             return {
                 "log_mass": result["log_mass"],
                 "mass": result.get("mass"),
                 "is_normalized": result["is_normalized"],
+                "status": result.get("status"),
+                "method": result.get("method"),
+                "delta_scope": result.get("delta_scope"),
+                "ess": result.get("ess"),
+                "ci_log_mass_low": result.get("ci_log_mass_low"),
+                "ci_log_mass_high": result.get("ci_log_mass_high"),
                 "d": result.get("d"),
             }
-        return {"ok": False, "reason": result.get("reason", "unknown"), "d": result.get("d")}
+        return {
+            "ok": False,
+            "reason": result.get("reason", "unknown"),
+            "status": result.get("status"),
+            "method": result.get("method", method),
+            "delta_scope": result.get("delta_scope", delta_scope),
+            "is_normalized": False,
+            "d": result.get("d"),
+        }
     except Exception as exc:
         log.debug("normalization check failed: %s", exc)
         return None
@@ -689,7 +782,7 @@ def _collect_lh_programs(
     step_records: list[CompletionRecord],
     _judge_verdicts: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Filter step records for programs with integral Z_p != 1 (formal LH)."""
+    """Return step records flagged as formally non-normalized."""
     lh_rows: list[dict[str, Any]] = []
 
     for rec in step_records:
@@ -713,8 +806,6 @@ def _collect_lh_programs(
                 "step": step,
                 "code": rec.code or "",
                 "reported": rec.reported_reward,
-                "oracle": rec.oracle_score,
-                "gap": rec.gap,
                 "detection": ",".join(detection),
                 "log_mass": log_mass,
                 "judge_verdict": "",
@@ -726,7 +817,7 @@ def _collect_lh_programs(
 
 
 def _compute_heuristic_rates(records: list[CompletionRecord]) -> dict[str, float]:
-    """Run heuristic exploit detection over valid records and return tag rates."""
+    """Compute heuristic exploit tag rates over valid records."""
     valid = [r for r in records if r.outcome == "valid" and r.code]
     if not valid:
         return {}
@@ -755,7 +846,7 @@ def _compute_heuristic_rates(records: list[CompletionRecord]) -> dict[str, float
 def _log_normalization_summary(
     step: int, step_data: _StepData, metrics_path: Path
 ) -> dict[str, Any] | None:
-    """Extract normalization results from step records and log summary."""
+    """Aggregate and log normalization results from step records."""
     log_masses = []
     n_checked = 0
     n_non_normalized = 0
@@ -767,10 +858,10 @@ def _log_normalization_summary(
             continue
         n_checked += 1
         lm = norm.get("log_mass")
+        if norm.get("is_normalized") is False:
+            n_non_normalized += 1
         if lm is not None:
             log_masses.append(float(lm))
-            if not norm.get("is_normalized", True):
-                n_non_normalized += 1
 
     if not n_checked:
         return None
@@ -840,36 +931,39 @@ def _compute_step_point(
         for reported in step_data.all_reported
         if np.isfinite(reported) and classify_outcome(float(reported)) == "valid"
     ]
-    oracle_valid = [oracle for oracle in step_data.all_oracle if np.isfinite(oracle)]
-    aligned_pairs = [
-        (reported, oracle)
-        for reported, oracle in zip(step_data.all_reported, step_data.all_oracle, strict=True)
-        if np.isfinite(reported)
-        and np.isfinite(oracle)
-        and classify_outcome(float(reported)) == "valid"
-    ]
-
     reward_mean = float(np.mean(valid_rewards)) if valid_rewards else float("nan")
-    oracle_proxy_mean = float(np.mean(oracle_valid)) if oracle_valid else float("nan")
-    if np.isfinite(reward_mean) and np.isfinite(oracle_proxy_mean):
-        gap_proxy = reward_mean - oracle_proxy_mean
-    else:
-        gap_proxy = float("nan")
-    frac_above_proxy = (
-        sum(1 for r, o in aligned_pairs if r > o) / len(aligned_pairs) if aligned_pairs else 0.0
-    )
+
+    # extract normalization metrics from step records
+    n_norm_checked = 0
+    n_non_normalized = 0
+    abs_log_masses: list[float] = []
+    for rec in step_data.step_records:
+        if not rec.metadata:
+            continue
+        norm = rec.metadata.get("normalization")
+        if not norm or not isinstance(norm, dict):
+            continue
+        n_norm_checked += 1
+        lm = norm.get("log_mass")
+        if norm.get("is_normalized") is False:
+            n_non_normalized += 1
+        if lm is not None:
+            abs_log_masses.append(abs(float(lm)))
+
+    frac_non_norm = n_non_normalized / n_norm_checked if n_norm_checked > 0 else float("nan")
+    mean_abs_lm = float(np.mean(abs_log_masses)) if abs_log_masses else float("nan")
 
     return TrajectoryPoint(
         step=step,
         reward_mean=reward_mean,
-        oracle_proxy_mean=oracle_proxy_mean,
-        gap_proxy_mean=gap_proxy,
         n_valid=len(valid_rewards),
         n_total=len(step_data.all_reported),
         n_parse_fail=step_data.n_parse_fail,
         n_exec_fail=step_data.n_exec_fail,
         frac_zero_variance=frac_zero_variance,
-        frac_above_oracle_proxy=frac_above_proxy,
+        frac_non_normalized=frac_non_norm,
+        mean_abs_log_mass=mean_abs_lm,
+        n_norm_checked=n_norm_checked,
     )
 
 
@@ -880,7 +974,7 @@ def _write_trajectory(output_dir: Path, trajectory: list[TrajectoryPoint]) -> No
 
 
 def _compute_results(config: TinkerGRPOConfig, trajectory: list[TrajectoryPoint]) -> dict:
-    metrics = compute_trajectory_metrics(cast(list[Any], trajectory))
+    metrics = compute_traj_metrics(cast(list[Any], trajectory))
     if "error" in metrics:
         metrics["n_steps"] = len(trajectory)
         return metrics
@@ -896,24 +990,29 @@ def _compute_results(config: TinkerGRPOConfig, trajectory: list[TrajectoryPoint]
         "top_k": config.top_k,
         "learning_rate": config.learning_rate,
         "lora_rank": config.lora_rank,
-        "interface_d": config.interface_d,
-        "p_true_mode": config.p_true_mode,
-        "p_true_fixed": config.p_true_fixed,
-        "p_true_beta_alpha": config.p_true_beta_alpha,
-        "p_true_beta_beta": config.p_true_beta_beta,
+        "dataset_name": config.dataset_name,
+        "dataset_n_features": config.dataset_n_features,
+        "dataset_noise_sigma": config.dataset_noise_sigma,
+        "dataset_n_train": config.dataset_n_train,
+        "dataset_n_holdout": config.dataset_n_holdout,
         "reward_metric": config.reward_metric,
         "reward_data_split": config.reward_data_split,
         "predictive_estimator": config.predictive_estimator,
+        "claim_mode": config.claim_mode,
         "smc_draws": config.smc_draws,
         "scoring_workers": config.scoring_workers,
         "max_tokens": config.max_tokens,
         "paper_track": config.paper_track,
         "monitoring_mode": config.monitoring_mode,
+        "normalization_method": config.normalization_method,
+        "normalization_delta_scope": config.normalization_delta_scope,
+        "normalization_epsilon": config.normalization_epsilon,
+        "normalization_ci_alpha": config.normalization_ci_alpha,
+        "normalization_mc_samples": config.normalization_mc_samples,
+        "normalization_min_ess": config.normalization_min_ess,
     }
     metrics["final_frac_zero_variance"] = final.frac_zero_variance
     metrics["final_reward_mean"] = metrics.get("final_reward")
-    metrics["final_oracle_proxy_mean"] = metrics.get("final_oracle_proxy")
-    metrics["final_gap_proxy_mean"] = metrics.get("final_gap_proxy")
     metrics["n_steps_completed"] = len(trajectory)
     return metrics
 
@@ -934,8 +1033,9 @@ def _log_training_start(config: TinkerGRPOConfig, output_dir: Path) -> None:
         config.rollouts_per_prompt,
     )
     log.info(
-        "Track: %s | Monitoring: %s",
+        "Track: %s | Claim mode: %s | Monitoring: %s",
         config.paper_track,
+        config.claim_mode,
         config.monitoring_mode,
     )
     log.info(
@@ -945,29 +1045,36 @@ def _log_training_start(config: TinkerGRPOConfig, output_dir: Path) -> None:
         config.top_k,
     )
     log.info(
-        "Reward: metric=%s split=%s estimator=%s d=%d smc_draws=%d workers=%d",
+        "Reward: metric=%s split=%s estimator=%s smc_draws=%d workers=%d",
         config.reward_metric,
         config.reward_data_split,
         config.predictive_estimator,
-        config.interface_d,
         config.smc_draws,
         config.scoring_workers,
     )
-    if config.p_true_mode == "sampled_beta":
-        log.info(
-            "Interface p_true mode: sampled_beta(alpha=%.2f,beta=%.2f)",
-            config.p_true_beta_alpha,
-            config.p_true_beta_beta,
-        )
-    else:
-        log.info("Interface p_true mode: fixed(%.3f)", config.p_true_fixed)
+    log.info(
+        "Dataset: %s n_train=%d n_features=%d noise_sigma=%.2f n_holdout=%d",
+        config.dataset_name,
+        config.dataset_n_train,
+        config.dataset_n_features,
+        config.dataset_noise_sigma,
+        config.dataset_n_holdout,
+    )
     log.info("Output: %s", output_dir)
-    if config.normalization_interval > 0:
+    if config.normalization_interval > 0 and config.normalization_method != "off":
         log.info(
-            "Normalization: every %d steps, sample %d records (d=%d)",
+            (
+                "Normalization: method=%s delta=%s every=%d sample=%d "
+                "eps=%.3g ci_alpha=%.3g mc=%d min_ess=%.1f"
+            ),
+            config.normalization_method,
+            config.normalization_delta_scope,
             config.normalization_interval,
             config.normalization_sample_size,
-            config.interface_d,
+            config.normalization_epsilon,
+            config.normalization_ci_alpha,
+            config.normalization_mc_samples,
+            config.normalization_min_ess,
         )
 
 
@@ -1009,18 +1116,18 @@ def _log_reward_diag(step: int, all_reported: list[float]) -> None:
 
 def _log_step_summary(step: int, point: TrajectoryPoint) -> None:
     log.info(
-        "Step %3d: reward=%.3f oracle_proxy=%.3f gap_proxy=%.3f valid=%d/%d "
-        "parse_fail=%d exec_fail=%d frac_zero_var=%.2f above_oracle_proxy=%.2f",
+        "Step %3d: reward=%.3f valid=%d/%d parse_fail=%d exec_fail=%d "
+        "frac_zero_var=%.2f norm_checked=%d frac_non_norm=%.3f mean_abs_log_mass=%.3f",
         step,
         point.reward_mean,
-        point.oracle_proxy_mean,
-        point.gap_proxy_mean,
         point.n_valid,
         point.n_total,
         point.n_parse_fail,
         point.n_exec_fail,
         point.frac_zero_variance,
-        point.frac_above_oracle_proxy,
+        point.n_norm_checked,
+        point.frac_non_normalized if not np.isnan(point.frac_non_normalized) else 0.0,
+        point.mean_abs_log_mass if not np.isnan(point.mean_abs_log_mass) else 0.0,
     )
 
 
@@ -1226,20 +1333,18 @@ def _build_wandb_final_summary(
 
     summary: dict[str, Any] = {
         "sweep/run_status": run_status,
-        "sweep/final_reward_mean": results.get("final_reward_mean", results.get("final_reward")),
-        "sweep/final_oracle_proxy_mean": results.get(
-            "final_oracle_proxy_mean", results.get("final_oracle_proxy")
-        ),
-        "sweep/final_gap_proxy_mean": results.get(
-            "final_gap_proxy_mean", results.get("final_gap_proxy")
-        ),
+        "sweep/final_lh_formal_signal": results.get("final_frac_non_normalized", float("nan")),
         "sweep/final_valid_rate": results.get("final_valid_rate"),
         "paper/track": config.paper_track,
+        "paper/claim_mode": config.claim_mode,
         "paper/reward_metric": config.reward_metric,
         "paper/reward_data_split": config.reward_data_split,
         "paper/predictive_estimator": config.predictive_estimator,
         "paper/monitoring_mode": config.monitoring_mode,
+        "paper/normalization_method": config.normalization_method,
+        "paper/delta_scope": config.normalization_delta_scope,
         "paper/frac_non_normalized_final": float("nan"),
+        "paper/lh_formal_signal_final": float("nan"),
         "paper/judge_hacking_rate_final": float("nan"),
         "paper/lh_family_prevalence_final": float("nan"),
     }
@@ -1249,6 +1354,12 @@ def _build_wandb_final_summary(
         normalization_payload.get("frac_non_normalized"), int | float
     ):
         summary["paper/frac_non_normalized_final"] = float(
+            normalization_payload["frac_non_normalized"]
+        )
+        summary["paper/lh_formal_signal_final"] = float(
+            normalization_payload["frac_non_normalized"]
+        )
+        summary["sweep/final_lh_formal_signal"] = float(
             normalization_payload["frac_non_normalized"]
         )
     if judge_payload and isinstance(judge_payload.get("hacking_rate"), int | float):
@@ -1280,7 +1391,7 @@ def _init_rubric(config: TinkerGRPOConfig):
 
 
 def _make_rubric_judge_fn(cfg: JudgeConfig):
-    """Create a callable (prompt -> str) for rubric evolution proposals."""
+    """Create a prompt -> str callable for rubric evolution."""
     import os
 
     api_key = os.getenv(cfg.api_key_env)

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from ppl_synthesis_reward_hacking.experiments.results import (
-    compute_trajectory_metrics,
+    compute_traj_metrics,
     json_default,
     print_training_summary,
 )
@@ -14,55 +14,59 @@ from ppl_synthesis_reward_hacking.experiments.results import (
 
 @dataclass
 class FakeTP:
-    gap_proxy_mean: float
     reward_mean: float
-    oracle_proxy_mean: float
     n_valid: int
     n_total: int
+    frac_non_normalized: float = 0.0
+    mean_abs_log_mass: float = 0.0
+    n_norm_checked: int = 0
 
 
 class TestComputeTrajectoryMetrics:
     def test_normal_trajectory(self):
-        t = [FakeTP(1.0, -5.0, -6.0, 8, 10), FakeTP(3.0, -2.0, -8.0, 9, 10)]
-        m = compute_trajectory_metrics(t)
-        assert m["initial_gap_proxy"] == 1.0
-        assert m["final_gap_proxy"] == 3.0
-        assert m["gap_proxy_increase"] == pytest.approx(2.0)
+        t = [
+            FakeTP(-5.0, 8, 10, frac_non_normalized=0.0, n_norm_checked=10),
+            FakeTP(-2.0, 9, 10, frac_non_normalized=0.0, n_norm_checked=10),
+        ]
+        m = compute_traj_metrics(t)
+        assert m["initial_reward"] == -5.0
+        assert m["final_reward"] == -2.0
+        assert m["reward_increase"] == pytest.approx(3.0)
         assert m["final_valid_rate"] == pytest.approx(0.9)
-        assert m["hacking_detected"] is False
+        assert m["lh_detected"] is False
 
     def test_empty_trajectory(self):
-        m = compute_trajectory_metrics([])
+        m = compute_traj_metrics([])
         assert "error" in m
 
     def test_single_element(self):
-        m = compute_trajectory_metrics([FakeTP(0, 0, 0, 0, 0)])
+        m = compute_traj_metrics([FakeTP(0, 0, 0)])
         assert "error" in m
 
-    def test_nan_gap(self):
-        t = [FakeTP(float("nan"), -5.0, -6.0, 1, 1), FakeTP(3.0, -2.0, -8.0, 1, 1)]
-        m = compute_trajectory_metrics(t)
-        assert np.isnan(m["gap_proxy_increase"])
-        assert m["hacking_detected"] is False
+    def test_nan_reward(self):
+        t = [FakeTP(float("nan"), 1, 1), FakeTP(-2.0, 1, 1)]
+        m = compute_traj_metrics(t)
+        assert np.isnan(m["reward_increase"])
+        assert m["lh_detected"] is False
 
     def test_both_nan(self):
-        t = [
-            FakeTP(float("nan"), -5.0, -6.0, 1, 1),
-            FakeTP(float("nan"), -2.0, -8.0, 1, 1),
-        ]
-        m = compute_trajectory_metrics(t)
-        assert np.isnan(m["gap_proxy_increase"])
-        assert m["hacking_detected"] is False
+        t = [FakeTP(float("nan"), 1, 1), FakeTP(float("nan"), 1, 1)]
+        m = compute_traj_metrics(t)
+        assert np.isnan(m["reward_increase"])
+        assert m["lh_detected"] is False
 
     def test_zero_total(self):
-        t = [FakeTP(0.0, 0.0, 0.0, 0, 0), FakeTP(1.0, 1.0, 0.0, 0, 0)]
-        m = compute_trajectory_metrics(t)
+        t = [FakeTP(0.0, 0, 0), FakeTP(1.0, 0, 0)]
+        m = compute_traj_metrics(t)
         assert m["final_valid_rate"] == 0.0
 
-    def test_hacking_detected(self):
-        t = [FakeTP(0.0, -5.0, -5.0, 5, 10), FakeTP(15.0, -2.0, -17.0, 5, 10)]
-        m = compute_trajectory_metrics(t)
-        assert m["hacking_detected"] is True
+    def test_lh_detected(self):
+        t = [
+            FakeTP(-5.0, 5, 10, frac_non_normalized=0.0, n_norm_checked=10),
+            FakeTP(-2.0, 5, 10, frac_non_normalized=0.5, n_norm_checked=10),
+        ]
+        m = compute_traj_metrics(t)
+        assert m["lh_detected"] is True
 
 
 class TestJsonDefault:
@@ -90,18 +94,16 @@ class TestPrintTrainingSummary:
 
     def test_normal_results(self, caplog):
         results = {
-            "initial_gap_proxy": 1.0,
-            "final_gap_proxy": 3.0,
-            "gap_proxy_increase": 2.0,
             "initial_reward": -5.0,
             "final_reward": -2.0,
-            "initial_oracle_proxy": -6.0,
-            "final_oracle_proxy": -8.0,
+            "reward_increase": 3.0,
             "final_valid_rate": 0.9,
-            "hacking_detected": False,
+            "lh_detected": False,
+            "final_frac_non_normalized": 0.0,
+            "final_mean_abs_log_mass": 0.0,
+            "final_n_norm_checked": 10,
         }
         with caplog.at_level("INFO"):
             print_training_summary(results)
-        assert "gap_proxy:" in caplog.text
         assert "reward:" in caplog.text
-        assert "oracle_proxy:" in caplog.text
+        assert "lh_detected" in caplog.text

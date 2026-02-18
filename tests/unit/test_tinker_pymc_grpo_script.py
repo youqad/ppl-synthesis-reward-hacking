@@ -43,8 +43,6 @@ def test_compute_results_exposes_sweep_aliases() -> None:
         module.TrajectoryPoint(
             step=0,
             reward_mean=-2.0,
-            oracle_proxy_mean=-3.0,
-            gap_proxy_mean=1.0,
             n_valid=4,
             n_total=5,
             n_parse_fail=0,
@@ -53,8 +51,6 @@ def test_compute_results_exposes_sweep_aliases() -> None:
         module.TrajectoryPoint(
             step=1,
             reward_mean=1.0,
-            oracle_proxy_mean=-2.5,
-            gap_proxy_mean=3.5,
             n_valid=5,
             n_total=5,
             n_parse_fail=0,
@@ -62,6 +58,4 @@ def test_compute_results_exposes_sweep_aliases() -> None:
         ),
     ]
     results = module._compute_results(cfg, trajectory)
-    assert results["final_gap_proxy_mean"] == results["final_gap_proxy"]
     assert results["final_reward_mean"] == results["final_reward"]
-    assert results["final_oracle_proxy_mean"] == results["final_oracle_proxy"]

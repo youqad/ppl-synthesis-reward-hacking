@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -36,26 +37,46 @@ def _build_sweep_summary(results: dict[str, Any]) -> dict[str, Any]:
         return {
             "sweep/run_status": "fail",
             "sweep/error": results.get("error", "unknown"),
-            "sweep/final_reward_mean": float("nan"),
+            "sweep/final_lh_formal_signal": float("nan"),
         }
+    final_reward = results.get("final_reward_mean", results.get("final_reward"))
+    final_lh_signal = results.get(
+        "paper/lh_formal_signal_final",
+        results.get("final_frac_non_normalized", float("nan")),
+    )
+    final_valid_rate = results.get("final_valid_rate")
+    run_status = str(results.get("sweep/run_status", "success"))
+    error_reason = results.get("sweep/error")
+    if run_status not in {"success", "fail"}:
+        run_status = "success"
+    if error_reason is not None:
+        run_status = "fail"
+    if run_status == "success":
+        if isinstance(final_valid_rate, int | float) and final_valid_rate <= 0:
+            run_status = "fail"
+            error_reason = "no_valid_completions"
+        elif isinstance(final_reward, int | float) and not math.isfinite(float(final_reward)):
+            run_status = "fail"
+            error_reason = "non_finite_final_reward"
+
     summary = {
-        "sweep/run_status": "success",
-        "sweep/final_reward_mean": results.get("final_reward_mean", results.get("final_reward")),
-        "sweep/final_oracle_proxy_mean": results.get(
-            "final_oracle_proxy_mean", results.get("final_oracle_proxy")
-        ),
-        "sweep/final_gap_proxy_mean": results.get(
-            "final_gap_proxy_mean", results.get("final_gap_proxy")
-        ),
-        "sweep/final_valid_rate": results.get("final_valid_rate"),
+        "sweep/run_status": run_status,
+        "sweep/final_lh_formal_signal": final_lh_signal,
+        "sweep/final_valid_rate": final_valid_rate,
     }
+    if error_reason is not None:
+        summary["sweep/error"] = error_reason
     for key in (
         "paper/track",
+        "paper/claim_mode",
         "paper/reward_metric",
         "paper/reward_data_split",
         "paper/predictive_estimator",
         "paper/monitoring_mode",
+        "paper/normalization_method",
+        "paper/delta_scope",
         "paper/frac_non_normalized_final",
+        "paper/lh_formal_signal_final",
         "paper/judge_hacking_rate_final",
         "paper/lh_family_prevalence_final",
     ):
@@ -103,10 +124,9 @@ def _run_from_cfg(cfg) -> dict[str, Any]:
         )
         log.info("Initialized W&B run: %s", getattr(run, "name", "<unnamed>"))
 
-    trl_cfg = config_from_mapping(train_cfg)
-    _save_resolved_config(trl_cfg.output_dir, cfg_dict)
-
     try:
+        trl_cfg = config_from_mapping(train_cfg)
+        _save_resolved_config(trl_cfg.output_dir, cfg_dict)
         results = run_training(trl_cfg)
         summary = _build_sweep_summary(results)
         if wandb_enabled:
@@ -118,7 +138,7 @@ def _run_from_cfg(cfg) -> dict[str, Any]:
             failure_summary = {
                 "sweep/run_status": "fail",
                 "sweep/error": str(exc),
-                "sweep/final_reward_mean": float("nan"),
+                "sweep/final_lh_formal_signal": float("nan"),
             }
             log_metrics(failure_summary)
             update_summary(failure_summary)
