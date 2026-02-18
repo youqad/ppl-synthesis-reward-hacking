@@ -184,7 +184,7 @@ class TestDiagnosticsStructure:
 class TestParallelScorer:
     @pytest.fixture
     def scoring_data(self):
-        from ppl_synthesis_reward_hacking.data.synthstats_loader import make_scoring_data_dict
+        from ppl_synthesis_reward_hacking.data.pymc_reward_loader import make_scoring_data_dict
 
         return make_scoring_data_dict()
 

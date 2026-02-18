@@ -51,6 +51,11 @@ _BANNED_INIT_PATTERNS = re.compile(r"\b(?:initval|testval|initial_point)\b\s*=")
 
 _GROUND_TRUTH_EXTRA = frozenset({"beta", "noise_sigma"})
 
+_INTERNAL_KEYS = frozenset({
+    "y_train", "y_holdout", "X_train", "X_holdout",
+    "seed", "dataset_id",
+})
+
 
 def extract_pymc_code(completion: str) -> str | None:
     """Extract Python code from an LLM completion.
@@ -115,9 +120,11 @@ def execute_pymc_code(
     # signal.alarm only works on POSIX (Linux, macOS) and only in the main thread
     use_alarm = hasattr(signal, "SIGALRM")
 
-    # strip ground-truth keys so generated code can't cheat
+    # strip ground-truth and internal split keys so generated code can't cheat
     sanitized = {
-        k: v for k, v in data.items() if not k.endswith("_true") and k not in _GROUND_TRUTH_EXTRA
+        k: v
+        for k, v in data.items()
+        if not k.endswith("_true") and k not in _GROUND_TRUTH_EXTRA and k not in _INTERNAL_KEYS
     }
 
     try:

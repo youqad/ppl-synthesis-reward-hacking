@@ -60,7 +60,7 @@ def score_batch_parallel(
 ) -> list[tuple[float, float | None, dict | None]]:
     """Score completions in parallel via multiprocessing pool.
 
-    Returns (reward_train, oracle_proxy, decomposition) per completion.
+    Returns (reward_train, diagnostic_oracle_like_value, decomposition) per completion.
     """
     if not completions:
         return []
