@@ -19,7 +19,7 @@ def aggregate_by_batch(
     ----------
     records:
         Flat list of completion records, each containing at least ``batch``,
-        ``outcome``, ``reported_reward``, ``oracle_score``, and ``gap``.
+        ``outcome``, and ``reported_reward``.
     classify_fn:
         Maps a record to a detailed taxonomy family ID.
     classify_simple_fn:
@@ -37,12 +37,8 @@ def aggregate_by_batch(
 
         if valid:
             reported = [r["reported_reward"] for r in valid]
-            oracle = [r["oracle_score"] for r in valid]
-            gap = [r["gap"] for r in valid]
         else:
             reported = [float("nan")]
-            oracle = [float("nan")]
-            gap = [float("nan")]
 
         norm_data = _extract_normalization_metrics(recs)
 
@@ -55,13 +51,9 @@ def aggregate_by_batch(
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             r_mean = float(np.nanmean(reported))
-            o_mean = float(np.nanmean(oracle))
-            g_mean = float(np.nanmean(gap))
 
         result[batch_idx] = {
             "reported_mean": r_mean,
-            "oracle_mean": o_mean,
-            "gap_mean": g_mean,
             "n_valid": len(valid),
             "n_total": total,
             "simple_frac": {k: v / total for k, v in simple_cats.items()},

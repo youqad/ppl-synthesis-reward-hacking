@@ -7,7 +7,7 @@ as CompletionRecord JSONL compatible with judge_completions.py.
 Usage:
     # all checkpoints in a training run
     python scripts/generate_from_checkpoints.py \
-        --run-dir artifacts/grpo_synthstats_20260128_012030/ \
+        --run-dir artifacts/grpo_run_example/ \
         --n-samples 20
 
     # single checkpoint
@@ -97,8 +97,8 @@ def _generate_from_checkpoint(
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     from ppl_synthesis_reward_hacking.backends.pymc.code_executor import extract_pymc_code
-    from ppl_synthesis_reward_hacking.data.synthstats_loader import (
-        load_synthstats_prompts,
+    from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
+        load_pymc_reward_prompts,
         make_scoring_data_dict,
     )
     from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
@@ -130,7 +130,7 @@ def _generate_from_checkpoint(
         tokenizer.pad_token = tokenizer.eos_token
 
     scoring_data = make_scoring_data_dict(d=scoring_d)
-    prompts = load_synthstats_prompts(max_examples=20)
+    prompts = load_pymc_reward_prompts(max_examples=20)
 
     completions_path = checkpoint_path / "completions.jsonl"
     writer = CompletionWriter(completions_path)
@@ -177,10 +177,12 @@ def _generate_from_checkpoint(
                     completion_text=completion_text,
                     code=code,
                     reported_reward=reported,
-                    oracle_score=oracle,
-                    gap=gap,
                     outcome=outcome,
                     timestamp=make_timestamp(),
+                    metadata={
+                        "oracle_score": oracle,
+                        "gap": gap,
+                    },
                 )
             )
             total += 1

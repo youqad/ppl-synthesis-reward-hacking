@@ -23,6 +23,7 @@ def test_validate_manifest_accepts_offline_aggregate_shape() -> None:
                 "label": "Run 6",
                 "runs": ["artifacts/tinker_poc"],
                 "n_runs_used": 1,
+                "claim_modes_used": ["formal_lh"],
                 "offline_eval_runs": [{"dummy": True}],
                 "offline_eval_aggregate": {
                     "normalization_frac_non_normalized": {},
@@ -46,6 +47,7 @@ def test_validate_manifest_flags_missing_aggregate_keys() -> None:
                 "label": "Run 6",
                 "runs": ["artifacts/tinker_poc"],
                 "n_runs_used": 1,
+                "claim_modes_used": ["formal_lh"],
                 "offline_eval_runs": [{"dummy": True}],
                 "offline_eval_aggregate": {},
             }

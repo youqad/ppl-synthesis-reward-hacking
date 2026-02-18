@@ -110,7 +110,7 @@ def test_process_condition_manifest_runs_reflect_used_runs(
     existing_run.mkdir(parents=True, exist_ok=True)
     (existing_run / "completions.jsonl").write_text("", encoding="utf-8")
     (existing_run / "hydra_resolved_config.json").write_text(
-        json.dumps({"train": {"paper_track": "part_a_emergence"}}),
+        json.dumps({"train": {"paper_track": "part_a_emergence", "claim_mode": "formal_lh"}}),
         encoding="utf-8",
     )
     missing_run = tmp_path / "missing_run"

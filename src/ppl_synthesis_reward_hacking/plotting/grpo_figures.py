@@ -66,7 +66,6 @@ FAMILY_LABELS = {
 def plot_lh_emergence(batch_stats: dict[int, dict], out: Path, window: int = WINDOW) -> None:
     batches = sorted(batch_stats)
     reported = [batch_stats[b]["reported_mean"] for b in batches]
-    oracle = [batch_stats[b]["oracle_mean"] for b in batches]
 
     has_norm = any(batch_stats[b].get("frac_non_normalized") is not None for b in batches)
 
@@ -101,33 +100,19 @@ def plot_lh_emergence(batch_stats: dict[int, dict], out: Path, window: int = WIN
         fig, ax_top = plt.subplots(figsize=(6.5, 2.8))
 
         rep_sm = rolling_mean(reported, window)
-        orc_sm = rolling_mean(oracle, window)
         ax_top.plot(
             batches,
             rep_sm,
             color=C_REPORTED,
             linewidth=1.5,
-            label="Reported reward (proxy)",
+            label="Reported reward",
             zorder=3,
-        )
-        ax_top.plot(
-            batches, orc_sm, color=C_ORACLE, linewidth=1.5, label="Oracle score (true)", zorder=3
-        )
-        ax_top.fill_between(
-            batches,
-            orc_sm,
-            rep_sm,
-            where=[r >= o for r, o in zip(rep_sm, orc_sm, strict=True)],
-            alpha=0.12,
-            color=C_REPORTED,
-            interpolate=True,
-            label="Gap (hacking margin)",
         )
         ax_top.set_xlabel("Training batch")
         ax_top.set_ylabel("Log-probability score")
         ax_top.legend(loc="upper left", fontsize=7)
         sns.despine(ax=ax_top, left=False, bottom=False)
-        print("  WARN: no normalization data; using reward divergence fallback")
+        print("  WARN: no normalization data; using reported reward only")
 
     fig.tight_layout()
     fig.savefig(out, bbox_inches="tight")
@@ -250,7 +235,11 @@ def plot_lh_taxonomy_bar(
             log_masses_per_cat.append(np.array(lms) if lms else np.array([float("nan")]))
     else:
         log_masses_per_cat = [
-            np.array([r["gap"] for r in by_cat[c]]) if by_cat[c] else np.array([float("nan")])
+            (
+                np.array([r["reported_reward"] for r in by_cat[c]])
+                if by_cat[c]
+                else np.array([float("nan")])
+            )
             for c in cat_order
         ]
 
@@ -299,7 +288,7 @@ def plot_lh_taxonomy_bar(
 
     short_labels = [label.replace("\n", " ")[:20] for label in labels]
     ax_box.set_xticklabels(short_labels, fontsize=5.5, rotation=35, ha="right")
-    y_label = "log mass" if has_log_mass else "Gap (reported $-$ oracle)"
+    y_label = "log mass" if has_log_mass else "Reported reward"
     ax_box.set_ylabel(y_label)
     ax_box.text(
         0.02, 0.96, "(b)", transform=ax_box.transAxes, fontsize=9, fontweight="bold", va="top"

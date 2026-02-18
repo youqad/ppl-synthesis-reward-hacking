@@ -33,8 +33,6 @@ def _make_record(
         completion_text=completion_text,
         code=code,
         reported_reward=-100.0,
-        oracle_score=-100.0,
-        gap=0.0,
         outcome=outcome,
         timestamp="2026-01-01T00:00:00Z",
         metadata=metadata,

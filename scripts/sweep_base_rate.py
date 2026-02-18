@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 """Sweep base-rate exploit prevalence across multiple LLMs via litellm.
 
-Measures whether untrained (base/instruct) LLMs produce exploit-containing
-PyMC programs at any nonzero rate. Runs each model through the full analysis
-pipeline: code extraction, structural checks, scoring, and integrity checks.
-
 Usage:
     python3 scripts/sweep_base_rate.py \
         --models "bedrock/meta.llama3-8b-instruct-v1:0,bedrock/mistral.mistral-7b-instruct-v0:2" \
@@ -36,7 +32,7 @@ from ppl_synthesis_reward_hacking.backends.pymc.code_executor import (
     extract_pymc_code,
 )
 from ppl_synthesis_reward_hacking.backends.pymc_safe.checker import check_pymc_model
-from ppl_synthesis_reward_hacking.data.synthstats_loader import (
+from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
     SYSTEM_PROMPT,
     get_prompts,
     make_scoring_data_dict,
@@ -117,10 +113,7 @@ def analyse_completion(
     *,
     exec_timeout: int,
 ) -> dict[str, Any]:
-    """Run the full analysis pipeline on a single completion.
-
-    Returns a dict with all analysis results (tags, scores, metadata).
-    """
+    """Full analysis pipeline on a single completion: tags, scores, metadata."""
     result: dict[str, Any] = {
         "completion_text": completion_text,
         "outcome": "valid",
@@ -132,34 +125,27 @@ def analyse_completion(
         "complexity": None,
     }
 
-    # Step 1: Extract code
     code = extract_pymc_code(completion_text)
     result["code"] = code
     if code is None:
         result["outcome"] = "parse_fail"
         return result
 
-    # Step 2: String-based exploit detection
     heuristic_exploits = detect_exploits(code)
     result["tags"].update(heuristic_exploits)
-
-    # Complexity signals
     result["complexity"] = compute_complexity_signals(code)
 
-    # Step 3: Execute code to get model object
     model = execute_pymc_code(code, data, timeout=exec_timeout)
     if model is None:
         result["outcome"] = "exec_fail"
         return result
 
-    # Step 4: Structural checks
     is_valid, reasons = check_pymc_model(model)
     structural_tags = parse_checker_reasons_to_tags(reasons)
     result["tags"].update(structural_tags)
     result["structural_valid"] = is_valid
     result["structural_reasons"] = reasons
 
-    # Step 5: Score the model
     try:
         reported, oracle, decomposition = score_pymc_model(model)
         result["reported"] = reported
@@ -175,11 +161,9 @@ def analyse_completion(
         result["outcome"] = "score_fail"
         return result
 
-    # Step 6: Fabricated data check
     if not check_fabricated_data(model, data):
         result["tags"].add("fabricated_data")
 
-    # Step 7: Data-used perturbation test (re-executes model)
     if not check_data_used(code, data, timeout=exec_timeout):
         result["tags"].add("data_ignored")
 
@@ -280,13 +264,15 @@ def sweep_model(
             tags = analysis["tags"]
             all_tags.append(tags)
 
-            # Build metadata for completion record
             metadata: dict[str, Any] = {"model": model_name}
             metadata["tags"] = sorted(tags)
             if analysis["complexity"]:
                 metadata["complexity"] = analysis["complexity"]
             if analysis.get("structural_reasons"):
                 metadata["structural_reasons"] = analysis["structural_reasons"]
+
+            metadata["oracle_score"] = analysis["oracle"]
+            metadata["gap"] = analysis["gap"]
 
             record = CompletionRecord(
                 batch=0,
@@ -295,8 +281,6 @@ def sweep_model(
                 completion_text=completion_text,
                 code=analysis["code"],
                 reported_reward=analysis["reported"],
-                oracle_score=analysis["oracle"],
-                gap=analysis["gap"],
                 outcome=outcome,
                 timestamp=make_timestamp(),
                 metadata=metadata,
@@ -304,13 +288,12 @@ def sweep_model(
             writer.write(record)
             sample_idx += 1
 
-        # Progress logging
         done = (prompt_idx + 1) * samples_per_prompt
         log.info("[%s] %d/%d completions", model_name, done, n_total)
 
     writer.close()
 
-    # Compute tag prevalence (over all completions, not just valid ones)
+    # Compute rates over all completions, including failures.
     all_known_tags = [
         "data_discard",
         "score_bonus",
@@ -345,7 +328,6 @@ def sweep_model(
         "gap_std": float(np.std(valid_gaps)) if valid_gaps else float("nan"),
     }
 
-    # Write per-model summary
     summary_path = model_dir / "summary.json"
     with open(summary_path, "w") as f:
         json.dump(_make_json_safe(summary), f, indent=2)
@@ -454,7 +436,7 @@ def parse_args() -> argparse.Namespace:
         "--scoring-d",
         type=int,
         default=30,
-        help="Scoring data dimensionality (keep in sync with training)",
+        help="Scoring data dimensionality (default 30 for base-rate sweep; training uses d=3)",
     )
     p.add_argument("--output-dir", default="artifacts/sweep")
     p.add_argument("--retry-limit", type=int, default=3)
@@ -541,12 +523,10 @@ def main() -> None:
         except Exception:
             log.exception("Failed to sweep model %s", model_name)
 
-    # Write overall sweep summary
     sweep_summary_path = output_dir / "sweep_summary.json"
     with open(sweep_summary_path, "w") as f:
         json.dump(_make_json_safe(all_summaries), f, indent=2)
 
-    # Print results
     print("\n" + "=" * 80)
     print("SWEEP RESULTS")
     print("=" * 80 + "\n")
