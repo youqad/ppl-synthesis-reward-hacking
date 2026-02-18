@@ -15,8 +15,7 @@ from ppl_synthesis_reward_hacking.experiments.scoring_env import (
     get_logp_ceil,
     get_logp_floor,
 )
-
-EXEC_FAIL_REWARD = -400.0
+from ppl_synthesis_reward_hacking.reward_sentinels import EXEC_FAIL_REWARD
 
 log = logging.getLogger(__name__)
 
