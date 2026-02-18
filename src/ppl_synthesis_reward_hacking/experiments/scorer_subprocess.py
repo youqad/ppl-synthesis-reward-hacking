@@ -17,13 +17,17 @@ from ppl_synthesis_reward_hacking.experiments.scoring_env import (
 from ppl_synthesis_reward_hacking.experiments.scoring_env import (
     get_logp_floor as _get_logp_floor,
 )
+from ppl_synthesis_reward_hacking.reward_sentinels import (
+    DEFAULT_EXEC_TIMEOUT,
+    EXEC_FAIL_REWARD,
+    OUTCOME_EXEC_FAIL,
+    OUTCOME_PARSE_FAIL,
+    PARSE_FAIL_REWARD,
+    classify_outcome_from_reward,
+)
 from ppl_synthesis_reward_hacking.scoring import ZEvalConfig, evaluate_model, select_split_data
 
 log = logging.getLogger(__name__)
-
-EXEC_FAIL_REWARD = -400.0
-PARSE_FAIL_REWARD = -500.0
-DEFAULT_EXEC_TIMEOUT = 60
 
 
 def get_logp_floor() -> float:
@@ -35,11 +39,7 @@ def get_logp_ceil() -> float:
 
 
 def classify_outcome(reported: float) -> str:
-    if reported == PARSE_FAIL_REWARD:
-        return "parse_fail"
-    if reported == EXEC_FAIL_REWARD:
-        return "exec_fail"
-    return "valid"
+    return classify_outcome_from_reward(reported)
 
 
 _SECRETS_TO_SCRUB = {
@@ -230,7 +230,7 @@ def _score_completion_internal(
             PARSE_FAIL_REWARD,
             PARSE_FAIL_REWARD,
             {
-                "outcome_code": "parse_fail",
+                "outcome_code": OUTCOME_PARSE_FAIL,
                 "reward_metric": reward_metric,
                 "reward_data_split": reward_data_split,
                 "predictive_estimator": predictive_estimator,
@@ -264,7 +264,7 @@ def _score_completion_internal(
             EXEC_FAIL_REWARD,
             EXEC_FAIL_REWARD,
             {
-                "outcome_code": "exec_fail",
+                "outcome_code": OUTCOME_EXEC_FAIL,
                 "reward_metric": reward_metric,
                 "reward_data_split": reward_data_split,
                 "predictive_estimator": predictive_estimator,

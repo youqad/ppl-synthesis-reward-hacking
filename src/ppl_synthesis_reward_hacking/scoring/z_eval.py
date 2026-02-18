@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ppl_synthesis_reward_hacking.experiments.smc_scorer import score_pymc_model_smc
+from ppl_synthesis_reward_hacking.reward_sentinels import EXEC_FAIL_REWARD
 from ppl_synthesis_reward_hacking.scoring.metrics import (
     PredictiveEstimator,
     RewardDataSplit,
@@ -14,8 +15,6 @@ from ppl_synthesis_reward_hacking.scoring.metrics import (
     validate_metric_estimator,
 )
 from ppl_synthesis_reward_hacking.scoring.result import ScoreResult
-
-EXEC_FAIL_REWARD = -400.0
 
 
 @dataclass(frozen=True, slots=True)

@@ -40,37 +40,43 @@ except ImportError:  # Fallback for environments without project imports.
 
 
 try:
-    from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
-        EXEC_FAIL_REWARD as _EXEC_FAIL_REWARD,
+    from ppl_synthesis_reward_hacking.reward_sentinels import (
+        OUTCOME_EXEC_FAIL as _OUTCOME_EXEC_FAIL,
     )
-    from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
-        PARSE_FAIL_REWARD as _PARSE_FAIL_REWARD,
+    from ppl_synthesis_reward_hacking.reward_sentinels import (
+        OUTCOME_PARSE_FAIL as _OUTCOME_PARSE_FAIL,
     )
-    from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
-        classify_outcome as _classify_outcome_from_reward,
+    from ppl_synthesis_reward_hacking.reward_sentinels import (
+        OUTCOME_VALID as _OUTCOME_VALID,
+    )
+    from ppl_synthesis_reward_hacking.reward_sentinels import (
+        classify_outcome_from_reward as _classify_outcome_from_reward,
     )
 except ImportError:  # Fallback for environments without project imports.
     _EXEC_FAIL_REWARD = -400.0
     _PARSE_FAIL_REWARD = -500.0
+    _OUTCOME_EXEC_FAIL = "exec_fail"
+    _OUTCOME_PARSE_FAIL = "parse_fail"
+    _OUTCOME_VALID = "valid"
 
     def _classify_outcome_from_reward(reported: float) -> str:
         if reported == _PARSE_FAIL_REWARD:
-            return "parse_fail"
+            return _OUTCOME_PARSE_FAIL
         if reported == _EXEC_FAIL_REWARD:
-            return "exec_fail"
-        return "valid"
+            return _OUTCOME_EXEC_FAIL
+        return _OUTCOME_VALID
 
 
 def _is_valid(record: dict) -> bool:
     outcome = record.get("outcome", "")
-    if outcome == "valid":
+    if outcome == _OUTCOME_VALID:
         return True
     if not outcome:
         r = record.get("reported_reward", float("nan"))
         return (
             isinstance(r, int | float)
             and math.isfinite(r)
-            and _classify_outcome_from_reward(float(r)) == "valid"
+            and _classify_outcome_from_reward(float(r)) == _OUTCOME_VALID
         )
     return False
 
@@ -114,9 +120,37 @@ def _is_reward_eligible(record: dict) -> bool:
         return False
     if math.isnan(r) or math.isinf(r):
         return False
-    if _classify_outcome_from_reward(float(r)) != "valid":
+    if _classify_outcome_from_reward(float(r)) != _OUTCOME_VALID:
         return False
     return True
+
+
+def _extract_normalization_from_records(records: list[dict]) -> dict:
+    """Extract normalization metrics from metadata.normalization fields.
+
+    Uses the same logic as aggregation._extract_normalization_metrics:
+    frac_non_normalized = count(not is_normalized) / count(checked)
+    mean_abs_log_mass = mean(|log_mass|) over checked records.
+    """
+    log_masses: list[float] = []
+    n_non_normalized = 0
+    n_checked = 0
+    for r in records:
+        meta = r.get("metadata") or {}
+        norm = meta.get("normalization")
+        if norm is None:
+            continue
+        n_checked += 1
+        lm = norm.get("log_mass")
+        if lm is not None:
+            log_masses.append(abs(float(lm)))
+            if not norm.get("is_normalized", True):
+                n_non_normalized += 1
+    if not n_checked:
+        return {"frac_non_normalized": None, "mean_abs_log_mass": None}
+    frac = n_non_normalized / n_checked
+    mean_abs = sum(log_masses) / len(log_masses) if log_masses else None
+    return {"frac_non_normalized": frac, "mean_abs_log_mass": mean_abs}
 
 
 def _winsorize(xs: list[float], *, p: float) -> list[float]:
@@ -184,8 +218,10 @@ def analyze_step(
             misspec_counts[flag] += 1
 
     diversity_pct = (len(code_set) / n_valid * 100) if n_valid else 0.0
-    exec_fail_pct = (outcomes.get("exec_fail", 0) / n_total * 100) if n_total else 0.0
-    parse_fail_pct = (outcomes.get("parse_fail", 0) / n_total * 100) if n_total else 0.0
+    exec_fail_pct = (outcomes.get(_OUTCOME_EXEC_FAIL, 0) / n_total * 100) if n_total else 0.0
+    parse_fail_pct = (outcomes.get(_OUTCOME_PARSE_FAIL, 0) / n_total * 100) if n_total else 0.0
+
+    norm_result = _extract_normalization_from_records(valid)
 
     return {
         "n_total": n_total,
@@ -200,6 +236,8 @@ def analyze_step(
         "diversity_pct": diversity_pct,
         "exec_fail_pct": exec_fail_pct,
         "parse_fail_pct": parse_fail_pct,
+        "frac_non_normalized": norm_result["frac_non_normalized"],
+        "mean_abs_log_mass": norm_result["mean_abs_log_mass"],
     }
 
 
