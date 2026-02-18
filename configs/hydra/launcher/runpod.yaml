@@ -1,0 +1,11 @@
+# @package _global_
+# RunPod defaults for Hydra config composition (not used by launch.py yet).
+
+defaults:
+  - override /hydra/launcher: basic
+
+launcher:
+  kind: runpod
+  gpu_type: "NVIDIA A100 80GB PCIe"
+  image: "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
+  disk_gb: 50
