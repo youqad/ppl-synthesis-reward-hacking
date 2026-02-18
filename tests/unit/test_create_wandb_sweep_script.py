@@ -20,7 +20,7 @@ def test_main_calls_wandb_sweep(monkeypatch, tmp_path) -> None:
 
     cfg_path = tmp_path / "sweep.yaml"
     cfg_path.write_text(
-        "method: bayes\nmetric:\n  name: sweep/final_reward_mean\n  goal: maximize\n",
+        "method: bayes\nmetric:\n  name: paper/lh_formal_signal_final\n  goal: maximize\n",
         encoding="utf-8",
     )
 
