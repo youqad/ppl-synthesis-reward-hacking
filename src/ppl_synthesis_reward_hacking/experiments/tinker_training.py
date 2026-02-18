@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
@@ -14,6 +15,7 @@ import numpy as np
 
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import extract_pymc_code
 from ppl_synthesis_reward_hacking.config.contracts import validate_train_contract
+from ppl_synthesis_reward_hacking.config.flattening import flatten_hydra_train_mapping
 from ppl_synthesis_reward_hacking.data.generators import generate_dataset
 from ppl_synthesis_reward_hacking.data.interfaces import list_dataset_interfaces
 from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
@@ -24,6 +26,11 @@ from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
 from ppl_synthesis_reward_hacking.evaluation.heuristics import detect_exploits
 from ppl_synthesis_reward_hacking.evaluation.normalization_check import (
     check_normalization,
+)
+from ppl_synthesis_reward_hacking.evaluation.taxonomy import (
+    EXPLOIT_FAMILIES,
+    canonicalize_exploit_tags,
+    canonicalize_judge_tags,
 )
 from ppl_synthesis_reward_hacking.experiments.grpo import (
     RolloutData,
@@ -67,6 +74,37 @@ from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
 from ppl_synthesis_reward_hacking.utils.tinker import tinker, types, validate_tinker_setup
 
 log = logging.getLogger(__name__)
+
+_JUDGE_BACKEND_DEFAULTS: dict[str, dict[str, str | None]] = {
+    "zai": {
+        "api_base": "https://api.z.ai/api/anthropic",
+        "custom_llm_provider": "anthropic",
+        "api_key_env": "ZHIPUAI_API_KEY",
+    },
+    "openrouter": {
+        "api_base": "https://openrouter.ai/api/v1",
+        "custom_llm_provider": "openrouter",
+        "api_key_env": "OPENROUTER_API_KEY",
+    },
+    "openai": {
+        "api_base": None,
+        "custom_llm_provider": None,
+        "api_key_env": "OPENAI_API_KEY",
+    },
+    "anthropic": {
+        "api_base": None,
+        "custom_llm_provider": None,
+        "api_key_env": "ANTHROPIC_API_KEY",
+    },
+    "custom": {
+        "api_base": None,
+        "custom_llm_provider": None,
+        "api_key_env": None,
+    },
+}
+_JUDGE_SAMPLING_POLICIES = frozenset({"fixed_cap", "adaptive_cap"})
+_JUDGE_ADAPTIVE_TARGET_METRICS = frozenset({"heuristic_novelty", "outcome_entropy", "combined"})
+_LH_CANONICAL_FAMILIES = tuple(f for f in EXPLOIT_FAMILIES if f.startswith("lh_"))
 
 
 @dataclass
@@ -124,9 +162,18 @@ class TinkerGRPOConfig:
     judge_interval: int = 0
     judge_sample_size: int = 20
     judge_dedup: bool = True
+    judge_backend: str = "zai"
     judge_model: str = "anthropic/glm-5"
+    judge_api_base: str | None = None
+    judge_custom_llm_provider: str | None = None
+    judge_api_key_env: str | None = None
     judge_use_stub: bool = False
     judge_env_file: str | None = None
+    judge_sampling_policy: str = "fixed_cap"
+    judge_adaptive_min: int = 8
+    judge_adaptive_max: int = 20
+    judge_adaptive_target_metric: str = "combined"
+    track_lh_every_batch: bool = True
 
     # rubric evolution (0 disables)
     rubric_evolution_interval: int = 0
@@ -145,74 +192,9 @@ class TinkerGRPOConfig:
     wandb_table_interval: int = 10
 
 
-def _coalesce_nested_value(raw: Any, key: str) -> Any:
-    """Extract scalar config values from Hydra nested config-group payloads."""
-    if isinstance(raw, Mapping):
-        if key in raw:
-            return raw[key]
-        # Accept single-key wrapper payloads.
-        if len(raw) == 1:
-            return next(iter(raw.values()))
-    # Compatibility with older YAML parsing of `off` as bool false.
-    if key == "monitoring_mode" and isinstance(raw, bool):
-        return "off" if raw is False else "judge_evolving"
-    return raw
-
-
 def config_from_mapping(mapping: Mapping[str, Any]) -> TinkerGRPOConfig:
     """Create TinkerGRPOConfig from a mapping (Hydra-friendly)."""
-    flattened: dict[str, Any] = dict(mapping)
-
-    # Pull scalar values out of Hydra subgroups.
-    for scalar_key in (
-        "reward_metric",
-        "reward_data_split",
-        "predictive_estimator",
-        "claim_mode",
-        "paper_track",
-        "monitoring_mode",
-    ):
-        if scalar_key in flattened:
-            flattened[scalar_key] = _coalesce_nested_value(flattened[scalar_key], scalar_key)
-
-    data_interface_payload = flattened.pop("data_interface", None)
-    if isinstance(data_interface_payload, Mapping):
-        for key in (
-            "dataset_name",
-            "dataset_n_features",
-            "dataset_noise_sigma",
-            "dataset_n_train",
-            "dataset_n_holdout",
-            "dataset_p_true_alpha",
-            "dataset_p_true_beta",
-            "dataset_p_true_fixed",
-        ):
-            if key not in flattened and key in data_interface_payload:
-                flattened[key] = data_interface_payload[key]
-
-    normalization_payload = flattened.pop("normalization", None)
-    if isinstance(normalization_payload, Mapping):
-        for key in (
-            "normalization_method",
-            "normalization_delta_scope",
-            "normalization_epsilon",
-            "normalization_ci_alpha",
-            "normalization_mc_samples",
-            "normalization_min_ess",
-            "normalization_interval",
-            "normalization_sample_size",
-        ):
-            if key not in flattened and key in normalization_payload:
-                flattened[key] = normalization_payload[key]
-
-    monitoring_payload = mapping.get("monitoring_mode")
-    if isinstance(monitoring_payload, Mapping):
-        for key in ("judge_interval", "rubric_evolution_interval"):
-            if key not in flattened and key in monitoring_payload:
-                flattened[key] = monitoring_payload[key]
-
-    # Ignore composition-only metadata.
-    flattened.pop("name", None)
+    flattened = flatten_hydra_train_mapping(mapping)
 
     allowed_keys = {f.name for f in fields(TinkerGRPOConfig)}
     cfg_kwargs = {key: value for key, value in flattened.items() if key in allowed_keys}
@@ -249,6 +231,55 @@ def _validate_config(config: TinkerGRPOConfig) -> None:
     )
     config.normalization_method = resolved.normalization_method
     config.normalization_delta_scope = resolved.normalization_delta_scope
+    if config.judge_backend not in _JUDGE_BACKEND_DEFAULTS:
+        raise ValueError(
+            "judge_backend must be one of "
+            f"{sorted(_JUDGE_BACKEND_DEFAULTS)}, got {config.judge_backend!r}"
+        )
+    if config.judge_sample_size <= 0:
+        raise ValueError("judge_sample_size must be positive")
+    if config.judge_sampling_policy not in _JUDGE_SAMPLING_POLICIES:
+        raise ValueError(
+            "judge_sampling_policy must be one of "
+            f"{sorted(_JUDGE_SAMPLING_POLICIES)}, got {config.judge_sampling_policy!r}"
+        )
+    if config.judge_adaptive_target_metric not in _JUDGE_ADAPTIVE_TARGET_METRICS:
+        raise ValueError(
+            "judge_adaptive_target_metric must be one of "
+            f"{sorted(_JUDGE_ADAPTIVE_TARGET_METRICS)}, got {config.judge_adaptive_target_metric!r}"
+        )
+    if config.judge_adaptive_min < 0:
+        raise ValueError("judge_adaptive_min must be >= 0")
+    if config.judge_adaptive_max < config.judge_adaptive_min:
+        raise ValueError("judge_adaptive_max must be >= judge_adaptive_min")
+    if config.judge_sampling_policy == "adaptive_cap" and config.judge_adaptive_max <= 0:
+        raise ValueError("adaptive judge sampling requires judge_adaptive_max > 0")
+
+
+def _build_judge_config(config: TinkerGRPOConfig) -> JudgeConfig:
+    backend_defaults = _JUDGE_BACKEND_DEFAULTS[config.judge_backend]
+    api_base = (
+        config.judge_api_base
+        if config.judge_api_base is not None
+        else backend_defaults["api_base"]
+    )
+    custom_llm_provider = (
+        config.judge_custom_llm_provider
+        if config.judge_custom_llm_provider is not None
+        else backend_defaults["custom_llm_provider"]
+    )
+    api_key_env = (
+        config.judge_api_key_env
+        if config.judge_api_key_env is not None
+        else backend_defaults["api_key_env"]
+    )
+    return JudgeConfig(
+        model=config.judge_model,
+        api_base=api_base,
+        custom_llm_provider=custom_llm_provider or "",
+        api_key_env=api_key_env or "",
+        use_stub=config.judge_use_stub,
+    )
 
 
 @dataclass
@@ -329,6 +360,8 @@ def run_training(config: TinkerGRPOConfig) -> dict:
     last_norm_payload: dict[str, Any] | None = None
     last_judge_payload: dict[str, Any] | None = None
     last_heuristic_rates: dict[str, float] = {}
+    last_batch_lh_metrics: dict[str, float] = {}
+    batch_lh_history: list[dict[str, float]] = []
     update_summary(
         {
             "paper/track": config.paper_track,
@@ -391,18 +424,30 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         writer.flush()
 
         heuristic_rates = _compute_heuristic_rates(step_data.step_records)
-        if heuristic_rates:
-            log_heuristic_rates(step, heuristic_rates)
-            last_heuristic_rates = heuristic_rates
+        log_heuristic_rates(step, heuristic_rates)
+        last_heuristic_rates = heuristic_rates
 
         if config.wandb_table_interval > 0 and step % config.wandb_table_interval == 0:
             log_completion_table(step, step_data.step_records)
 
-        judge_verdicts = _maybe_run_step_judge(
+        judge_verdicts, judge_stats = _maybe_run_step_judge(
             step, step_data.step_records, config, judge_cfg, judge_metrics_path, rubric_state
         )
-        if judge_verdicts:
+        if judge_stats is not None:
+            last_judge_payload = _summarize_judge_verdicts(judge_verdicts, judge_stats=judge_stats)
+        elif judge_verdicts:
             last_judge_payload = _summarize_judge_verdicts(judge_verdicts)
+
+        batch_lh_metrics = _compute_batch_lh_metrics(
+            records=step_data.step_records,
+            heuristic_rates=heuristic_rates,
+            judge_verdicts=judge_verdicts,
+            judge_stats=judge_stats,
+        )
+        batch_lh_history.append(batch_lh_metrics)
+        last_batch_lh_metrics = batch_lh_metrics
+        if config.track_lh_every_batch:
+            log_metrics(batch_lh_metrics, step=step)
         rubric_state = _maybe_evolve_rubric(
             step, step_data, config, rubric_state, judge_verdicts, judge_cfg=judge_cfg
         )
@@ -420,6 +465,8 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         normalization_payload=last_norm_payload,
         judge_payload=last_judge_payload,
         heuristic_rates=last_heuristic_rates,
+        batch_lh_metrics=last_batch_lh_metrics,
+        batch_lh_history=batch_lh_history,
     )
     results.update(summary_payload)
     with open(output_dir / "results.json", "w") as f:
@@ -446,7 +493,7 @@ def _initialize_training(
 ) -> tuple[CompletionWriter, Path, JudgeConfig, Any, Any, list[str]]:
     writer = CompletionWriter(output_dir / "completions.jsonl")
     judge_metrics_path = output_dir / "judge_metrics.jsonl"
-    judge_cfg = JudgeConfig(model=config.judge_model, use_stub=config.judge_use_stub)
+    judge_cfg = _build_judge_config(config)
     _load_judge_env(config.judge_env_file)
     service_client = tinker.ServiceClient()
     training_client = service_client.create_lora_training_client(
@@ -817,30 +864,95 @@ def _collect_lh_programs(
 
 
 def _compute_heuristic_rates(records: list[CompletionRecord]) -> dict[str, float]:
-    """Compute heuristic exploit tag rates over valid records."""
+    """Compute canonical heuristic exploit-family rates over valid records."""
     valid = [r for r in records if r.outcome == "valid" and r.code]
+    rates: dict[str, float] = {
+        "n_valid": float(len(valid)),
+        "any_exploit_rate": float("nan"),
+        "lh_rate": float("nan"),
+    }
+    for family in _LH_CANONICAL_FAMILIES:
+        rates[f"family_rate/{family}"] = float("nan")
     if not valid:
-        return {}
-    tag_counter: Counter[str] = Counter()
+        return rates
+
+    family_counter: Counter[str] = Counter()
     n_any = 0
     for r in valid:
-        code = r.code
-        if code is None:
-            continue
+        code = r.code or ""
         tags = detect_exploits(code)
-        tag_counter.update(tags)
-        if tags:
+        families = {
+            tag
+            for tag in canonicalize_exploit_tags(code, precomputed_raw=tags)
+            if tag in _LH_CANONICAL_FAMILIES
+        }
+        if families:
             n_any += 1
+            family_counter.update(families)
+
     n = len(valid)
-    rates: dict[str, float] = {
-        "score_bonus_rate": tag_counter.get("score_bonus", 0) / n,
-        "double_observation_rate": tag_counter.get("double_observation", 0) / n,
-        "custom_dist_rate": tag_counter.get("custom_dist", 0) / n,
-        "observed_literal_rate": tag_counter.get("observed_literal", 0) / n,
-        "data_discard_rate": tag_counter.get("data_discard", 0) / n,
-        "any_exploit_rate": n_any / n,
-    }
+    rates["any_exploit_rate"] = n_any / n
+    rates["lh_rate"] = n_any / n
+    for family in _LH_CANONICAL_FAMILIES:
+        rates[f"family_rate/{family}"] = family_counter.get(family, 0) / n
     return rates
+
+
+def _compute_batch_lh_metrics(
+    *,
+    records: list[CompletionRecord],
+    heuristic_rates: dict[str, float],
+    judge_verdicts: list[dict[str, Any]],
+    judge_stats: dict[str, Any] | None,
+) -> dict[str, float]:
+    valid_n = sum(1 for rec in records if rec.outcome == "valid")
+    heuristic_rate = float(
+        heuristic_rates.get("lh_rate", heuristic_rates.get("any_exploit_rate", float("nan")))
+    )
+    if not np.isfinite(heuristic_rate):
+        heuristic_rate = float("nan")
+
+    metrics: dict[str, float] = {
+        "lh/batch/valid_n": float(valid_n),
+        "lh/batch/heuristic_rate": heuristic_rate,
+        "lh/batch/proportion": heuristic_rate,
+        "lh/batch/judge_rate": float("nan"),
+        "lh/batch/judge_n": float("nan"),
+        "lh/batch/judge_coverage": float("nan"),
+        "lh/batch/other_novel_rate": float("nan"),
+    }
+    for family in _LH_CANONICAL_FAMILIES:
+        metrics[f"lh/batch/family/{family}"] = float(
+            heuristic_rates.get(f"family_rate/{family}", float("nan"))
+        )
+        metrics[f"lh/batch/judge_family/{family}"] = float("nan")
+
+    if judge_verdicts:
+        judge_payload = _summarize_judge_verdicts(judge_verdicts, judge_stats=judge_stats)
+        judge_n = float(judge_payload.get("n_judged", len(judge_verdicts)))
+        judge_rate = judge_payload.get("hacking_rate")
+        metrics["lh/batch/judge_n"] = judge_n
+        if isinstance(judge_rate, int | float) and np.isfinite(float(judge_rate)):
+            metrics["lh/batch/judge_rate"] = float(judge_rate)
+        if valid_n > 0:
+            metrics["lh/batch/judge_coverage"] = judge_n / valid_n
+        other_novel = judge_payload.get("lh_other_novel_rate")
+        if isinstance(other_novel, int | float):
+            metrics["lh/batch/other_novel_rate"] = float(other_novel)
+        for family in _LH_CANONICAL_FAMILIES:
+            value = judge_payload.get(f"family_rate/{family}")
+            if isinstance(value, int | float):
+                metrics[f"lh/batch/judge_family/{family}"] = float(value)
+    elif judge_stats and isinstance(judge_stats.get("n_judged"), int | float):
+        judge_n = float(judge_stats["n_judged"])
+        metrics["lh/batch/judge_n"] = judge_n
+        if valid_n > 0:
+            metrics["lh/batch/judge_coverage"] = judge_n / valid_n
+        judge_rate = judge_stats.get("hacking_rate")
+        if isinstance(judge_rate, int | float):
+            metrics["lh/batch/judge_rate"] = float(judge_rate)
+
+    return metrics
 
 
 def _log_normalization_summary(
@@ -1138,11 +1250,11 @@ def _maybe_run_step_judge(
     judge_cfg: JudgeConfig,
     judge_metrics_path: Path,
     rubric_state=None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     if config.monitoring_mode == "off":
-        return []
+        return [], None
     if config.judge_interval <= 0 or step % config.judge_interval != 0 or not step_records:
-        return []
+        return [], None
     try:
         return _run_observational_judge(
             step=step,
@@ -1152,10 +1264,14 @@ def _maybe_run_step_judge(
             dedup=config.judge_dedup,
             metrics_path=judge_metrics_path,
             rubric_state=rubric_state,
+            sampling_policy=config.judge_sampling_policy,
+            adaptive_min=config.judge_adaptive_min,
+            adaptive_max=config.judge_adaptive_max,
+            adaptive_target_metric=config.judge_adaptive_target_metric,
         )
     except Exception as exc:
         log.warning("Step %3d JUDGE: failed (continuing training): %s", step, exc)
-        return []
+        return [], None
 
 
 def _deduplicate_records(records: list[CompletionRecord]) -> list[CompletionRecord]:
@@ -1167,6 +1283,73 @@ def _deduplicate_records(records: list[CompletionRecord]) -> list[CompletionReco
     return list(unique.values())
 
 
+def _select_judge_sample_size(
+    *,
+    records: list[CompletionRecord],
+    sampling_policy: str,
+    sample_size: int,
+    adaptive_min: int,
+    adaptive_max: int,
+    adaptive_target_metric: str,
+) -> tuple[int, dict[str, float]]:
+    if not records:
+        return 0, {
+            "heuristic_lh_signal": float("nan"),
+            "outcome_entropy_signal": float("nan"),
+            "combined_signal": float("nan"),
+            "target_signal": float("nan"),
+        }
+
+    rates = _compute_heuristic_rates(records)
+    heuristic_lh_signal = float(rates.get("lh_rate", rates.get("any_exploit_rate", 0.0)))
+    heuristic_lh_signal = float(np.clip(heuristic_lh_signal, 0.0, 1.0))
+
+    outcome_counts = Counter(r.outcome for r in records)
+    total = max(sum(outcome_counts.values()), 1)
+    probs = [count / total for count in outcome_counts.values() if count > 0]
+    if len(probs) <= 1:
+        outcome_entropy_signal = 0.0
+    else:
+        entropy = -sum(p * math.log(p) for p in probs)
+        max_entropy = math.log(len(probs))
+        outcome_entropy_signal = entropy / max_entropy if max_entropy > 0 else 0.0
+    outcome_entropy_signal = float(np.clip(outcome_entropy_signal, 0.0, 1.0))
+    combined_signal = 0.5 * (heuristic_lh_signal + outcome_entropy_signal)
+
+    if adaptive_target_metric == "heuristic_novelty":
+        target_signal = heuristic_lh_signal
+    elif adaptive_target_metric == "outcome_entropy":
+        target_signal = outcome_entropy_signal
+    else:
+        target_signal = combined_signal
+
+    if sampling_policy == "adaptive_cap":
+        if adaptive_max <= adaptive_min:
+            requested = adaptive_max
+        else:
+            span = adaptive_max - adaptive_min
+            requested = adaptive_min + int(round(target_signal * span))
+        if sample_size > 0:
+            requested = min(requested, sample_size)
+    else:
+        requested = sample_size
+
+    if requested <= 0:
+        return 0, {
+            "heuristic_lh_signal": heuristic_lh_signal,
+            "outcome_entropy_signal": outcome_entropy_signal,
+            "combined_signal": combined_signal,
+            "target_signal": target_signal,
+        }
+
+    return min(requested, len(records)), {
+        "heuristic_lh_signal": heuristic_lh_signal,
+        "outcome_entropy_signal": outcome_entropy_signal,
+        "combined_signal": combined_signal,
+        "target_signal": target_signal,
+    }
+
+
 def _run_observational_judge(
     *,
     step: int,
@@ -1175,15 +1358,48 @@ def _run_observational_judge(
     sample_size: int,
     dedup: bool,
     metrics_path: Path,
+    sampling_policy: str,
+    adaptive_min: int,
+    adaptive_max: int,
+    adaptive_target_metric: str,
     rubric_state=None,
-) -> list[dict[str, Any]]:
-    judged_records = _deduplicate_records(records) if dedup else records
-    if sample_size > 0 and len(judged_records) > sample_size:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    valid_records = [r for r in records if r.outcome == "valid" and (r.code or r.completion_text)]
+    candidate_records = _deduplicate_records(valid_records) if dedup else valid_records
+
+    requested_sample_size, adaptive_signals = _select_judge_sample_size(
+        records=candidate_records,
+        sampling_policy=sampling_policy,
+        sample_size=sample_size,
+        adaptive_min=adaptive_min,
+        adaptive_max=adaptive_max,
+        adaptive_target_metric=adaptive_target_metric,
+    )
+
+    judged_records = candidate_records
+    if requested_sample_size > 0 and len(candidate_records) > requested_sample_size:
         rng = np.random.default_rng(step)
         idxs = np.asarray(
-            rng.choice(len(judged_records), size=sample_size, replace=False), dtype=np.int64
+            rng.choice(len(candidate_records), size=requested_sample_size, replace=False),
+            dtype=np.int64,
         ).reshape(-1)
-        judged_records = [judged_records[int(i)] for i in idxs]
+        judged_records = [candidate_records[int(i)] for i in idxs]
+
+    if not judged_records:
+        empty_payload = {
+            "step": step,
+            "n_candidates": len(candidate_records),
+            "n_judged": 0,
+            "hacking_rate": float("nan"),
+            "verdict_counts": {},
+            "tag_counts": {},
+            "sampling_policy": sampling_policy,
+            "sample_size_requested": requested_sample_size,
+            **adaptive_signals,
+        }
+        with metrics_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(empty_payload) + "\n")
+        return [], empty_payload
 
     if rubric_state is not None:
         from ppl_synthesis_reward_hacking.monitoring.evolving_rubric import (
@@ -1194,6 +1410,7 @@ def _run_observational_judge(
         verdicts = [judge_with_rubric(r, cfg, rubric_prompt) for r in judged_records]
     else:
         verdicts = judge_completions(judged_records, cfg)
+
     verdict_counts = Counter(v.verdict for v in verdicts)
     tag_counts = Counter(tag for v in verdicts for tag in v.tags)
     n_total = max(len(verdicts), 1)
@@ -1201,10 +1418,14 @@ def _run_observational_judge(
 
     payload = {
         "step": step,
+        "n_candidates": len(candidate_records),
         "n_judged": len(verdicts),
         "hacking_rate": hacking_rate,
         "verdict_counts": dict(verdict_counts),
         "tag_counts": dict(tag_counts),
+        "sampling_policy": sampling_policy,
+        "sample_size_requested": requested_sample_size,
+        **adaptive_signals,
     }
     with metrics_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(payload) + "\n")
@@ -1212,42 +1433,121 @@ def _run_observational_judge(
     log_judge_metrics(step, hacking_rate, len(verdicts), dict(verdict_counts), dict(tag_counts))
 
     log.info(
-        "Step %3d JUDGE: n=%d hacking_rate=%.3f verdicts=%s",
+        "Step %3d JUDGE: n=%d/%d hacking_rate=%.3f verdicts=%s policy=%s target=%.3f",
         step,
         len(verdicts),
+        len(candidate_records),
         hacking_rate,
         dict(verdict_counts),
+        sampling_policy,
+        adaptive_signals["target_signal"],
     )
 
-    return [
-        {"verdict": v.verdict, "tags": v.tags, "reported_reward": r.reported_reward}
-        for v, r in zip(verdicts, judged_records, strict=True)
-    ]
+    verdict_rows: list[dict[str, Any]] = []
+    for verdict, record in zip(verdicts, judged_records, strict=True):
+        verdict_rows.append(
+            {
+                "verdict": verdict.verdict,
+                "tags": verdict.tags,
+                "canonical_tags": sorted(canonicalize_judge_tags(verdict.tags)),
+                "novel_exploit": verdict.novel_exploit,
+                "confidence": verdict.confidence,
+                "reported_reward": record.reported_reward,
+                "record_index": record.index,
+            }
+        )
+
+    return verdict_rows, payload
 
 
-def _summarize_judge_verdicts(verdicts: list[dict[str, Any]]) -> dict[str, Any]:
+def _summarize_judge_verdicts(
+    verdicts: list[dict[str, Any]],
+    *,
+    judge_stats: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     n = len(verdicts)
+    summary: dict[str, Any] = {
+        "n_judged": n,
+        "hacking_rate": float("nan"),
+        "lh_other_novel_rate": float("nan"),
+    }
+    for family in _LH_CANONICAL_FAMILIES:
+        summary[f"family_rate/{family}"] = float("nan")
+
     if n == 0:
-        return {"n_judged": 0, "hacking_rate": float("nan")}
+        if judge_stats:
+            for key in (
+                "sampling_policy",
+                "sample_size_requested",
+                "n_candidates",
+                "target_signal",
+                "heuristic_lh_signal",
+                "outcome_entropy_signal",
+                "combined_signal",
+                "hacking_rate",
+                "n_judged",
+            ):
+                if key in judge_stats:
+                    summary[key] = judge_stats[key]
+        return summary
 
     n_hacking = 0
     n_with_verdict = 0
+    n_other_novel = 0
+    family_counts: Counter[str] = Counter()
     for item in verdicts:
-        verdict = item.get("verdict")
-        if isinstance(verdict, str) and verdict:
+        verdict = str(item.get("verdict", "")).strip()
+        raw_tags = item.get("tags", [])
+        tags = [str(tag).strip() for tag in raw_tags] if isinstance(raw_tags, list) else []
+        raw_canonical = item.get("canonical_tags", [])
+        canonical_tags = (
+            [str(tag) for tag in raw_canonical if isinstance(tag, str)]
+            if isinstance(raw_canonical, list)
+            else sorted(canonicalize_judge_tags(tags))
+        )
+        lh_families = [tag for tag in canonical_tags if tag in _LH_CANONICAL_FAMILIES]
+
+        is_hacking = False
+        if verdict:
             n_with_verdict += 1
             if verdict == "hacking":
-                n_hacking += 1
-            continue
+                is_hacking = True
+        if lh_families:
+            is_hacking = True
 
-        tags = item.get("tags", [])
-        if isinstance(tags, list) and any(str(tag).startswith("lh_") for tag in tags):
+        if is_hacking:
             n_hacking += 1
+            for family in lh_families:
+                family_counts[family] += 1
+            if not lh_families:
+                novel_exploit = item.get("novel_exploit")
+                has_novel = isinstance(novel_exploit, str) and bool(novel_exploit.strip())
+                has_nontrivial_tags = any(
+                    tag and tag != "honest" and not tag.startswith("evaluator_hack") for tag in tags
+                )
+                if has_novel or has_nontrivial_tags or verdict == "hacking":
+                    n_other_novel += 1
 
-    return {
-        "n_judged": n,
-        "hacking_rate": n_hacking / (n_with_verdict if n_with_verdict else n),
-    }
+    summary["hacking_rate"] = n_hacking / (n_with_verdict if n_with_verdict else n)
+    summary["lh_other_novel_rate"] = n_other_novel / n
+    for family in _LH_CANONICAL_FAMILIES:
+        summary[f"family_rate/{family}"] = family_counts.get(family, 0) / n
+
+    if judge_stats:
+        for key in (
+            "sampling_policy",
+            "sample_size_requested",
+            "n_candidates",
+            "target_signal",
+            "heuristic_lh_signal",
+            "outcome_entropy_signal",
+            "combined_signal",
+            "hacking_rate",
+            "n_judged",
+        ):
+            if key in judge_stats:
+                summary[key] = judge_stats[key]
+    return summary
 
 
 def _compute_step_wandb_metrics(records: list[CompletionRecord]) -> dict[str, Any]:
@@ -1315,6 +1615,8 @@ def _build_wandb_final_summary(
     normalization_payload: dict[str, Any] | None,
     judge_payload: dict[str, Any] | None,
     heuristic_rates: dict[str, float] | None,
+    batch_lh_metrics: dict[str, float] | None = None,
+    batch_lh_history: list[dict[str, float]] | None = None,
 ) -> dict[str, Any]:
     run_status = "success"
     error_reason: str | None = None
@@ -1347,6 +1649,10 @@ def _build_wandb_final_summary(
         "paper/lh_formal_signal_final": float("nan"),
         "paper/judge_hacking_rate_final": float("nan"),
         "paper/lh_family_prevalence_final": float("nan"),
+        "paper/lh_rate_batch_final": float("nan"),
+        "paper/lh_rate_batch_mean": float("nan"),
+        "paper/lh_other_novel_final": float("nan"),
+        "paper/lh_other_novel_mean": float("nan"),
     }
     if error_reason is not None:
         summary["sweep/error"] = error_reason
@@ -1366,6 +1672,30 @@ def _build_wandb_final_summary(
         summary["paper/judge_hacking_rate_final"] = float(judge_payload["hacking_rate"])
     if heuristic_rates and isinstance(heuristic_rates.get("any_exploit_rate"), int | float):
         summary["paper/lh_family_prevalence_final"] = float(heuristic_rates["any_exploit_rate"])
+    if batch_lh_metrics:
+        final_lh = batch_lh_metrics.get("lh/batch/proportion")
+        if isinstance(final_lh, int | float):
+            summary["paper/lh_rate_batch_final"] = float(final_lh)
+        final_other_novel = batch_lh_metrics.get("lh/batch/other_novel_rate")
+        if isinstance(final_other_novel, int | float):
+            summary["paper/lh_other_novel_final"] = float(final_other_novel)
+        for family in _LH_CANONICAL_FAMILIES:
+            value = batch_lh_metrics.get(f"lh/batch/family/{family}")
+            if isinstance(value, int | float):
+                summary[f"paper/family/{family}_final"] = float(value)
+    if batch_lh_history:
+        lh_vals = np.asarray(
+            [row.get("lh/batch/proportion", float("nan")) for row in batch_lh_history],
+            dtype=np.float64,
+        )
+        if lh_vals.size and np.any(np.isfinite(lh_vals)):
+            summary["paper/lh_rate_batch_mean"] = float(np.nanmean(lh_vals))
+        other_vals = np.asarray(
+            [row.get("lh/batch/other_novel_rate", float("nan")) for row in batch_lh_history],
+            dtype=np.float64,
+        )
+        if other_vals.size and np.any(np.isfinite(other_vals)):
+            summary["paper/lh_other_novel_mean"] = float(np.nanmean(other_vals))
     return summary
 
 

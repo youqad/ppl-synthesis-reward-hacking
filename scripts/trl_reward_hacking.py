@@ -34,6 +34,7 @@ except ImportError:
 
 from ppl_synthesis_reward_hacking.backends.pymc.backend import PyMCBackend
 from ppl_synthesis_reward_hacking.config.contracts import validate_train_contract
+from ppl_synthesis_reward_hacking.config.flattening import flatten_hydra_train_mapping
 from ppl_synthesis_reward_hacking.data.generators import generate_dataset
 from ppl_synthesis_reward_hacking.data.pymc_reward_loader import load_pymc_reward_prompts
 from ppl_synthesis_reward_hacking.experiments.pymc_reward import (
@@ -104,66 +105,7 @@ class TRLRewardHackingConfig:
 
 def config_from_mapping(mapping: Mapping[str, Any]) -> TRLRewardHackingConfig:
     """Create TRLRewardHackingConfig from a mapping (Hydra-friendly)."""
-    flattened = dict(mapping)
-
-    def _coalesce_nested_value(raw: Any, key: str) -> Any:
-        if isinstance(raw, Mapping):
-            if key in raw:
-                return raw[key]
-            if len(raw) == 1:
-                return next(iter(raw.values()))
-        if key == "monitoring_mode" and isinstance(raw, bool):
-            return "off" if raw is False else "judge_evolving"
-        return raw
-
-    for scalar_key in (
-        "reward_metric",
-        "reward_data_split",
-        "predictive_estimator",
-        "paper_track",
-        "monitoring_mode",
-        "claim_mode",
-    ):
-        if scalar_key in flattened:
-            flattened[scalar_key] = _coalesce_nested_value(flattened[scalar_key], scalar_key)
-
-    data_interface_payload = flattened.pop("data_interface", None)
-    if isinstance(data_interface_payload, Mapping):
-        for key in (
-            "dataset_name",
-            "dataset_n_features",
-            "dataset_noise_sigma",
-            "dataset_n_train",
-            "dataset_n_holdout",
-            "dataset_p_true_alpha",
-            "dataset_p_true_beta",
-            "dataset_p_true_fixed",
-        ):
-            if key not in flattened and key in data_interface_payload:
-                flattened[key] = data_interface_payload[key]
-
-    normalization_payload = flattened.pop("normalization", None)
-    if isinstance(normalization_payload, Mapping):
-        for key in (
-            "normalization_method",
-            "normalization_delta_scope",
-            "normalization_epsilon",
-            "normalization_ci_alpha",
-            "normalization_mc_samples",
-            "normalization_min_ess",
-            "normalization_interval",
-            "normalization_sample_size",
-        ):
-            if key not in flattened and key in normalization_payload:
-                flattened[key] = normalization_payload[key]
-
-    monitoring_payload = mapping.get("monitoring_mode")
-    if isinstance(monitoring_payload, Mapping):
-        for key in ("judge_interval", "rubric_evolution_interval"):
-            if key not in flattened and key in monitoring_payload:
-                flattened[key] = monitoring_payload[key]
-
-    flattened.pop("name", None)
+    flattened = flatten_hydra_train_mapping(mapping)
     allowed = {f.name for f in fields(TRLRewardHackingConfig)}
     cfg = TRLRewardHackingConfig(**{k: v for k, v in flattened.items() if k in allowed})
     resolved = validate_train_contract(
