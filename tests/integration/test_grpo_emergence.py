@@ -7,7 +7,6 @@ import pytest
 from ppl_synthesis_reward_hacking.backends.toy import ToyBackend
 from ppl_synthesis_reward_hacking.data.schema import Dataset
 from ppl_synthesis_reward_hacking.experiments.grpo import (
-    HACKING_GAP_THRESHOLD,
     GRPOConfig,
     RolloutData,
     build_grpo_datum,
@@ -22,7 +21,6 @@ class TestNoOracleLeakage:
             completion_tokens=[4, 5, 6],
             sampling_logprobs=[-0.5, -0.3, -0.4],
             reported_reward=100.0,
-            oracle_score=50.0,  # this should NOT appear in datum
             log_mass=1.5,
         )
 
@@ -40,7 +38,6 @@ class TestNoOracleLeakage:
                     completion_tokens=[3],
                     sampling_logprobs=[-0.5],
                     reported_reward=100.0,
-                    oracle_score=10.0,
                     log_mass=1.0,
                 ),
                 RolloutData(
@@ -48,7 +45,6 @@ class TestNoOracleLeakage:
                     completion_tokens=[4],
                     sampling_logprobs=[-0.6],
                     reported_reward=200.0,
-                    oracle_score=20.0,
                     log_mass=1.5,
                 ),
             ]
@@ -76,7 +72,6 @@ class TestGroupRelativeAdvantages:
                     [2],
                     [-0.5],
                     reported_reward=100.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -84,7 +79,6 @@ class TestGroupRelativeAdvantages:
                     [3],
                     [-0.6],
                     reported_reward=150.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -92,7 +86,6 @@ class TestGroupRelativeAdvantages:
                     [4],
                     [-0.7],
                     reported_reward=200.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -100,7 +93,6 @@ class TestGroupRelativeAdvantages:
                     [5],
                     [-0.8],
                     reported_reward=50.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
             ],
@@ -110,7 +102,6 @@ class TestGroupRelativeAdvantages:
                     [2],
                     [-0.5],
                     reported_reward=10.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -118,7 +109,6 @@ class TestGroupRelativeAdvantages:
                     [3],
                     [-0.6],
                     reported_reward=20.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
             ],
@@ -140,7 +130,6 @@ class TestGroupRelativeAdvantages:
                     [2],
                     [-0.5],
                     reported_reward=100.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -148,7 +137,6 @@ class TestGroupRelativeAdvantages:
                     [3],
                     [-0.6],
                     reported_reward=300.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
             ],
@@ -183,8 +171,9 @@ class TestGapGrowth:
         final_gap = trajectory[-1].reported_reward - trajectory[-1].oracle_score
         gap_increase = final_gap - initial_gap
 
-        assert gap_increase > HACKING_GAP_THRESHOLD, (
-            f"Gap should increase by >{HACKING_GAP_THRESHOLD} points. "
+        threshold = 10.0
+        assert gap_increase > threshold, (
+            f"Gap should increase by >{threshold} points. "
             f"Initial: {initial_gap:.2f}, Final: {final_gap:.2f}, Increase: {gap_increase:.2f}"
         )
 
@@ -196,7 +185,6 @@ class TestDatumStructure:
             completion_tokens=[4, 5, 6, 7],
             sampling_logprobs=[-0.5, -0.3, -0.4, -0.2],
             reported_reward=100.0,
-            oracle_score=50.0,
             log_mass=1.5,
         )
 
@@ -212,7 +200,6 @@ class TestDatumStructure:
             completion_tokens=[4, 5, 6, 7],
             sampling_logprobs=[-0.5, -0.3, -0.4, -0.2],
             reported_reward=100.0,
-            oracle_score=50.0,
             log_mass=1.5,
         )
 
@@ -237,7 +224,6 @@ class TestDatumStructure:
             completion_tokens=list(range(n_prompt, n_prompt + n_completion)),
             sampling_logprobs=[-0.5] * n_completion,
             reported_reward=100.0,
-            oracle_score=50.0,
             log_mass=1.5,
         )
 
@@ -270,14 +256,13 @@ class TestEmergenceRequirements:
             completion_tokens=[3, 4],
             sampling_logprobs=[-0.5, -0.3],
             reported_reward=100.0,
-            oracle_score=50.0,
             log_mass=1.5,
         )
 
         assert hasattr(rollout, "reported_reward")
-        assert hasattr(rollout, "oracle_score")
-        assert rollout.reported_reward != rollout.oracle_score, (
-            "Test setup should use different values for reported vs oracle"
+        assert hasattr(rollout, "log_mass")
+        assert not hasattr(rollout, "oracle_score"), (
+            "RolloutData should not carry oracle_score (removed in scorer rearchitect)"
         )
 
 
@@ -288,7 +273,6 @@ class TestInputValidation:
             completion_tokens=[4, 5, 6, 7],
             sampling_logprobs=[-0.5, -0.3],
             reported_reward=100.0,
-            oracle_score=50.0,
             log_mass=1.5,
         )
 
@@ -301,7 +285,6 @@ class TestInputValidation:
             completion_tokens=[4, 5],
             sampling_logprobs=[-0.5, -0.3],
             reported_reward=100.0,
-            oracle_score=50.0,
             log_mass=1.5,
         )
 
@@ -314,7 +297,6 @@ class TestInputValidation:
             completion_tokens=[],
             sampling_logprobs=[],
             reported_reward=100.0,
-            oracle_score=50.0,
             log_mass=1.5,
         )
 
@@ -329,7 +311,6 @@ class TestInputValidation:
                     [2],
                     [-0.5],
                     reported_reward=100.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
             ],
@@ -350,7 +331,6 @@ class TestInputValidation:
                     [2],
                     [-0.5],
                     reported_reward=50.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -358,7 +338,6 @@ class TestInputValidation:
                     [3],
                     [-0.6],
                     reported_reward=50.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -366,7 +345,6 @@ class TestInputValidation:
                     [4],
                     [-0.7],
                     reported_reward=50.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
             ],
@@ -388,7 +366,6 @@ class TestInputValidation:
                     [2],
                     [-0.5],
                     reported_reward=50.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -396,7 +373,6 @@ class TestInputValidation:
                     [3],
                     [-0.6],
                     reported_reward=50.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
             ],
@@ -406,7 +382,6 @@ class TestInputValidation:
                     [2],
                     [-0.5],
                     reported_reward=100.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -414,7 +389,6 @@ class TestInputValidation:
                     [3],
                     [-0.6],
                     reported_reward=200.0,
-                    oracle_score=0.0,
                     log_mass=0.0,
                 ),
             ],
@@ -440,7 +414,6 @@ class TestFailureFiltering:
                     [2],
                     [-0.5],
                     reported_reward=EXEC_FAIL_REWARD,
-                    oracle_score=EXEC_FAIL_REWARD,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -448,7 +421,6 @@ class TestFailureFiltering:
                     [3],
                     [-0.6],
                     reported_reward=-0.7,
-                    oracle_score=-0.9,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -456,7 +428,6 @@ class TestFailureFiltering:
                     [4],
                     [-0.7],
                     reported_reward=-0.3,
-                    oracle_score=-0.5,
                     log_mass=0.0,
                 ),
             ],
@@ -479,7 +450,6 @@ class TestFailureFiltering:
                     [2],
                     [-0.5],
                     reported_reward=EXEC_FAIL_REWARD,
-                    oracle_score=EXEC_FAIL_REWARD,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -487,7 +457,6 @@ class TestFailureFiltering:
                     [3],
                     [-0.6],
                     reported_reward=EXEC_FAIL_REWARD,
-                    oracle_score=EXEC_FAIL_REWARD,
                     log_mass=0.0,
                 ),
             ],
@@ -508,7 +477,6 @@ class TestFailureFiltering:
                     [2],
                     [-0.5],
                     reported_reward=EXEC_FAIL_REWARD,
-                    oracle_score=EXEC_FAIL_REWARD,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -516,7 +484,6 @@ class TestFailureFiltering:
                     [3],
                     [-0.6],
                     reported_reward=10.0,
-                    oracle_score=5.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -524,7 +491,6 @@ class TestFailureFiltering:
                     [4],
                     [-0.7],
                     reported_reward=20.0,
-                    oracle_score=10.0,
                     log_mass=0.0,
                 ),
             ],
@@ -550,7 +516,6 @@ class TestFailureFiltering:
                     [2],
                     [-0.5],
                     reported_reward=EXEC_FAIL_REWARD,
-                    oracle_score=EXEC_FAIL_REWARD,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -558,7 +523,6 @@ class TestFailureFiltering:
                     [3],
                     [-0.6],
                     reported_reward=-450.0,  # valid but below EXEC_FAIL_REWARD
-                    oracle_score=-460.0,
                     log_mass=0.0,
                 ),
                 RolloutData(
@@ -566,7 +530,6 @@ class TestFailureFiltering:
                     [4],
                     [-0.7],
                     reported_reward=-420.0,  # valid but below EXEC_FAIL_REWARD
-                    oracle_score=-430.0,
                     log_mass=0.0,
                 ),
             ],

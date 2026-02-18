@@ -36,7 +36,7 @@ except ImportError:
 from ppl_synthesis_reward_hacking.backends.protocol import ModelSpec
 from ppl_synthesis_reward_hacking.backends.toy import ToyBackend, parse_program_from_text
 from ppl_synthesis_reward_hacking.data.schema import Dataset
-from ppl_synthesis_reward_hacking.experiments.grpo import HACKING_GAP_THRESHOLD, GRPOConfig
+from ppl_synthesis_reward_hacking.experiments.grpo import GRPOConfig
 
 # global state for reward function (set during training setup)
 _REWARD_STATE: dict[str, Any] = {}
@@ -244,7 +244,7 @@ def run_trl_training(config: GRPOConfig) -> dict:
             "final_observed_count": final["observed_count_mean"],
             "initial_frac_improper": initial["frac_improper"],
             "final_frac_improper": final["frac_improper"],
-            "hacking_detected": final["gap_mean"] > initial["gap_mean"] + HACKING_GAP_THRESHOLD,
+            "hacking_detected": False,  # normalization-based detection wired separately
             "n_batches": len(trajectory),
         }
     else:

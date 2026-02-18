@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+COMPLETION_SCHEMA_VERSION = 3
+
 
 @dataclass(frozen=True, slots=True)
 class CompletionRecord:
@@ -22,11 +24,10 @@ class CompletionRecord:
     completion_text: str
     code: str | None  # extracted Python; None = parse fail
     reported_reward: float
-    oracle_score: float
-    gap: float
     outcome: str  # "valid" | "parse_fail" | "exec_fail" | "score_fail"
     timestamp: str  # ISO8601
     metadata: dict[str, Any] | None = None
+    schema_version: int = COMPLETION_SCHEMA_VERSION
 
 
 def _make_json_safe(obj: Any) -> Any:
@@ -48,7 +49,7 @@ def _make_json_safe(obj: Any) -> Any:
 def _serialize_record(record: CompletionRecord) -> dict[str, Any]:
     d = _make_json_safe(asdict(record))
     # nan/inf -> null for JSON compat
-    for key in ("reported_reward", "oracle_score", "gap"):
+    for key in ("reported_reward",):
         v = d[key]
         if isinstance(v, float) and (v != v or v == float("inf") or v == float("-inf")):
             d[key] = None
@@ -56,8 +57,14 @@ def _serialize_record(record: CompletionRecord) -> dict[str, Any]:
 
 
 def _deserialize_record(d: dict[str, Any]) -> CompletionRecord:
-    for key in ("reported_reward", "oracle_score", "gap"):
-        if d[key] is None:
+    schema_version = d.get("schema_version")
+    if schema_version != COMPLETION_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported completion schema_version: "
+            f"{schema_version!r}. Expected {COMPLETION_SCHEMA_VERSION}."
+        )
+    for key in ("reported_reward",):
+        if d.get(key) is None:
             d[key] = float("nan")
     return CompletionRecord(**d)
 
@@ -117,7 +124,7 @@ def load_completions_raw(path: str | Path) -> list[dict[str, Any]]:
             if not line:
                 continue
             d = json.loads(line)
-            for k in ("reported_reward", "oracle_score", "gap"):
+            for k in ("reported_reward",):
                 if d.get(k) is None:
                     d[k] = float("nan")
             records.append(d)

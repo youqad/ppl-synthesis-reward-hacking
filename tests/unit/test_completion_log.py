@@ -26,8 +26,6 @@ def _make_record(**overrides) -> CompletionRecord:
         "completion_text": "import pymc as pm\ndef model(data): ...",
         "code": "def model(data): ...",
         "reported_reward": -3.5,
-        "oracle_score": -5.2,
-        "gap": 1.7,
         "outcome": "valid",
         "timestamp": "2026-01-28T00:00:00+00:00",
         "metadata": None,
@@ -55,7 +53,6 @@ class TestSerializationRoundTrip:
             code=None,
             outcome="parse_fail",
             reported_reward=PARSE_FAIL_REWARD,
-            oracle_score=PARSE_FAIL_REWARD,
         )
         serialized = _serialize_record(rec)
         restored = _deserialize_record(serialized)
@@ -63,37 +60,24 @@ class TestSerializationRoundTrip:
         assert restored.outcome == "parse_fail"
 
     def test_nan_values_survive_json(self):
-        rec = _make_record(
-            reported_reward=float("nan"), oracle_score=float("nan"), gap=float("nan")
-        )
+        rec = _make_record(reported_reward=float("nan"))
         serialized = _serialize_record(rec)
         # nan -> None in JSON
         assert serialized["reported_reward"] is None
-        assert serialized["oracle_score"] is None
-        assert serialized["gap"] is None
         # round-trip through JSON string
         json_str = json.dumps(serialized)
         restored = _deserialize_record(json.loads(json_str))
         assert math.isnan(restored.reported_reward)
-        assert math.isnan(restored.oracle_score)
-        assert math.isnan(restored.gap)
 
     def test_inf_values_serialize_to_null(self):
-        rec = _make_record(reported_reward=float("-inf"), gap=float("inf"))
+        rec = _make_record(reported_reward=float("-inf"))
         serialized = _serialize_record(rec)
         assert serialized["reported_reward"] is None
-        assert serialized["gap"] is None
 
     def test_numpy_scalar_rewards_are_json_safe(self):
-        rec = _make_record(
-            reported_reward=np.float32(1.25),
-            oracle_score=np.float32(float("nan")),
-            gap=np.float32(-0.5),
-        )
+        rec = _make_record(reported_reward=np.float32(1.25))
         serialized = _serialize_record(rec)
         assert serialized["reported_reward"] == 1.25
-        assert serialized["oracle_score"] is None
-        assert serialized["gap"] == -0.5
         # Must be serializable by stdlib json.
         json.dumps(serialized)
 

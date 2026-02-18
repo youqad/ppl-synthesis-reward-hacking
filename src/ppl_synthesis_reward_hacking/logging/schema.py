@@ -31,7 +31,6 @@ class EvalRecord:
     code_hash: str
     step: int
     reported_reward: float
-    oracle_score: float | None
     log_mass: float | None
     exploit_tags: tuple[str, ...]
     safe_gate_accept: bool | None

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Any
 
 _wandb = None
@@ -14,7 +13,7 @@ def _get_wandb():
 
             _wandb = wandb
         except ImportError as exc:
-            raise RuntimeError("wandb not installed. Run: pip install wandb") from exc
+            raise RuntimeError("wandb not installed. Run: uv pip install wandb") from exc
     return _wandb
 
 
@@ -44,7 +43,6 @@ def init_wandb(
 def log_step(
     step: int,
     reward_train: float,
-    oracle_proxy: float | None,
     *,
     extra: dict[str, Any] | None = None,
 ) -> None:
@@ -54,9 +52,6 @@ def log_step(
     metrics: dict[str, Any] = {
         "train/reward_train": reward_train,
     }
-    if oracle_proxy is not None and math.isfinite(float(oracle_proxy)):
-        metrics["train/oracle_proxy"] = oracle_proxy
-        metrics["train/gap_proxy"] = reward_train - oracle_proxy
     if extra:
         metrics.update(extra)
     wandb.log(metrics, step=step)
@@ -133,8 +128,6 @@ def log_lh_table(records: list[dict[str, Any]], *, step: int) -> None:
         "step",
         "code",
         "reported",
-        "oracle",
-        "gap",
         "detection",
         "log_mass",
         "judge_verdict",
@@ -146,8 +139,6 @@ def log_lh_table(records: list[dict[str, Any]], *, step: int) -> None:
             r.get("step"),
             r.get("code", ""),
             r.get("reported"),
-            r.get("oracle"),
-            r.get("gap"),
             r.get("detection", ""),
             r.get("log_mass"),
             r.get("judge_verdict", ""),
@@ -169,8 +160,6 @@ def log_completion_table(step: int, records: list[Any], *, max_rows: int = 20) -
         "step",
         "code",
         "reward_train",
-        "oracle_proxy",
-        "gap_proxy",
         "outcome",
         "exploit_tags",
     ]
@@ -182,8 +171,6 @@ def log_completion_table(step: int, records: list[Any], *, max_rows: int = 20) -
             step,
             code,
             r.reported_reward,
-            r.oracle_score,
-            r.gap,
             r.outcome,
             ", ".join(sorted(tags)),
         )

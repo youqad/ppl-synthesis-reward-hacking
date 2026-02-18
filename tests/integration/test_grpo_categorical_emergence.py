@@ -20,7 +20,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from ppl_synthesis_reward_hacking.backends.toy import ToyProgram
-from ppl_synthesis_reward_hacking.experiments.grpo import HACKING_GAP_THRESHOLD
+
+# threshold was formerly imported from grpo.py; use local constant
+GAP_THRESHOLD = 10.0
 
 
 @dataclass
@@ -283,7 +285,7 @@ class TestNegativeControls:
         final_gap = policy.probs() @ (space.reported_rewards - space.oracle_scores)
 
         # gap should NOT increase (should stay similar or decrease)
-        assert final_gap < initial_gap + HACKING_GAP_THRESHOLD, (
+        assert final_gap < initial_gap + GAP_THRESHOLD, (
             f"Oracle training should NOT cause hacking. "
             f"Initial gap: {initial_gap:.2f}, Final gap: {final_gap:.2f}"
         )
