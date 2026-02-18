@@ -74,3 +74,12 @@ def test_trl_error_fails() -> None:
     )
     assert summary["sweep/run_status"] == "fail"
     assert summary["sweep/error"] == "upstream_error"
+
+
+def test_entrypoints_share_summary_builder_from_common_module() -> None:
+    tinker = _load_script("hydra_train_tinker.py")
+    trl = _load_script("hydra_train_trl.py")
+    common = __import__("hydra_train_common")
+
+    assert tinker._build_sweep_summary is common.build_sweep_summary
+    assert trl._build_sweep_summary is common.build_sweep_summary
