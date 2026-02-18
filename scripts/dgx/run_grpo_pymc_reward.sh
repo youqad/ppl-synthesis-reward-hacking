@@ -1,19 +1,19 @@
 #!/bin/bash
-# GRPO training with synthstats reward on DGX Spark.
+# GRPO training with PyMC reward on DGX Spark.
 #
 # Prereqs: rsync the repo to ~/ppl-synthesis-reward-hacking on DGX Spark.
 # Uses [tool.uv] extra-index-url in pyproject.toml to find CUDA torch wheels.
 # Sets PYTHONNOUSERSITE=1 to isolate from system vLLM in ~/.local.
 #
 # Usage:
-#   ssh dgx-spark-aws-staton 'bash ~/ppl-synthesis-reward-hacking/scripts/dgx/run_grpo_synthstats.sh'
+#   ssh dgx-spark-aws-staton 'bash ~/ppl-synthesis-reward-hacking/scripts/dgx/run_grpo_pymc_reward.sh'
 
 set -euo pipefail
 
 REPO=~/ppl-synthesis-reward-hacking
 VENV=$REPO/.dgx-venv
 
-echo "=== DGX Spark: GRPO SynthStats Training ==="
+echo "=== DGX Spark: GRPO PyMC Reward Training ==="
 echo "Host: $(hostname)"
 echo "Date: $(date -Iseconds)"
 echo "GPU:  $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'N/A')"
@@ -39,7 +39,7 @@ echo "Installing project with [dgx] extras (CUDA torch via [tool.uv] extra-index
 echo "Install done."
 echo ""
 
-OUTPUT_DIR=~/artifacts/grpo_synthstats_$(date +%Y%m%d_%H%M%S)
+OUTPUT_DIR=~/artifacts/grpo_pymc_reward_$(date +%Y%m%d_%H%M%S)
 mkdir -p "$OUTPUT_DIR"
 
 echo "Output: $OUTPUT_DIR"
@@ -47,7 +47,6 @@ echo ""
 
 python scripts/trl_reward_hacking.py \
     --model Qwen/Qwen3-4B-Instruct-2507 \
-    --dataset data/synthstats/synthstats_train.jsonl \
     --n-steps 50 \
     --n-prompts 100 \
     --rollouts-per-prompt 4 \

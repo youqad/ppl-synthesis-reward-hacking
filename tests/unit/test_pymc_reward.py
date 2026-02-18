@@ -1,4 +1,4 @@
-"""Synthstats reward scoring tests (requires PyMC)."""
+"""PyMC reward scoring tests (requires PyMC)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ import pytest
 pytest.importorskip("pymc")
 pytestmark = pytest.mark.pymc
 
-from ppl_synthesis_reward_hacking.backends.pymc.code_executor import execute_pymc_code  # noqa: E402
+from ppl_synthesis_reward_hacking.backends.pymc.code_executor import execute_pymc_code  # noqa: E402, I001
+from ppl_synthesis_reward_hacking.experiments import pymc_reward as pymc_reward_mod  # noqa: E402
 from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (  # noqa: E402
     EXEC_FAIL_REWARD,
     score_pymc_model,
@@ -150,3 +151,66 @@ def model(data):
         reported, oracle, _decomp = score_pymc_model(pymc_model)
         assert oracle is not None
         assert math.isfinite(reported - oracle)
+
+
+class TestSplitSelection:
+    def test_score_uses_parts(self, monkeypatch, tmp_path):
+        captured: dict[str, object] = {}
+
+        monkeypatch.setattr(pymc_reward_mod, "extract_pymc_code", lambda _text: "code")
+
+        def _fake_select_split_data(scoring_data, split):
+            _ = scoring_data
+            captured["split"] = split
+            return {"y": np.array([0.0, 1.0]), "d": 2, "seed": 7}
+
+        monkeypatch.setattr(pymc_reward_mod, "select_split_data", _fake_select_split_data)
+
+        def _fake_execute(code, data, timeout):
+            _ = code, timeout
+            captured["executed_data"] = data
+            return object()
+
+        monkeypatch.setattr(pymc_reward_mod, "execute_pymc_code", _fake_execute)
+
+        def _fake_score_executed(
+            state,
+            batch,
+            index,
+            prompt,
+            completion_text,
+            code,
+            pymc_model,
+            scoring_data,
+        ):
+            _ = state, batch, index, prompt, completion_text, code, pymc_model
+            captured["scoring_data_arg"] = scoring_data
+
+        monkeypatch.setattr(pymc_reward_mod, "_score_executed_model", _fake_score_executed)
+
+        state = pymc_reward_mod.PyMCRewardState(
+            backend=object(),
+            dataset=object(),
+            scoring_data={
+                "y": np.array([1.0, 0.0, 1.0]),
+                "y_holdout": np.array([0.0, 1.0]),
+            },
+            cache_dir=tmp_path,
+            reward_data_split="holdout",
+        )
+        batch = pymc_reward_mod._BatchResult()
+
+        pymc_reward_mod._score_completion(
+            state,
+            batch,
+            index=0,
+            prompt="prompt",
+            completion="completion",
+            exec_timeout=5,
+        )
+
+        assert captured["split"] == "holdout"
+        executed_data = captured["executed_data"]
+        assert isinstance(executed_data, dict)
+        np.testing.assert_array_equal(executed_data["y"], np.array([0.0, 1.0]))
+        assert captured["scoring_data_arg"] is executed_data
