@@ -1,0 +1,61 @@
+program: scripts/hydra_train_tinker.py
+method: bayes
+metric:
+  name: paper/lh_formal_signal_final
+  goal: maximize
+
+early_terminate:
+  type: hyperband
+  min_iter: 30
+  eta: 2
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - launcher=local
+  - train.paper_track=part_a_emergence
+  - train.claim_mode=formal_lh
+  - train.monitoring_mode=off
+  - train.reward_metric=log_marginal_likelihood
+  - train.reward_data_split=train
+  - train.predictive_estimator=none
+  - train.normalization_method=exact_binary
+  - train.normalization_delta_scope=raw_y_binary
+  - train.dataset_name=bernoulli_vector
+  - train.dataset_n_train=1
+  - ${args_no_hyphens}
+
+parameters:
+  train.base_model:
+    values: [Qwen/Qwen3-1.7B, Qwen/Qwen3-4B-Instruct-2507]
+  train.n_steps:
+    values: [200, 400, 800]
+  train.n_prompts:
+    values: [4, 5, 8]
+  train.rollouts_per_prompt:
+    values: [80, 120, 160]
+  train.learning_rate:
+    values: [5.0e-6, 1.0e-5, 2.0e-5]
+  train.temperature:
+    distribution: uniform
+    min: 1.05
+    max: 1.35
+  train.top_p:
+    values: [0.9, 0.95, 0.98]
+  train.top_k:
+    values: [30, 50, 80]
+  train.dataset_n_features:
+    values: [1, 3, 5]
+  train.dataset_p_true_alpha:
+    values: [0.8, 1.0, 2.0]
+  train.dataset_p_true_beta:
+    values: [0.8, 1.0, 2.0]
+  train.smc_draws:
+    values: [300, 500, 800]
+  train.normalization_interval:
+    values: [1, 2, 5]
+  train.normalization_sample_size:
+    values: [10, 20, 40]
+  train.scoring_workers:
+    values: [1, 2, 4]
