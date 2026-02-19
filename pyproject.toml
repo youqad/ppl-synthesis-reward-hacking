@@ -158,4 +158,4 @@ extra-index-url = ["https://download.pytorch.org/whl/cu128"]
 index-strategy = "unsafe-best-match"
 
 [dependency-groups]
-dev = ["wandb>=0.25.0,<0.26", "pymc>=5.27.1,<6"]
+dev = ["wandb>=0.25.0,<0.26", "pymc>=5.27.1,<6.0"]
