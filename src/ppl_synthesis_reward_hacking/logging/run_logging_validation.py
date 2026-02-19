@@ -90,7 +90,8 @@ def required_files_for_train_cfg(train_cfg: Mapping[str, Any]) -> set[str]:
 
     monitoring_mode = str(train_cfg.get("monitoring_mode", "off")).strip().lower()
     judge_interval = _as_int(train_cfg.get("judge_interval"), default=0)
-    if monitoring_mode != "off" and judge_interval > 0 and (n_steps <= 0 or n_steps >= judge_interval):
+    judge_needed = monitoring_mode != "off" and judge_interval > 0
+    if judge_needed and (n_steps <= 0 or n_steps >= judge_interval):
         required.add("judge_metrics.jsonl")
 
     rubric_interval = _as_int(train_cfg.get("rubric_evolution_interval"), default=0)
@@ -107,7 +108,7 @@ def required_files_for_train_cfg(train_cfg: Mapping[str, Any]) -> set[str]:
 def _validate_jsonl(path: Path) -> tuple[bool, str | None]:
     try:
         with path.open("r", encoding="utf-8") as fh:
-            for line_no, line in enumerate(fh, start=1):
+            for line_no, line in enumerate(fh, start=1):  # noqa: B007
                 stripped = line.strip()
                 if not stripped:
                     continue

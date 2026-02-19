@@ -28,11 +28,15 @@ def write_baseline_vs_trained_table(
 
     if baseline is not None:
         base_nn = baseline.get("frac_non_normalized")
-        base_nn_str = f"{base_nn * 100:.1f}\\%" if isinstance(base_nn, (int, float)) else "n/a"
+        base_nn_str = f"{base_nn * 100:.1f}\\%" if isinstance(base_nn, int | float) else "n/a"
         base_exploit = baseline.get("any_exploit_rate", float("nan"))
-        base_exploit_str = f"{base_exploit * 100:.1f}\\%" if isinstance(base_exploit, (int, float)) else "n/a"
+        base_exploit_str = (
+            f"{base_exploit * 100:.1f}\\%" if isinstance(base_exploit, int | float) else "n/a"
+        )
         base_tagged = baseline.get("tagged_fraction")
-        base_tagged_str = f"{base_tagged * 100:.1f}\\%" if isinstance(base_tagged, (int, float)) else "n/a"
+        base_tagged_str = (
+            f"{base_tagged * 100:.1f}\\%" if isinstance(base_tagged, int | float) else "n/a"
+        )
         lines.append(
             f"Baseline (untrained) "
             f"& {base_nn_str} "

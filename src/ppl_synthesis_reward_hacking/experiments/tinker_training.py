@@ -1096,13 +1096,11 @@ def _build_step_datums(
     per_prompt = compute_group_relative_advantages(
         rollouts_by_prompt, global_baseline_fallback=False
     )
-    used_global_fallback = False
     if not per_prompt:
         advantages_by_prompt = compute_group_relative_advantages(
             rollouts_by_prompt, global_baseline_fallback=True
         )
         if advantages_by_prompt:
-            used_global_fallback = True
             log.info(
                 "all per-prompt groups had zero variance; using global baseline (%d/%d prompts)",
                 len(advantages_by_prompt),
