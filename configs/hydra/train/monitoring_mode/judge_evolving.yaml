@@ -1,3 +1,7 @@
 monitoring_mode: judge_evolving
 judge_interval: 10
 rubric_evolution_interval: 10
+judge_sampling_policy: fixed_cap
+judge_adaptive_min: 8
+judge_adaptive_max: 20
+judge_adaptive_target_metric: combined

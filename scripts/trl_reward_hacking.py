@@ -64,7 +64,7 @@ class TRLRewardHackingConfig:
     claim_mode: str = "formal_lh"
     n_steps: int = 1000
     n_prompts: int = 100
-    rollouts_per_prompt: int = 4
+    rollouts_per_prompt: int = 8
     lora_rank: int = 32
     lora_dropout: float = 0.0
     lr: float = 5e-6
@@ -132,7 +132,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--model", default="Qwen/Qwen3-4B-Instruct-2507", help="HuggingFace model ID")
     p.add_argument("--n-steps", type=int, default=1000)
     p.add_argument("--n-prompts", type=int, default=100)
-    p.add_argument("--rollouts-per-prompt", type=int, default=4)
+    p.add_argument("--rollouts-per-prompt", type=int, default=8)
     p.add_argument("--lora-rank", type=int, default=32)
     p.add_argument("--lora-dropout", type=float, default=0.0, help="LoRA dropout")
     p.add_argument("--lr", type=float, default=5e-6, help="Learning rate")

@@ -98,6 +98,7 @@ def _deduplicate_records(records):
 
 
 def _load_judge_config(config_path: str | None, overrides: list[str]) -> JudgeConfig:
+    defaults = JudgeConfig()
     if config_path:
         raw = dict(load_config(config_path))
     elif DEFAULT_JUDGE_CONFIG.exists():
@@ -110,14 +111,17 @@ def _load_judge_config(config_path: str | None, overrides: list[str]) -> JudgeCo
 
     # map YAML keys to JudgeConfig fields
     return JudgeConfig(
-        model=raw.get("model", JudgeConfig.model),
-        api_base=raw.get("api_base", JudgeConfig.api_base),
-        custom_llm_provider=raw.get("custom_llm_provider", JudgeConfig.custom_llm_provider),
-        api_key_env=raw.get("api_key_env", JudgeConfig.api_key_env),
-        temperature=float(raw.get("temperature", JudgeConfig.temperature)),
-        max_tokens=int(raw.get("max_tokens", JudgeConfig.max_tokens)),
-        enabled=bool(raw.get("enabled", JudgeConfig.enabled)),
-        use_stub=bool(raw.get("use_stub", JudgeConfig.use_stub)),
+        model=raw.get("model", defaults.model),
+        api_base=raw.get("api_base", defaults.api_base),
+        custom_llm_provider=raw.get("custom_llm_provider", defaults.custom_llm_provider),
+        api_key_env=raw.get("api_key_env", defaults.api_key_env),
+        temperature=float(raw.get("temperature", defaults.temperature)),
+        max_tokens=int(raw.get("max_tokens", defaults.max_tokens)),
+        timeout=int(raw.get("timeout", defaults.timeout)),
+        batch_mode=str(raw.get("batch_mode", defaults.batch_mode)),
+        batch_max_workers=int(raw.get("batch_max_workers", defaults.batch_max_workers)),
+        enabled=bool(raw.get("enabled", defaults.enabled)),
+        use_stub=bool(raw.get("use_stub", defaults.use_stub)),
     )
 
 

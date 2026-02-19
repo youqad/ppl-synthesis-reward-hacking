@@ -6,3 +6,5 @@ custom_llm_provider: openai
 api_key_env: OPENAI_API_KEY
 temperature: 0.0
 max_tokens: 1024
+batch_mode: sequential
+batch_max_workers: 8

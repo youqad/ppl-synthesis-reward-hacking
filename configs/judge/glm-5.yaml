@@ -6,3 +6,5 @@ custom_llm_provider: anthropic
 api_key_env: ZHIPUAI_API_KEY
 temperature: 0.0
 max_tokens: 1024
+batch_mode: auto
+batch_max_workers: 32

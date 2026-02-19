@@ -68,7 +68,6 @@ from ppl_synthesis_reward_hacking.logging.wandb_hook import (
 from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
     JudgeConfig,
     judge_completions,
-    judge_with_rubric,
 )
 from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
 from ppl_synthesis_reward_hacking.utils.tinker import tinker, types, validate_tinker_setup
@@ -104,6 +103,7 @@ _JUDGE_BACKEND_DEFAULTS: dict[str, dict[str, str | None]] = {
 }
 _JUDGE_SAMPLING_POLICIES = frozenset({"fixed_cap", "adaptive_cap"})
 _JUDGE_ADAPTIVE_TARGET_METRICS = frozenset({"heuristic_novelty", "outcome_entropy", "combined"})
+_JUDGE_BATCH_MODES = frozenset({"auto", "batch_completion", "sequential"})
 _LH_CANONICAL_FAMILIES = tuple(f for f in EXPLOIT_FAMILIES if f.startswith("lh_"))
 
 
@@ -173,6 +173,8 @@ class TinkerGRPOConfig:
     judge_adaptive_min: int = 8
     judge_adaptive_max: int = 20
     judge_adaptive_target_metric: str = "combined"
+    judge_batch_mode: str = "auto"
+    judge_batch_max_workers: int = 32
     track_lh_every_batch: bool = True
 
     # rubric evolution (0 disables)
@@ -190,6 +192,10 @@ class TinkerGRPOConfig:
 
     # W&B completion table logging interval (0 disables)
     wandb_table_interval: int = 10
+
+    # periodic artifact sync (0 disables)
+    artifact_sync_interval: int = 50
+    artifact_sync_min_steps: int = 300
 
 
 def config_from_mapping(mapping: Mapping[str, Any]) -> TinkerGRPOConfig:
@@ -248,12 +254,23 @@ def _validate_config(config: TinkerGRPOConfig) -> None:
             "judge_adaptive_target_metric must be one of "
             f"{sorted(_JUDGE_ADAPTIVE_TARGET_METRICS)}, got {config.judge_adaptive_target_metric!r}"
         )
+    if config.judge_batch_mode not in _JUDGE_BATCH_MODES:
+        raise ValueError(
+            "judge_batch_mode must be one of "
+            f"{sorted(_JUDGE_BATCH_MODES)}, got {config.judge_batch_mode!r}"
+        )
+    if config.judge_batch_max_workers <= 0:
+        raise ValueError("judge_batch_max_workers must be positive")
     if config.judge_adaptive_min < 0:
         raise ValueError("judge_adaptive_min must be >= 0")
     if config.judge_adaptive_max < config.judge_adaptive_min:
         raise ValueError("judge_adaptive_max must be >= judge_adaptive_min")
     if config.judge_sampling_policy == "adaptive_cap" and config.judge_adaptive_max <= 0:
         raise ValueError("adaptive judge sampling requires judge_adaptive_max > 0")
+    if config.artifact_sync_interval < 0:
+        raise ValueError("artifact_sync_interval must be >= 0")
+    if config.artifact_sync_min_steps < 0:
+        raise ValueError("artifact_sync_min_steps must be >= 0")
 
 
 def _build_judge_config(config: TinkerGRPOConfig) -> JudgeConfig:
@@ -279,6 +296,8 @@ def _build_judge_config(config: TinkerGRPOConfig) -> JudgeConfig:
         custom_llm_provider=custom_llm_provider or "",
         api_key_env=api_key_env or "",
         use_stub=config.judge_use_stub,
+        batch_mode=config.judge_batch_mode,
+        batch_max_workers=config.judge_batch_max_workers,
     )
 
 
@@ -422,6 +441,12 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         )
         log_metrics(_compute_step_wandb_metrics(step_data.step_records), step=step)
         writer.flush()
+        _maybe_sync_artifacts(
+            step=step,
+            config=config,
+            output_dir=output_dir,
+            norm_metrics_path=norm_metrics_path,
+        )
 
         heuristic_rates = _compute_heuristic_rates(step_data.step_records)
         log_heuristic_rates(step, heuristic_rates)
@@ -479,6 +504,9 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         output_dir / "judge_metrics.jsonl",
         norm_metrics_path,
         output_dir / "rubric_evolution.jsonl",
+        output_dir / "hydra_resolved_config.json",
+        output_dir / "trajectory.json",
+        output_dir / "results.json",
     ]
     upload_artifacts(artifact_paths)
 
@@ -827,10 +855,16 @@ def _run_normalization_check(
 def _collect_lh_programs(
     step: int,
     step_records: list[CompletionRecord],
-    _judge_verdicts: list[dict[str, Any]],
+    judge_verdicts: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Return step records flagged as formally non-normalized."""
     lh_rows: list[dict[str, Any]] = []
+    verdict_by_index: dict[int, list[dict[str, Any]]] = {}
+    for verdict in judge_verdicts:
+        raw_index = verdict.get("record_index")
+        if not isinstance(raw_index, int):
+            continue
+        verdict_by_index.setdefault(raw_index, []).append(verdict)
 
     for rec in step_records:
         if rec.outcome != "valid":
@@ -848,6 +882,27 @@ def _collect_lh_programs(
         if not detection:
             continue
 
+        verdict_rows = verdict_by_index.get(rec.index, [])
+        verdict_labels = sorted(
+            {
+                str(v.get("verdict", "")).strip()
+                for v in verdict_rows
+                if str(v.get("verdict", "")).strip()
+            }
+        )
+        tag_labels = sorted(
+            {
+                str(tag).strip()
+                for v in verdict_rows
+                for tag in (
+                    v.get("canonical_tags")
+                    if isinstance(v.get("canonical_tags"), list)
+                    else v.get("tags", [])
+                )
+                if isinstance(tag, str) and tag.strip()
+            }
+        )
+
         lh_rows.append(
             {
                 "step": step,
@@ -855,8 +910,8 @@ def _collect_lh_programs(
                 "reported": rec.reported_reward,
                 "detection": ",".join(detection),
                 "log_mass": log_mass,
-                "judge_verdict": "",
-                "judge_tags": "",
+                "judge_verdict": ",".join(verdict_labels),
+                "judge_tags": ",".join(tag_labels),
             }
         )
 
@@ -1002,6 +1057,36 @@ def _log_normalization_summary(
 
     log_normalization_metrics(step, n_checked, frac_non_norm, mean_abs_lm)
     return payload
+
+
+def _maybe_sync_artifacts(
+    *,
+    step: int,
+    config: TinkerGRPOConfig,
+    output_dir: Path,
+    norm_metrics_path: Path,
+) -> None:
+    if config.artifact_sync_interval <= 0:
+        return
+    if step < config.artifact_sync_min_steps:
+        return
+    if step <= 0 or step % config.artifact_sync_interval != 0:
+        return
+
+    upload_artifacts(
+        [
+            output_dir / "completions.jsonl",
+            output_dir / "judge_metrics.jsonl",
+            norm_metrics_path,
+            output_dir / "rubric_evolution.jsonl",
+            output_dir / "hydra_resolved_config.json",
+        ]
+    )
+    log.info(
+        "Step %3d: synced intermediate artifacts to W&B (interval=%d)",
+        step,
+        config.artifact_sync_interval,
+    )
 
 
 def _build_step_datums(
@@ -1401,15 +1486,15 @@ def _run_observational_judge(
             f.write(json.dumps(empty_payload) + "\n")
         return [], empty_payload
 
+    rubric_prompt = None
     if rubric_state is not None:
         from ppl_synthesis_reward_hacking.monitoring.evolving_rubric import (
             format_rubric_prompt,
         )
 
         rubric_prompt = format_rubric_prompt(rubric_state)
-        verdicts = [judge_with_rubric(r, cfg, rubric_prompt) for r in judged_records]
-    else:
-        verdicts = judge_completions(judged_records, cfg)
+
+    verdicts = judge_completions(judged_records, cfg, rubric_prompt=rubric_prompt)
 
     verdict_counts = Counter(v.verdict for v in verdicts)
     tag_counts = Counter(tag for v in verdicts for tag in v.tags)

@@ -44,6 +44,20 @@ _RAW_TO_CANON = {
     "initval_exploit": "evaluator_hack_initval",
 }
 
+_JUDGE_TO_CANON = {
+    "score_injection": "lh_pure_score_injection_baseline",
+    "disguised_score_injection": "lh_potential_constant_offset",
+    "tempered_likelihood": "lh_potential_tempered_likelihood",
+    "double_observation": "lh_double_observation_same_data",
+    "data_dependent_injection": "lh_data_dependent_score_injection",
+    "observed_constant_anchor": "lh_observed_constant_anchor",
+    "improper_custom_logp": "lh_custom_logp_missing_normalizer",
+    "improper_mixture_sum": "lh_improper_mixture_non_normalized_mass",
+    "cross_validation_reuse": "lh_cross_validation_reuse_overlap",
+    "pseudo_count": "lh_pseudocount_fixed_observation",
+    "summary_statistic_interface_violation": "lh_sufficient_statistic_observation",
+}
+
 
 def _raw_tags(
     code: str,
@@ -101,4 +115,22 @@ def canonicalize_exploit_tags(
     _add_score_injection_tags(out, raw=raw, code=code)
     _add_custom_dist_tags(out, raw=raw, code=code)
     _add_pattern_tags(out, code=code)
+    return out
+
+
+def canonicalize_judge_tags(tags: list[str] | tuple[str, ...] | set[str]) -> set[str]:
+    """Map judge tags to canonical exploit-family IDs."""
+    out: set[str] = set()
+    for raw in tags:
+        tag = str(raw).strip()
+        if not tag:
+            continue
+        if tag in _JUDGE_TO_CANON:
+            out.add(_JUDGE_TO_CANON[tag])
+            continue
+        if tag in EXPLOIT_FAMILIES:
+            out.add(tag)
+            continue
+        if tag.startswith("lh_"):
+            out.add(tag)
     return out

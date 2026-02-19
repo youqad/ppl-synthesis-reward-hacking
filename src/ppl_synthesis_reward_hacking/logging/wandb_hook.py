@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 _wandb = None
+log = logging.getLogger(__name__)
 
 
 def _get_wandb():
@@ -177,7 +180,12 @@ def log_completion_table(step: int, records: list[Any], *, max_rows: int = 20) -
     wandb.log({"completions/samples": table}, step=step)
 
 
-def upload_artifacts(paths: list) -> None:
+def upload_artifacts(
+    paths: list,
+    *,
+    retries: int = 3,
+    initial_backoff_s: float = 1.0,
+) -> None:
     wandb = _get_wandb()
     if wandb.run is None:
         return
@@ -191,8 +199,31 @@ def upload_artifacts(paths: list) -> None:
         if p.exists():
             artifact.add_file(str(p))
             n_added += 1
-    if n_added:
-        wandb.log_artifact(artifact)
+    if not n_added:
+        return
+
+    attempts = max(retries, 1)
+    for attempt in range(1, attempts + 1):
+        try:
+            wandb.log_artifact(artifact)
+            return
+        except Exception as exc:  # noqa: BLE001
+            if attempt >= attempts:
+                log.warning(
+                    "W&B artifact upload failed after %d attempts: %s",
+                    attempts,
+                    exc,
+                )
+                return
+            backoff = initial_backoff_s * (2 ** (attempt - 1))
+            log.warning(
+                "W&B artifact upload failed (attempt %d/%d): %s; retrying in %.1fs",
+                attempt,
+                attempts,
+                exc,
+                backoff,
+            )
+            time.sleep(backoff)
 
 
 def finish_wandb() -> None:
