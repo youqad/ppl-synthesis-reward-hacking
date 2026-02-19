@@ -5074,7 +5074,7 @@ packages:
 - pypi: ./
   name: ppl-synthesis-reward-hacking
   version: 0.1.0
-  sha256: bf5671ba12e609f1a113acb91a496a0e723c977f0e7c2b9bfc33cf0b2257bc53
+  sha256: 628cebd34cf74ec05a20fed8ff5a23c82a453d0bd0910741a19e5d1376b651e5
   requires_dist:
   - numpy==2.2.0
   - pyyaml==6.0.2
