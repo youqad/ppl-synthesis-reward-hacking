@@ -21,7 +21,7 @@ command:
   - train/reward_data_split=train
   - train/predictive_estimator=waic
   - train/normalization=exact_binary
-  - train.n_steps=300
+  - train.n_steps=100
   - train.n_prompts=5
   - train.rollouts_per_prompt=120
   - train.learning_rate=1.0e-5

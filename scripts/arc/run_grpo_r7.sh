@@ -68,7 +68,6 @@ python scripts/trl_reward_hacking.py \
     --lr 5e-6 \
     --lora-rank 32 \
     --lora-dropout 0.0 \
-    --smc-draws 500 \
     --exec-timeout 30 \
     --report-to wandb \
     --output-dir "$OUTPUT_DIR"
