@@ -542,3 +542,44 @@ class TestFailureFiltering:
         assert abs(advantages[0][0]) < 1e-10  # failure sentinel stays zero
         assert abs(advantages[0][1] - (-15.0)) < 1e-6
         assert abs(advantages[0][2] - 15.0) < 1e-6
+
+    def test_global_fallback_all_zero_variance(self):
+        rollouts = {
+            0: [
+                RolloutData([1], [2], [-0.5], reported_reward=-0.70, log_mass=0.0),
+                RolloutData([1], [3], [-0.6], reported_reward=-0.70, log_mass=0.0),
+            ],
+            1: [
+                RolloutData([1], [2], [-0.5], reported_reward=-0.60, log_mass=0.0),
+                RolloutData([1], [3], [-0.6], reported_reward=-0.60, log_mass=0.0),
+            ],
+        }
+
+        no_fallback = compute_group_relative_advantages(
+            rollouts, global_baseline_fallback=False
+        )
+        assert len(no_fallback) == 0
+
+        # global mean = -0.65
+        with_fallback = compute_group_relative_advantages(
+            rollouts, global_baseline_fallback=True
+        )
+        assert len(with_fallback) == 2
+        assert all(a < 0 for a in with_fallback[0])  # -0.70 below global mean
+        assert all(a > 0 for a in with_fallback[1])  # -0.60 above global mean
+
+    def test_global_fallback_skipped_with_variance(self):
+        rollouts = {
+            0: [
+                RolloutData([1], [2], [-0.5], reported_reward=-0.70, log_mass=0.0),
+                RolloutData([1], [3], [-0.6], reported_reward=-0.70, log_mass=0.0),
+            ],
+            1: [
+                RolloutData([1], [2], [-0.5], reported_reward=-0.60, log_mass=0.0),
+                RolloutData([1], [3], [-0.6], reported_reward=-0.80, log_mass=0.0),
+            ],
+        }
+
+        result = compute_group_relative_advantages(rollouts, global_baseline_fallback=True)
+        assert 0 not in result
+        assert 1 in result
