@@ -152,24 +152,24 @@ def evaluate_model(
             },
         )
 
-    import arviz as az
-    import pymc as pm
-
-    with pymc_model:
-        idata = pm.sample(
-            draws=400,
-            tune=400,
-            chains=2,
-            cores=1,
-            progressbar=False,
-            random_seed=split_data.get("seed", 0),
-            return_inferencedata=True,
-            idata_kwargs={"log_likelihood": True},
-        )
-
     if metric is RewardMetric.ELPD:
+        import arviz as az
+        import pymc as pm
+
+        with pymc_model:
+            idata = pm.sample(
+                draws=400,
+                tune=400,
+                chains=2,
+                cores=1,
+                progressbar=False,
+                random_seed=split_data.get("seed", 0),
+                return_inferencedata=True,
+                idata_kwargs={"log_likelihood": True},
+            )
         loo_res = az.loo(idata, pointwise=False)
-        elpd = float(loo_res.elpd_loo)
+        # arviz >=0.23 uses pd.Series index "elpd_loo"; attribute access still works
+        elpd = float(loo_res["elpd_loo"])
         return ScoreResult(
             reward_train=elpd,
             outcome_code="ok",
@@ -183,8 +183,22 @@ def evaluate_model(
         )
 
     if metric is RewardMetric.WAIC:
+        import arviz as az
+        import pymc as pm
+
+        with pymc_model:
+            idata = pm.sample(
+                draws=400,
+                tune=400,
+                chains=2,
+                cores=1,
+                progressbar=False,
+                random_seed=split_data.get("seed", 0),
+                return_inferencedata=True,
+                idata_kwargs={"log_likelihood": True},
+            )
         waic_res = az.waic(idata, pointwise=False)
-        elpd_waic = float(waic_res.elpd_waic)
+        elpd_waic = float(waic_res["waic"])
         return ScoreResult(
             reward_train=elpd_waic,
             outcome_code="ok",
