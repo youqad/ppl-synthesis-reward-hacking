@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# pre-commit: run ruff check before committing
+# mirrors the CI lint step to catch errors locally
+
+if command -v pixi &>/dev/null; then
+  if ! pixi run -e dev ruff check . 2>&1; then
+    echo ""
+    echo "pre-commit: ruff check failed, fix errors before committing"
+    exit 1
+  fi
+fi
