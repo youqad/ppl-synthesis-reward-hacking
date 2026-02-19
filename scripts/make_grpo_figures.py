@@ -30,6 +30,7 @@ from ppl_synthesis_reward_hacking.logging.completions import load_completions_ra
 from ppl_synthesis_reward_hacking.plotting.grpo_figures import (  # noqa: E402
     FAMILY_LABELS,
     WINDOW,
+    plot_base_rate_comparison,
     plot_lh_emergence,
     plot_lh_taxonomy_bar,
     plot_lh_taxonomy_evolution,
@@ -59,26 +60,12 @@ apply_publication_style(
 )
 
 
-# ---------------------------------------------------------------------------
-# data loading
-# ---------------------------------------------------------------------------
-
-
 def load_completions(run_dir: Path) -> list[dict]:
     return load_completions_raw(run_dir / "completions.jsonl")
 
 
-# ---------------------------------------------------------------------------
-# classification (taxonomy-based)
-# ---------------------------------------------------------------------------
-
-
 def classify(rec: dict) -> str:
-    """Classify by LH taxonomy families.
-
-    Returns a taxonomy family ID (e.g. 'lh_potential_constant_offset'),
-    'multi_lh', 'honest', or 'invalid'.
-    """
+    """Classify by LH taxonomy families."""
     if rec.get("outcome") != "valid":
         return "invalid"
     code = rec.get("code") or ""
@@ -107,11 +94,6 @@ def classify_simple(rec: dict) -> str:
     if cat == "honest":
         return "honest"
     return "lh_exploit"
-
-
-# ---------------------------------------------------------------------------
-# legacy (kept for reference, not called by main)
-# ---------------------------------------------------------------------------
 
 
 def _legacy_classify(rec: dict) -> str:
@@ -146,11 +128,6 @@ def _legacy_classify(rec: dict) -> str:
     return "honest"
 
 
-# ---------------------------------------------------------------------------
-# main
-# ---------------------------------------------------------------------------
-
-
 def main() -> None:
     p = argparse.ArgumentParser(description="Generate GRPO paper figures")
     p.add_argument("--run-dir", type=Path, default=DEFAULT_RUN)
@@ -161,6 +138,12 @@ def main() -> None:
         type=int,
         default=800,
         help="batch index threshold for late-training analysis",
+    )
+    p.add_argument(
+        "--sweep-summary",
+        type=Path,
+        default=None,
+        help="JSON file with base-rate sweep results for comparison figure",
     )
     args = p.parse_args()
 
@@ -194,6 +177,22 @@ def main() -> None:
         classify_fn=classify,
         family_labels=FAMILY_LABELS,
     )
+
+    if args.sweep_summary is not None:
+        import json as _json
+
+        sweep_data = _json.loads(args.sweep_summary.read_text(encoding="utf-8"))
+        baseline_rates = sweep_data.get("baseline_rates") or {}
+        trained_nn = batch_stats[max(batch_stats)].get("frac_non_normalized")
+        trained_rate = (trained_nn or 0) * 100.0
+        metric_label = sweep_data.get("metric_label", "Non-normalized (%)")
+        plot_base_rate_comparison(
+            baseline_rates,
+            trained_rate,
+            out_dir / "base_rate_comparison.pdf",
+            metric_label=metric_label,
+        )
+
     print("\nDone.")
 
 

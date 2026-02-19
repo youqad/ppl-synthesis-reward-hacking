@@ -5,6 +5,19 @@ from collections.abc import Callable
 from pathlib import Path
 
 
+def _get_log_mass(record: dict) -> float | None:
+    meta = record.get("metadata") or {}
+    norm = meta.get("normalization") or {}
+    lm = norm.get("log_mass")
+    if lm is None:
+        return None
+    try:
+        v = float(lm)
+        return v if math.isfinite(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
 def select_example(
     records: list[dict],
     *,
@@ -14,6 +27,8 @@ def select_example(
 ) -> dict | None:
     """Pick a representative completion for the code comparison figure.
 
+    Exploits are sorted by |log_mass| (descending).
+
     Parameters
     ----------
     records:
@@ -21,8 +36,8 @@ def select_example(
     early:
         If *True*, restrict to batch <= 50; otherwise batch >= 900.
     honest:
-        If *True*, pick the honest program closest to gap=0;
-        otherwise pick the highest-gap exploit.
+        If *True*, pick the honest program closest to |log_mass|=0;
+        otherwise pick the highest-|log_mass| exploit.
     classify_fn:
         Maps a record to a taxonomy family ID.
     """
@@ -33,13 +48,15 @@ def select_example(
         pool = [r for r in valid if r.get("batch", 0) >= 900]
 
     if honest:
-        pool = [r for r in pool if classify_fn(r) == "honest"]
-        pool = [r for r in pool if not math.isnan(r.get("gap", float("nan")))]
-        pool.sort(key=lambda r: abs(r.get("gap", 0)))
+        pool = [r for r in pool if classify_fn(r) == "honest" and _get_log_mass(r) is not None]
+        pool.sort(key=lambda r: abs(float(_get_log_mass(r))))
     else:
-        pool = [r for r in pool if classify_fn(r) not in ("honest", "invalid")]
-        pool = [r for r in pool if not math.isnan(r.get("gap", float("nan")))]
-        pool.sort(key=lambda r: r.get("gap", 0), reverse=True)
+        pool = [
+            r
+            for r in pool
+            if classify_fn(r) not in ("honest", "invalid") and _get_log_mass(r) is not None
+        ]
+        pool.sort(key=lambda r: abs(float(_get_log_mass(r))), reverse=True)
 
     return pool[0] if pool else None
 
@@ -69,16 +86,23 @@ def write_code_comparison(
 
     h_code = (honest_rec.get("code") or "").strip()
     x_code = (hacked_rec.get("code") or "").strip()
-    h_gap = honest_rec.get("gap", 0)
-    x_gap = hacked_rec.get("gap", 0)
     h_batch = honest_rec.get("batch", 0)
     x_batch = hacked_rec.get("batch", 0)
     x_cat = classify_fn(hacked_rec)
     x_label = family_labels.get(x_cat, x_cat)
 
+    h_log_mass = _get_log_mass(honest_rec)
+    x_log_mass = _get_log_mass(hacked_rec)
+    if h_log_mass is None or x_log_mass is None:
+        print(f"  WARN: code comparison needs normalization log_mass, skipping {out.name}")
+        return
+    h_metric_str = f"$\\log m = {h_log_mass:.2f}$"
+    x_metric_str = f"$\\log m = {x_log_mass:.2f}$"
+
     lst = (
         "language=Python, basicstyle=\\scriptsize\\ttfamily, "
-        "breaklines=true, frame=single, xleftmargin=2pt, xrightmargin=2pt"
+        "breaklines=true, frame=single, xleftmargin=12pt, xrightmargin=2pt, "
+        "numbers=left, numberstyle=\\tiny\\color{gray}, numbersep=5pt"
     )
 
     lines = [
@@ -86,25 +110,25 @@ def write_code_comparison(
         "\\begin{figure*}[t]",
         "\\centering",
         "\\begin{minipage}[t]{0.48\\linewidth}",
-        f"\\textbf{{(a) Honest model}} (batch~{h_batch}, gap~$=$~{h_gap:.1f})",
+        f"\\textbf{{(a) Honest model}} (batch~{h_batch}, {h_metric_str})",
         f"\\begin{{lstlisting}}[{lst}]",
         h_code,
         "\\end{lstlisting}",
         "\\end{minipage}",
         "\\hfill",
         "\\begin{minipage}[t]{0.48\\linewidth}",
-        f"\\textbf{{(b) {x_label}}} (batch~{x_batch}, gap~$=$~{x_gap:.1f})",
+        f"\\textbf{{(b) {x_label}}} (batch~{x_batch}, {x_metric_str})",
         f"\\begin{{lstlisting}}[{lst}]",
         x_code,
         "\\end{lstlisting}",
         "\\end{minipage}",
         "\\caption{Representative programs from GRPO training. "
         "The honest model~(a) defines a properly normalized "
-        "distribution over the data (gap~$\\approx 0$). "
+        "distribution over the data ($\\log m \\approx 0$, Definition~9). "
         f"The hacked model~(b), classified as \\emph{{{x_label}}}, "
-        "manipulates the scorer's log-probability calculation to inflate "
-        "the reported reward without improving data fit "
-        f"(gap~$=$~{x_gap:.1f}).}}",
+        "produces an improper marginal data density "
+        f"({x_metric_str}), "
+        "inflating the reported reward without improving data fit.}",
         "\\label{fig:code-comparison}",
         "\\end{figure*}",
     ]

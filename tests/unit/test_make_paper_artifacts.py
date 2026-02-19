@@ -73,21 +73,16 @@ def test_write_lh_evidence_table_emits_expected_columns(tmp_path: Path) -> None:
                 "normalization_frac_non_normalized_pm_std": "55.0 $\\pm$ 2.0",
                 "normalization_mean_abs_log_mass_pm_std": "0.250 $\\pm$ 0.050",
                 "taxonomy_tagged_pm_std": "40.0 $\\pm$ 3.0",
-                "gap_pm_std": "1.200 $\\pm$ 0.100",
                 "safety_acceptance_pm_std": "60.0 $\\pm$ 5.0",
             }
         ],
     )
     text = out_path.read_text(encoding="utf-8")
-    assert "Gap" in text
+    assert "Gap" not in text, "Gap column should be removed from LH evidence table"
     assert "Safety accept (\\%)" in text
     assert "Mean $|$log-mass$|$" in text
+    assert "Non-normalized (\\%)" in text
     assert "Run 6" in text
-    # normalization columns come before Gap (Gap is last data column)
-    header_line = [line for line in text.splitlines() if "Non-normalized" in line][0]
-    norm_pos = header_line.index("Non-normalized")
-    gap_pos = header_line.index("Gap")
-    assert norm_pos < gap_pos, "normalization columns should precede Gap"
 
 
 def test_run_artifact_id_is_unique_for_same_basename() -> None:
@@ -113,17 +108,22 @@ def test_process_condition_manifest_runs_reflect_used_runs(
         json.dumps({"train": {"paper_track": "part_a_emergence", "claim_mode": "formal_lh"}}),
         encoding="utf-8",
     )
+    (existing_run / "results.json").write_text(
+        json.dumps({"logging/valid_run": True}),
+        encoding="utf-8",
+    )
     missing_run = tmp_path / "missing_run"
 
     dummy_report = {
         "per_step": {
             "1": {
-                "gap_mean": 0.1,
+                "reported_mean": -2.0,
                 "exec_fail_pct": 0.0,
                 "parse_fail_pct": 0.0,
+                "frac_non_normalized": 0.1,
+                "mean_abs_log_mass": 0.05,
             }
         },
-        "gap_trajectory": {"last_step_mean": 0.1},
     }
 
     monkeypatch.setattr(module, "_run_analyze_hacking", lambda *args, **kwargs: dummy_report)
@@ -167,7 +167,7 @@ def test_normalization_panel_skips_nan_only_data() -> None:
     condition_summaries = [
         {
             "label": "Run 6",
-            "gap": {"steps": [1, 2], "mean": [0.1, 0.2], "std": [0.0, 0.0]},
+            "reward": {"steps": [1, 2], "mean": [0.1, 0.2], "std": [0.0, 0.0]},
             "offline_eval_aggregate": {
                 "normalization_frac_non_normalized": {
                     "mean": float("nan"),
@@ -180,14 +180,14 @@ def test_normalization_panel_skips_nan_only_data() -> None:
     assert bar_labels == []
     assert bar_vals == []
 
-    fig, _ax_gap, ax_norm = module._make_gap_figure(has_normalization_panel=bool(bar_labels))
+    fig, _ax_reward, ax_norm = module._make_reward_figure(has_normalization_panel=bool(bar_labels))
     assert ax_norm is None
     plt.close(fig)
 
 
-def test_gap_and_normalization_axes_do_not_share_x() -> None:
+def test_reward_and_normalization_axes_do_not_share_x() -> None:
     module = _load_module()
-    fig, ax_gap, ax_norm = module._make_gap_figure(has_normalization_panel=True)
+    fig, ax_reward, ax_norm = module._make_reward_figure(has_normalization_panel=True)
     assert ax_norm is not None
-    assert not ax_gap.get_shared_x_axes().joined(ax_gap, ax_norm)
+    assert not ax_reward.get_shared_x_axes().joined(ax_reward, ax_norm)
     plt.close(fig)

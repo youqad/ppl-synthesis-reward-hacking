@@ -31,9 +31,14 @@ def _build_rc(
         "ytick.labelsize": ytick_labelsize,
         "legend.fontsize": legend_fontsize,
         "lines.linewidth": lines_linewidth,
+        "axes.linewidth": 0.8,
         "axes.grid": True,
         "grid.alpha": 0.15,
         "grid.linestyle": "--",
+        "figure.dpi": 150,
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "savefig.pad_inches": 0.05,
     }
 
 
