@@ -95,12 +95,15 @@ def test_judge_script_defaults_to_glm5_config() -> None:
     assert cfg.model == "anthropic/glm-5"
     assert cfg.custom_llm_provider == "anthropic"
     assert cfg.api_key_env == "ZHIPUAI_API_KEY"
+    assert cfg.batch_mode == "auto"
+    assert cfg.batch_max_workers == 32
 
 
 def test_judge_config_allows_cli_overrides() -> None:
-    cfg = _load_judge_config(overrides=["model='gpt-5.2'"])
+    cfg = _load_judge_config(overrides=["model='gpt-5.2'", "batch_mode='sequential'"])
     assert cfg.model == "gpt-5.2"
     assert cfg.api_key_env == "ZHIPUAI_API_KEY"
+    assert cfg.batch_mode == "sequential"
 
 
 def test_judge_config_allows_explicit_config_path() -> None:

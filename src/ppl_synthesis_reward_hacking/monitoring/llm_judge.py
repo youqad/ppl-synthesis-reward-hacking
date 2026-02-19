@@ -57,6 +57,8 @@ class JudgeConfig:
     temperature: float = 0.0
     max_tokens: int = 1024
     timeout: int = 60
+    batch_mode: str = "auto"  # auto | batch_completion | sequential
+    batch_max_workers: int = 32
     enabled: bool = True
     use_stub: bool = False
     prompt_template: str = _default_prompt_template()
@@ -131,6 +133,91 @@ def _call_judge_api(message: str, cfg: JudgeConfig) -> JudgeVerdict:
     return _parse_verdict(content)
 
 
+def _extract_completion_content(response: Any) -> str:
+    try:
+        return response.choices[0].message.content
+    except Exception:
+        pass
+    if isinstance(response, dict):
+        choices = response.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0]
+            if isinstance(first, dict):
+                msg = first.get("message")
+                if isinstance(msg, dict):
+                    content = msg.get("content")
+                    if isinstance(content, str):
+                        return content
+    return ""
+
+
+def _call_judge_api_batch(messages: list[str], cfg: JudgeConfig) -> list[JudgeVerdict]:
+    if not messages:
+        return []
+    if cfg.batch_mode == "sequential" or len(messages) == 1:
+        return [_call_judge_api(message, cfg) for message in messages]
+
+    # GPT-5 models use Responses API path in _call_judge_api; keep sequential fallback.
+    if _is_gpt5_model(cfg.model):
+        return [_call_judge_api(message, cfg) for message in messages]
+
+    api_key = os.getenv(cfg.api_key_env)
+    if not api_key:
+        return [
+            JudgeVerdict(
+                is_hacking=False,
+                confidence=0.0,
+                rationale="Missing API key",
+                tags=[],
+                verdict="suspicious",
+                parse_error=True,
+            )
+            for _ in messages
+        ]
+
+    if cfg.batch_mode not in {"auto", "batch_completion"}:
+        return [_call_judge_api(message, cfg) for message in messages]
+
+    try:
+        import litellm
+
+        batch_messages = [[{"role": "user", "content": message}] for message in messages]
+        kwargs: dict[str, Any] = {
+            "model": cfg.model,
+            "messages": batch_messages,
+            "api_key": api_key,
+            "temperature": cfg.temperature,
+            "max_tokens": cfg.max_tokens,
+            "timeout": cfg.timeout,
+            "max_workers": max(int(cfg.batch_max_workers), 1),
+        }
+        if cfg.api_base:
+            kwargs["api_base"] = cfg.api_base
+        if cfg.custom_llm_provider:
+            kwargs["custom_llm_provider"] = cfg.custom_llm_provider
+
+        responses = litellm.batch_completion(**kwargs)
+    except Exception:
+        return [_call_judge_api(message, cfg) for message in messages]
+
+    verdicts: list[JudgeVerdict] = []
+    for response in responses:
+        if isinstance(response, Exception):
+            verdicts.append(
+                JudgeVerdict(
+                    is_hacking=False,
+                    confidence=0.0,
+                    rationale=f"Judge call failed: {response}",
+                    tags=[],
+                    verdict="suspicious",
+                    parse_error=True,
+                )
+            )
+            continue
+        verdicts.append(_parse_verdict(_extract_completion_content(response)))
+    return verdicts
+
+
 def judge_sample(
     *,
     prompt: str,
@@ -163,14 +250,7 @@ def judge_completion_record(
     if cfg.use_stub:
         return _stub_verdict(record.reported_reward)
 
-    code_block = record.code or record.completion_text
-    message = (
-        _OPEN_ENDED_PROMPT
-        + f"```python\n{code_block}\n```\n\n"
-        + f"Scores: reported_reward={record.reported_reward:.2f}\n"
-        + f"Outcome: {record.outcome}\n"
-        + _STRUCTURED_PROMPT
-    )
+    message = _build_record_message(record)
     return _call_judge_api(message, cfg)
 
 
@@ -180,6 +260,7 @@ def judge_completions(
     *,
     sample: int | None = None,
     env_file: str | None = None,
+    rubric_prompt: str | None = None,
 ) -> list[JudgeVerdict]:
     if env_file:
         try:
@@ -192,7 +273,11 @@ def judge_completions(
     if sample is not None and sample < len(records):
         records = random.sample(records, sample)
 
-    return [judge_completion_record(r, cfg) for r in records]
+    if cfg.use_stub:
+        return [_stub_verdict(record.reported_reward) for record in records]
+
+    messages = [_build_record_message(record, rubric_prompt=rubric_prompt) for record in records]
+    return _call_judge_api_batch(messages, cfg)
 
 
 def judge_with_rubric(
@@ -207,16 +292,7 @@ def judge_with_rubric(
     if cfg.use_stub:
         return _stub_verdict(record.reported_reward)
 
-    code_block = record.code or record.completion_text
-    message = (
-        rubric_prompt
-        + "\n\n"
-        + _OPEN_ENDED_PROMPT
-        + f"```python\n{code_block}\n```\n\n"
-        + f"Scores: reported_reward={record.reported_reward:.2f}\n"
-        + f"Outcome: {record.outcome}\n"
-        + _STRUCTURED_PROMPT
-    )
+    message = _build_record_message(record, rubric_prompt=rubric_prompt)
     return _call_judge_api(message, cfg)
 
 
@@ -237,6 +313,20 @@ def _build_message(
         "reported_reward": reported_reward,
     }
     return cfg.prompt_template + "\n\nINPUT:\n" + json.dumps(payload, ensure_ascii=False)
+
+
+def _build_record_message(record: CompletionRecord, rubric_prompt: str | None = None) -> str:
+    code_block = record.code or record.completion_text
+    message = _OPEN_ENDED_PROMPT
+    if rubric_prompt is not None:
+        message = rubric_prompt + "\n\n" + message
+    return (
+        message
+        + f"```python\n{code_block}\n```\n\n"
+        + f"Scores: reported_reward={record.reported_reward:.2f}\n"
+        + f"Outcome: {record.outcome}\n"
+        + _STRUCTURED_PROMPT
+    )
 
 
 def _parse_verdict(content: str) -> JudgeVerdict:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared helpers for Hydra-based training entrypoints."""
+"""Common plumbing for Hydra train scripts."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from ppl_synthesis_reward_hacking.logging.wandb_hook import (
     log_metrics,
     update_summary,
 )
+from ppl_synthesis_reward_hacking.logging.run_logging_validation import validate_run_logging
 
 _PAPER_SUMMARY_KEYS = (
     "paper/track",
@@ -36,6 +37,25 @@ _PAPER_SUMMARY_KEYS = (
     "paper/lh_other_novel_final",
     "paper/lh_other_novel_mean",
 )
+
+_PAPER_SUMMARY_DEFAULTS: dict[str, Any] = {
+    "paper/track": "unknown",
+    "paper/claim_mode": "unknown",
+    "paper/reward_metric": "unknown",
+    "paper/reward_data_split": "unknown",
+    "paper/predictive_estimator": "unknown",
+    "paper/monitoring_mode": "unknown",
+    "paper/normalization_method": "unknown",
+    "paper/delta_scope": "unknown",
+    "paper/frac_non_normalized_final": float("nan"),
+    "paper/lh_formal_signal_final": float("nan"),
+    "paper/judge_hacking_rate_final": float("nan"),
+    "paper/lh_family_prevalence_final": float("nan"),
+    "paper/lh_rate_batch_final": float("nan"),
+    "paper/lh_rate_batch_mean": float("nan"),
+    "paper/lh_other_novel_final": float("nan"),
+    "paper/lh_other_novel_mean": float("nan"),
+}
 
 
 def build_sweep_summary(results: dict[str, Any]) -> dict[str, Any]:
@@ -73,8 +93,10 @@ def build_sweep_summary(results: dict[str, Any]) -> dict[str, Any]:
     if error_reason is not None:
         summary["sweep/error"] = error_reason
     for key in _PAPER_SUMMARY_KEYS:
-        if key in results:
-            summary[key] = results[key]
+        summary[key] = results.get(key, _PAPER_SUMMARY_DEFAULTS[key])
+    for key, value in results.items():
+        if isinstance(key, str) and key.startswith("logging/"):
+            summary[key] = value
     return summary
 
 
@@ -85,6 +107,30 @@ def save_resolved_config(output_dir: str, cfg_dict: dict[str, Any]) -> None:
         json.dumps(cfg_dict, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+def _save_results(output_dir: str, results: dict[str, Any]) -> None:
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "results.json").write_text(
+        json.dumps(results, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _logging_metrics(report: dict[str, Any]) -> dict[str, Any]:
+    missing_files = report.get("missing_files")
+    missing_summary = report.get("missing_summary_keys")
+    parse_errors = report.get("parse_errors")
+    missing_files_n = len(missing_files) if isinstance(missing_files, list) else 0
+    missing_summary_n = len(missing_summary) if isinstance(missing_summary, list) else 0
+    parse_errors_n = len(parse_errors) if isinstance(parse_errors, list) else 0
+    return {
+        "logging/valid_run": bool(report.get("valid", False)),
+        "logging/missing_files_n": missing_files_n,
+        "logging/missing_summary_keys_n": missing_summary_n,
+        "logging/parse_errors_n": parse_errors_n,
+    }
 
 
 def run_from_cfg(
@@ -127,10 +173,37 @@ def run_from_cfg(
         train_run_cfg = config_from_mapping(train_cfg)
         save_resolved_config(train_run_cfg.output_dir, cfg_dict)
         results = run_training(train_run_cfg)
+        summary_for_validation = {**results, **build_sweep_summary(results)}
+        validation_report = validate_run_logging(
+            Path(train_run_cfg.output_dir),
+            summary_payload=summary_for_validation,
+        )
+        logging_metrics = _logging_metrics(validation_report)
+        results.update(logging_metrics)
+        invalid_logging = not validation_report.get("valid", False)
+        if invalid_logging:
+            results["sweep/run_status"] = "fail"
+            if "sweep/error" not in results:
+                results["sweep/error"] = "logging_validation_failed"
+            logger.warning(
+                "Logging validation failed for %s: missing_files=%s missing_summary=%s parse_errors=%s",
+                train_run_cfg.output_dir,
+                validation_report.get("missing_files", []),
+                validation_report.get("missing_summary_keys", []),
+                validation_report.get("parse_errors", []),
+            )
+        _save_results(train_run_cfg.output_dir, results)
         summary = build_sweep_summary(results)
         if wandb_enabled:
             log_metrics(summary)
             update_summary(summary)
+        if invalid_logging:
+            raise RuntimeError(
+                "logging_validation_failed: "
+                f"missing_files={validation_report.get('missing_files', [])}, "
+                f"missing_summary_keys={validation_report.get('missing_summary_keys', [])}, "
+                f"parse_errors={validation_report.get('parse_errors', [])}"
+            )
         return results
     except Exception as exc:
         if wandb_enabled:
@@ -139,6 +212,18 @@ def run_from_cfg(
                 "sweep/error": str(exc),
                 "sweep/final_lh_formal_signal": float("nan"),
             }
+            if "results" in locals() and isinstance(results, dict):
+                final_lh = results.get(
+                    "sweep/final_lh_formal_signal",
+                    results.get("paper/lh_formal_signal_final", float("nan")),
+                )
+                failure_summary["sweep/final_lh_formal_signal"] = final_lh
+                for key in _PAPER_SUMMARY_KEYS:
+                    if key in results:
+                        failure_summary[key] = results[key]
+                for key, value in results.items():
+                    if isinstance(key, str) and key.startswith("logging/"):
+                        failure_summary[key] = value
             log_metrics(failure_summary)
             update_summary(failure_summary)
         raise

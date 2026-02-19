@@ -13,7 +13,7 @@ name: trl
 model: Qwen/Qwen3-4B-Instruct-2507
 n_steps: 1000
 n_prompts: 100
-rollouts_per_prompt: 4
+rollouts_per_prompt: 8
 lora_rank: 32
 lora_dropout: 0.0
 lr: 5e-6

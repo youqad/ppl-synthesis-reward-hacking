@@ -60,3 +60,35 @@ def test_invalid_reward_split_fails() -> None:
 def test_bad_dataset_fails() -> None:
     with pytest.raises(ValueError):
         config_from_mapping({**_base_mapping(), "dataset_name": "nonexistent_dataset"})
+
+
+def test_bad_judge_sampling_policy_fails() -> None:
+    with pytest.raises(ValueError):
+        config_from_mapping({**_base_mapping(), "judge_sampling_policy": "invalid_policy"})
+
+
+def test_adaptive_judge_sampling_requires_positive_max() -> None:
+    with pytest.raises(ValueError):
+        config_from_mapping(
+            {
+                **_base_mapping(),
+                "judge_sampling_policy": "adaptive_cap",
+                "judge_adaptive_min": 0,
+                "judge_adaptive_max": 0,
+            }
+        )
+
+
+def test_artifact_sync_interval_must_be_non_negative() -> None:
+    with pytest.raises(ValueError):
+        config_from_mapping({**_base_mapping(), "artifact_sync_interval": -1})
+
+
+def test_bad_judge_batch_mode_fails() -> None:
+    with pytest.raises(ValueError):
+        config_from_mapping({**_base_mapping(), "judge_batch_mode": "invalid"})
+
+
+def test_judge_batch_max_workers_must_be_positive() -> None:
+    with pytest.raises(ValueError):
+        config_from_mapping({**_base_mapping(), "judge_batch_max_workers": 0})

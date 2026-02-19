@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from ppl_synthesis_reward_hacking.evaluation.taxonomy import canonicalize_exploit_tags
+from ppl_synthesis_reward_hacking.evaluation.taxonomy import (
+    canonicalize_exploit_tags,
+    canonicalize_judge_tags,
+)
 
 
 def test_taxonomy_maps_constant_potential_to_core_families() -> None:
@@ -124,3 +127,18 @@ def model(data):
 ```"""
     tags = canonicalize_exploit_tags(code)
     assert "lh_improper_mixture_non_normalized_mass" in tags
+
+
+def test_taxonomy_maps_judge_tags_to_canonical_families() -> None:
+    tags = canonicalize_judge_tags(
+        [
+            "score_injection",
+            "summary_statistic_interface_violation",
+            "lh_cross_validation_reuse_overlap",
+            "unknown_freeform_tag",
+        ]
+    )
+    assert "lh_pure_score_injection_baseline" in tags
+    assert "lh_sufficient_statistic_observation" in tags
+    assert "lh_cross_validation_reuse_overlap" in tags
+    assert "unknown_freeform_tag" not in tags
