@@ -38,6 +38,7 @@ htmlcov/
 *.synctex.gz
 
 artifacts/
+wandb-dir/
 background-documents/
 .scratch/
 .notes/
