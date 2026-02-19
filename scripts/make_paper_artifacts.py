@@ -271,7 +271,7 @@ def _maybe_plot_normalization_trajectory(
         for cond in condition_summaries
     )
     if not has_norm:
-        print("WARN: no normalization series data, skipping normalization trajectory", file=sys.stderr)
+        print("WARN: no normalization series, skipping norm trajectory", file=sys.stderr)
         return
 
     _setup_plot_style()

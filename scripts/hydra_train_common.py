@@ -11,13 +11,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ppl_synthesis_reward_hacking.logging.run_logging_validation import validate_run_logging
 from ppl_synthesis_reward_hacking.logging.wandb_hook import (
     finish_wandb,
     init_wandb,
     log_metrics,
     update_summary,
 )
-from ppl_synthesis_reward_hacking.logging.run_logging_validation import validate_run_logging
 
 _PAPER_SUMMARY_KEYS = (
     "paper/track",
@@ -186,7 +186,7 @@ def run_from_cfg(
             if "sweep/error" not in results:
                 results["sweep/error"] = "logging_validation_failed"
             logger.warning(
-                "Logging validation failed for %s: missing_files=%s missing_summary=%s parse_errors=%s",
+                "Logging validation failed for %s: missing=%s summary=%s parse=%s",
                 train_run_cfg.output_dir,
                 validation_report.get("missing_files", []),
                 validation_report.get("missing_summary_keys", []),

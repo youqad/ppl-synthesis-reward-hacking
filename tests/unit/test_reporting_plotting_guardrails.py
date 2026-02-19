@@ -3,7 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from ppl_synthesis_reward_hacking.plotting.grpo_figures import plot_lh_taxonomy_bar
-from ppl_synthesis_reward_hacking.reporting.code_examples import select_example, write_code_comparison
+from ppl_synthesis_reward_hacking.reporting.code_examples import (
+    select_example,
+    write_code_comparison,
+)
 
 
 def _record(
