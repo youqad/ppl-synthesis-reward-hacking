@@ -142,7 +142,9 @@ def _summarize_completions(path: Path) -> dict[str, Any]:
     records = 0
     valid = 0
     max_batch = -1
-    gaps: list[float] = []
+    abs_log_masses: list[float] = []
+    n_non_normalized = 0
+    n_norm_checked = 0
 
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -156,20 +158,29 @@ def _summarize_completions(path: Path) -> dict[str, Any]:
                 max_batch = batch
             if rec.get("outcome") == "valid":
                 valid += 1
-                gap = rec.get("gap")
-                if isinstance(gap, int | float):
-                    gap_f = float(gap)
-                    if math.isfinite(gap_f):
-                        gaps.append(gap_f)
+                meta = rec.get("metadata") or {}
+                norm = meta.get("normalization")
+                if isinstance(norm, dict):
+                    n_norm_checked += 1
+                    lm = norm.get("log_mass")
+                    if lm is not None:
+                        lm_f = float(lm)
+                        if math.isfinite(lm_f):
+                            abs_log_masses.append(abs(lm_f))
+                    if not norm.get("is_normalized", True):
+                        n_non_normalized += 1
 
-    mean_gap = float(sum(gaps) / len(gaps)) if gaps else None
     valid_rate = (float(valid) / float(records)) if records > 0 else None
+    frac_nn = (n_non_normalized / n_norm_checked) if n_norm_checked > 0 else None
+    mean_abs_lm = float(sum(abs_log_masses) / len(abs_log_masses)) if abs_log_masses else None
     return {
         "records": records,
         "valid_records": valid,
         "valid_rate": valid_rate,
         "max_batch": max_batch,
-        "mean_gap_valid": mean_gap,
+        "n_norm_checked": n_norm_checked,
+        "frac_non_normalized": frac_nn,
+        "mean_abs_log_mass": mean_abs_lm,
     }
 
 
@@ -239,8 +250,12 @@ def main() -> None:
         print(summary_line, flush=True)
 
         detail_line = f"           max_batch={summary['max_batch']}"
-        if summary["mean_gap_valid"] is not None:
-            detail_line += f" mean_gap_valid={summary['mean_gap_valid']:.3f}"
+        if summary["n_norm_checked"] and summary["n_norm_checked"] > 0:
+            detail_line += f" norm_checked={summary['n_norm_checked']}"
+            if summary["frac_non_normalized"] is not None:
+                detail_line += f" frac_non_normalized={summary['frac_non_normalized']:.3f}"
+            if summary["mean_abs_log_mass"] is not None:
+                detail_line += f" mean_abs_log_mass={summary['mean_abs_log_mass']:.3f}"
         print(detail_line, flush=True)
 
         out_dir = out_root / name

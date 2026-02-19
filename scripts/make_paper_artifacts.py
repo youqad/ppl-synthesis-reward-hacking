@@ -22,6 +22,9 @@ from typing import Any
 import numpy as np
 import yaml
 
+from ppl_synthesis_reward_hacking.plotting.grpo_figures import (
+    plot_normalization_trajectory as _plot_normalization_trajectory,
+)
 from ppl_synthesis_reward_hacking.plotting.styles import apply_publication_style
 from ppl_synthesis_reward_hacking.reporting.tables import (
     fmt_pm_std as _fmt_pm_std,
@@ -130,7 +133,6 @@ def _aggregate_series(reports: list[dict[str, Any]], metric: str) -> dict[str, l
 
 
 def _setup_plot_style() -> None:
-    """Configure seaborn + Times New Roman for publication figures."""
     apply_publication_style(
         font_size=9,
         axes_labelsize=9,
@@ -149,18 +151,13 @@ def _make_reward_figure(*, has_normalization_panel: bool):
         fig, (ax_reward, ax_norm) = plt.subplots(
             2,
             1,
-            figsize=(9, 6),
+            figsize=(6.75, 5),
             gridspec_kw={"height_ratios": [1, 0.7]},
         )
         return fig, ax_reward, ax_norm
 
-    fig, ax_reward = plt.subplots(figsize=(9, 4.5))
+    fig, ax_reward = plt.subplots(figsize=(6.75, 3.5))
     return fig, ax_reward, None
-
-
-# Legacy helper names retained for local script tests.
-def _make_gap_figure(*, has_normalization_panel: bool):
-    return _make_reward_figure(has_normalization_panel=has_normalization_panel)
 
 
 def _plot_reward_trajectories(
@@ -187,30 +184,6 @@ def _plot_reward_trajectories(
         )
 
 
-def _plot_gap_trajectories(
-    ax_gap: Any,
-    condition_summaries: list[dict[str, Any]],
-    *,
-    palette: list[Any] | None,
-) -> None:
-    for i, cond in enumerate(condition_summaries):
-        series = cond["gap"]
-        steps = series["steps"]
-        if not steps:
-            continue
-        mean_ = series["mean"]
-        std_ = series["std"]
-        color = palette[i % len(palette)] if palette else None
-        ax_gap.plot(steps, mean_, linewidth=2, label=cond["label"], color=color)
-        ax_gap.fill_between(
-            steps,
-            [m - sd for m, sd in zip(mean_, std_, strict=False)],
-            [m + sd for m, sd in zip(mean_, std_, strict=False)],
-            alpha=0.12,
-            color=color,
-        )
-
-
 def _format_reward_axis(ax_reward: Any, *, show_xlabel: bool) -> None:
     ax_reward.set_title("Reward trajectory (train objective)")
     if show_xlabel:
@@ -218,17 +191,7 @@ def _format_reward_axis(ax_reward: Any, *, show_xlabel: bool) -> None:
     ax_reward.set_ylabel("Reward")
     ax_reward.legend(loc="best")
     if _HAS_SEABORN:
-        sns.despine(ax=ax_reward, left=False, bottom=False)
-
-
-def _format_gap_axis(ax_gap: Any, *, show_xlabel: bool) -> None:
-    ax_gap.set_title("Reward gap trajectory (reported \u2212 oracle)")
-    if show_xlabel:
-        ax_gap.set_xlabel("Training step")
-    ax_gap.set_ylabel("Gap")
-    ax_gap.legend(loc="best")
-    if _HAS_SEABORN:
-        sns.despine(ax=ax_gap, left=False, bottom=False)
+        sns.despine(ax=ax_reward)
 
 
 def _normalization_bars(
@@ -265,7 +228,7 @@ def _plot_normalization_panel(
     ax_norm.set_ylabel("Non-normalized (%)")
     ax_norm.set_xlabel("Condition")
     if _HAS_SEABORN:
-        sns.despine(ax=ax_norm, left=False, bottom=False)
+        sns.despine(ax=ax_norm)
 
 
 def _maybe_plot_reward_trajectory(
@@ -293,34 +256,28 @@ def _maybe_plot_reward_trajectory(
 
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_pdf, bbox_inches="tight")
-    plt.savefig(out_png, dpi=200, bbox_inches="tight")
+    plt.savefig(out_png, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
-def _maybe_plot_gap_trajectory(
+def _maybe_plot_normalization_trajectory(
     condition_summaries: list[dict[str, Any]],
     *,
     out_pdf: Path,
     out_png: Path,
 ) -> None:
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("WARN: matplotlib not installed, skipping plots", file=sys.stderr)
+    has_norm = any(
+        (cond.get("normalization_frac") or {}).get("steps")
+        for cond in condition_summaries
+    )
+    if not has_norm:
+        print("WARN: no normalization series data, skipping normalization trajectory", file=sys.stderr)
         return
 
     _setup_plot_style()
-    fig, ax_gap = plt.subplots(figsize=(9, 4.5))
     palette = sns.color_palette("muted") if _HAS_SEABORN else None
-    _plot_gap_trajectories(ax_gap, condition_summaries, palette=palette)
-    _format_gap_axis(ax_gap, show_xlabel=True)
-
-    fig.tight_layout()
-
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_pdf, bbox_inches="tight")
-    plt.savefig(out_png, dpi=200, bbox_inches="tight")
-    plt.close(fig)
+    _plot_normalization_trajectory(condition_summaries, out_pdf, palette=palette)
 
 
 def _maybe_plot_failure_rates(
@@ -337,7 +294,7 @@ def _maybe_plot_failure_rates(
 
     _setup_plot_style()
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.75, 3))
     palette = sns.color_palette("muted") if _HAS_SEABORN else None
     for i, cond in enumerate(condition_summaries):
         name = cond["label"]
@@ -359,13 +316,13 @@ def _maybe_plot_failure_rates(
 
     ax1.legend(loc="best")
     if _HAS_SEABORN:
-        sns.despine(ax=ax1, left=False, bottom=False)
-        sns.despine(ax=ax2, left=False, bottom=False)
+        sns.despine(ax=ax1)
+        sns.despine(ax=ax2)
     fig.tight_layout()
 
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_pdf, bbox_inches="tight")
-    plt.savefig(out_png, dpi=200, bbox_inches="tight")
+    plt.savefig(out_png, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -419,7 +376,15 @@ def _summarize_offline_eval_runs(
         section="safety",
         key="acceptance_rate_checked",
     )
-    norm_abs_log_mass = [abs(v) for v in norm_log_mass]
+    # prefer the already-correct mean(|log_mass|) from eval summaries;
+    # fall back to |mean(log_mass)| only when the field is absent.
+    norm_abs_log_mass = _collect_offline_eval_values(
+        offline_eval_summaries,
+        section="normalization",
+        key="mean_abs_log_mass",
+    )
+    if not norm_abs_log_mass:
+        norm_abs_log_mass = [abs(v) for v in norm_log_mass]
     norm_frac_m, norm_frac_s = _compute_mean_std(norm_frac)
     norm_log_mass_m, norm_log_mass_s = _compute_mean_std(norm_log_mass)
     norm_abs_log_mass_m, norm_abs_log_mass_s = _compute_mean_std(norm_abs_log_mass)
@@ -514,6 +479,19 @@ def _read_claim_mode(run_dir: Path) -> str | None:
         return None
     claim_mode = train.get("claim_mode")
     return str(claim_mode) if isinstance(claim_mode, str) else None
+
+
+def _read_logging_valid(run_dir: Path) -> bool:
+    results_path = run_dir / "results.json"
+    if not results_path.exists():
+        return False
+    try:
+        payload = json.loads(results_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("logging/valid_run") is True
 
 
 def _load_runlist_config(cfg_path: Path) -> dict[str, Any]:
@@ -679,6 +657,12 @@ def _process_condition(
                 file=sys.stderr,
             )
             continue
+        if not _read_logging_valid(run_dir):
+            print(
+                f"SKIP (logging validation failed or missing): {run_dir}",
+                file=sys.stderr,
+            )
+            continue
         resolved_runs.append(str(run_dir))
         claim_modes_used.append(claim_mode)
         run_artifact_id = _run_artifact_id(run_dir)
@@ -791,9 +775,10 @@ def _build_condition_summary(
         "runs": resolved_runs,
         "n_runs_used": len(reports),
         "reward": _aggregate_series(reports, "reported_mean"),
-        "gap": _aggregate_series(reports, "gap_mean"),
         "exec_fail_pct": _aggregate_series(reports, "exec_fail_pct"),
         "parse_fail_pct": _aggregate_series(reports, "parse_fail_pct"),
+        "normalization_frac": _aggregate_series(reports, "frac_non_normalized"),
+        "normalization_abs_log_mass": _aggregate_series(reports, "mean_abs_log_mass"),
     }
 
 
@@ -885,7 +870,6 @@ def _write_outputs(
     condition_rows: list[dict[str, Any]],
     manifest: dict[str, Any],
 ) -> None:
-    # primary table: normalization-first LH evidence
     _write_lh_evidence_table(
         out_dir / "lh_evidence_table.tex",
         condition_rows=condition_rows,
@@ -899,17 +883,16 @@ def _write_outputs(
         out_pdf=out_dir / "reward_trajectory.pdf",
         out_png=out_dir / "reward_trajectory.png",
     )
-    _maybe_plot_gap_trajectory(
+    _maybe_plot_normalization_trajectory(
         condition_summaries,
-        out_pdf=out_dir / "gap_trajectory.pdf",
-        out_png=out_dir / "gap_trajectory.png",
+        out_pdf=out_dir / "normalization_trajectory.pdf",
+        out_png=out_dir / "normalization_trajectory.png",
     )
     _maybe_plot_failure_rates(
         condition_summaries,
         out_pdf=out_dir / "failure_rates.pdf",
         out_png=out_dir / "failure_rates.png",
     )
-    # secondary: legacy gap-only table
     _write_baseline_vs_trained_table(
         out_dir / "baseline_vs_trained_table.tex",
         baseline=baseline_summary,
@@ -963,9 +946,10 @@ def main() -> None:
                 "runs": condition_result["runs"],
                 "n_runs_used": condition_result["n_runs_used"],
                 "reward": condition_result["reward"],
-                "gap": condition_result["gap"],
                 "exec_fail_pct": condition_result["exec_fail_pct"],
                 "parse_fail_pct": condition_result["parse_fail_pct"],
+                "normalization_frac": condition_result.get("normalization_frac"),
+                "normalization_abs_log_mass": condition_result.get("normalization_abs_log_mass"),
                 "offline_eval_aggregate": condition_result.get("offline_eval_aggregate"),
             }
         )
