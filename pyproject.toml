@@ -152,6 +152,7 @@ arc = {features = ["arc"], solve-group = "arc"}
 [tool.pixi.tasks]
 psrh = "psrh"
 test = "pytest"
+setup-hooks = "git config core.hooksPath .githooks"
 
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/cu128"]
