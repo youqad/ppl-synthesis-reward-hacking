@@ -98,33 +98,40 @@ def compute_group_relative_advantages(
     rollouts_by_prompt: dict[int, list[RolloutData]],
     skip_zero_advantage: bool = True,
     failure_threshold: float | None = None,
+    global_baseline_fallback: bool = True,
 ) -> dict[int, list[float]]:
     """Per-prompt advantages from reported_reward only.
 
     Failed completions get advantage=0.0; zero-variance prompts skipped.
-    By default, failures are identified by scorer sentinels, not by reward
-    magnitude, so low but valid rewards still contribute gradient signal.
+    When ALL prompts have zero within-group variance and global_baseline_fallback
+    is True, recomputes advantages using the global mean across all prompts.
+    This prevents gradient starvation in flat reward landscapes.
     """
     from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
         classify_outcome,
     )
 
-    advantages_by_prompt: dict[int, list[float]] = {}
-
-    for prompt_idx, rollouts in rollouts_by_prompt.items():
+    def _valid_mask_for(rollouts: list[RolloutData]) -> list[bool]:
         if failure_threshold is None:
-            valid_mask = [
+            return [
                 bool(np.isfinite(r.reported_reward))
                 and classify_outcome(r.reported_reward) == "valid"
                 for r in rollouts
             ]
-        else:
-            # Legacy override for experiments that explicitly want threshold behavior.
-            valid_mask = [
-                bool(np.isfinite(r.reported_reward)) and r.reported_reward > failure_threshold
-                for r in rollouts
-            ]
-        valid_rewards = [r.reported_reward for r, v in zip(rollouts, valid_mask, strict=True) if v]
+        return [
+            bool(np.isfinite(r.reported_reward)) and r.reported_reward > failure_threshold
+            for r in rollouts
+        ]
+
+    advantages_by_prompt: dict[int, list[float]] = {}
+    masks_by_prompt: dict[int, list[bool]] = {}
+
+    for prompt_idx, rollouts in rollouts_by_prompt.items():
+        valid_mask = _valid_mask_for(rollouts)
+        masks_by_prompt[prompt_idx] = valid_mask
+        valid_rewards = [
+            r.reported_reward for r, v in zip(rollouts, valid_mask, strict=True) if v
+        ]
 
         if not valid_rewards:
             continue
@@ -138,6 +145,30 @@ def compute_group_relative_advantages(
         if skip_zero_advantage and all(abs(a) < 1e-10 for a in advantages):
             continue
 
+        advantages_by_prompt[prompt_idx] = advantages
+
+    if advantages_by_prompt or not global_baseline_fallback:
+        return advantages_by_prompt
+
+    # global mean fallback
+    all_valid = []
+    for prompt_idx, rollouts in rollouts_by_prompt.items():
+        mask = masks_by_prompt.get(prompt_idx, _valid_mask_for(rollouts))
+        all_valid.extend(
+            r.reported_reward for r, v in zip(rollouts, mask, strict=True) if v
+        )
+    if not all_valid or np.std(all_valid) < 1e-10:
+        return advantages_by_prompt
+
+    global_mean = float(np.mean(all_valid))
+    for prompt_idx, rollouts in rollouts_by_prompt.items():
+        mask = masks_by_prompt.get(prompt_idx, _valid_mask_for(rollouts))
+        advantages = [
+            (r.reported_reward - global_mean) if v else 0.0
+            for r, v in zip(rollouts, mask, strict=True)
+        ]
+        if all(abs(a) < 1e-10 for a in advantages):
+            continue
         advantages_by_prompt[prompt_idx] = advantages
 
     return advantages_by_prompt

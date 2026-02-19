@@ -744,9 +744,10 @@ def _process_sequence(
             completion_text,
             scoring_data=scoring_data,
             timeout=config.exec_timeout,
-            reward_metric=config.reward_metric,
+            # always SMC: MCMC is degenerate at n_train=1 for binary enumeration
+            reward_metric="log_marginal_likelihood",
             reward_data_split=config.reward_data_split,
-            predictive_estimator=config.predictive_estimator,
+            predictive_estimator="none",
             smc_draws=config.smc_draws,
             method=config.normalization_method,
             delta_scope=config.normalization_delta_scope,
@@ -1092,7 +1093,24 @@ def _maybe_sync_artifacts(
 def _build_step_datums(
     rollouts_by_prompt: dict[int, list[RolloutData]], *, n_prompts: int
 ) -> tuple[list, float]:
-    advantages_by_prompt = compute_group_relative_advantages(rollouts_by_prompt)
+    per_prompt = compute_group_relative_advantages(
+        rollouts_by_prompt, global_baseline_fallback=False
+    )
+    used_global_fallback = False
+    if not per_prompt:
+        advantages_by_prompt = compute_group_relative_advantages(
+            rollouts_by_prompt, global_baseline_fallback=True
+        )
+        if advantages_by_prompt:
+            used_global_fallback = True
+            log.info(
+                "all per-prompt groups had zero variance; using global baseline (%d/%d prompts)",
+                len(advantages_by_prompt),
+                n_prompts,
+            )
+    else:
+        advantages_by_prompt = per_prompt
+
     datums = []
     for prompt_idx, advantages in advantages_by_prompt.items():
         rollouts = rollouts_by_prompt[prompt_idx]
