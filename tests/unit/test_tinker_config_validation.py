@@ -92,3 +92,33 @@ def test_bad_judge_batch_mode_fails() -> None:
 def test_judge_batch_max_workers_must_be_positive() -> None:
     with pytest.raises(ValueError):
         config_from_mapping({**_base_mapping(), "judge_batch_max_workers": 0})
+
+
+@pytest.mark.parametrize(
+    "model_name",
+    [
+        "gpt-5.2-2025-12-11",
+        "openai/gpt-5.2-2025-12-11",
+        "gpt-5-2025-12-11",
+    ],
+)
+def test_openai_judge_rejects_dated_gpt5_snapshot(model_name: str) -> None:
+    with pytest.raises(ValueError, match="floating model aliases"):
+        config_from_mapping(
+            {
+                **_base_mapping(),
+                "judge_backend": "openai",
+                "judge_model": model_name,
+            }
+        )
+
+
+def test_openai_judge_accepts_floating_gpt5_alias() -> None:
+    cfg = config_from_mapping(
+        {
+            **_base_mapping(),
+            "judge_backend": "openai",
+            "judge_model": "gpt-5.2",
+        }
+    )
+    assert cfg.judge_model == "gpt-5.2"

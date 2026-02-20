@@ -74,7 +74,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--judge-interval", type=int, default=0)
     p.add_argument("--judge-sample-size", type=int, default=20)
     p.add_argument("--judge-dedup", action=argparse.BooleanOptionalAction, default=True)
-    p.add_argument("--judge-model", default="anthropic/glm-5")
+    p.add_argument("--judge-model", default="gpt-5.2")
     p.add_argument("--judge-use-stub", action="store_true")
     p.add_argument("--judge-env-file", default=None)
     p.add_argument("--rubric-evolution-interval", type=int, default=0)

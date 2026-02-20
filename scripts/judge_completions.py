@@ -48,7 +48,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-DEFAULT_JUDGE_CONFIG = Path("configs/judge/glm-5.yaml")
+DEFAULT_JUDGE_CONFIG = Path("configs/judge/gpt-5.2.yaml")
 
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:

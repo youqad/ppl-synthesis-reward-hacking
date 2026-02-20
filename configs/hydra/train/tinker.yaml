@@ -32,8 +32,8 @@ dataset_p_true_fixed: null
 # judge API params (used only when monitoring_mode != off)
 judge_sample_size: 20
 judge_dedup: true
-judge_backend: zai
-judge_model: anthropic/glm-5
+judge_backend: openai
+judge_model: gpt-5.2
 judge_api_base: null
 judge_custom_llm_provider: null
 judge_api_key_env: null
