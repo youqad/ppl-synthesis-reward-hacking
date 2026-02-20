@@ -50,10 +50,10 @@ _STRUCTURED_PROMPT = (
 
 @dataclass(frozen=True, slots=True)
 class JudgeConfig:
-    model: str = "anthropic/glm-5"
-    api_base: str | None = "https://api.z.ai/api/anthropic"
-    custom_llm_provider: str = "anthropic"
-    api_key_env: str = "ZHIPUAI_API_KEY"
+    model: str = "gpt-5.2"
+    api_base: str | None = None
+    custom_llm_provider: str = ""
+    api_key_env: str = "OPENAI_API_KEY"
     temperature: float = 0.0
     max_tokens: int = 1024
     timeout: int = 60

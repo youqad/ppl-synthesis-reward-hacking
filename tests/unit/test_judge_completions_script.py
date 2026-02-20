@@ -88,21 +88,20 @@ def _load_judge_config(
     return _MODULE._load_judge_config(config_path, overrides or [])
 
 
-def test_judge_script_defaults_to_glm5_config() -> None:
-    assert str(_MODULE.DEFAULT_JUDGE_CONFIG) == "configs/judge/glm-5.yaml"
+def test_judge_script_defaults_to_gpt52_config() -> None:
+    assert str(_MODULE.DEFAULT_JUDGE_CONFIG) == "configs/judge/gpt-5.2.yaml"
     assert _MODULE.DEFAULT_JUDGE_CONFIG.exists()
     cfg = _load_judge_config()
-    assert cfg.model == "anthropic/glm-5"
-    assert cfg.custom_llm_provider == "anthropic"
-    assert cfg.api_key_env == "ZHIPUAI_API_KEY"
+    assert cfg.model == "gpt-5.2"
+    assert cfg.api_key_env == "OPENAI_API_KEY"
     assert cfg.batch_mode == "auto"
     assert cfg.batch_max_workers == 32
 
 
 def test_judge_config_allows_cli_overrides() -> None:
-    cfg = _load_judge_config(overrides=["model='gpt-5.2'", "batch_mode='sequential'"])
-    assert cfg.model == "gpt-5.2"
-    assert cfg.api_key_env == "ZHIPUAI_API_KEY"
+    cfg = _load_judge_config(overrides=["model='gpt-4.1'", "batch_mode='sequential'"])
+    assert cfg.model == "gpt-4.1"
+    assert cfg.api_key_env == "OPENAI_API_KEY"
     assert cfg.batch_mode == "sequential"
 
 
@@ -110,5 +109,4 @@ def test_judge_config_allows_explicit_config_path() -> None:
     config_path = Path(__file__).resolve().parents[2] / "configs" / "judge" / "gpt-5.2.yaml"
     cfg = _load_judge_config(config_path=config_path)
     assert cfg.model == "gpt-5.2"
-    assert cfg.custom_llm_provider == "openai"
     assert cfg.api_key_env == "OPENAI_API_KEY"

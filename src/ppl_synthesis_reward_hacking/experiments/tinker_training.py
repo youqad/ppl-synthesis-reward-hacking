@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
@@ -105,6 +106,10 @@ _JUDGE_SAMPLING_POLICIES = frozenset({"fixed_cap", "adaptive_cap"})
 _JUDGE_ADAPTIVE_TARGET_METRICS = frozenset({"heuristic_novelty", "outcome_entropy", "combined"})
 _JUDGE_BATCH_MODES = frozenset({"auto", "batch_completion", "sequential"})
 _LH_CANONICAL_FAMILIES = tuple(f for f in EXPLOIT_FAMILIES if f.startswith("lh_"))
+_OPENAI_GPT5_DATED_SNAPSHOT = re.compile(
+    r"^(?:openai/)?gpt-5(?:\.\d+)?-\d{4}-\d{2}-\d{2}$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -162,8 +167,8 @@ class TinkerGRPOConfig:
     judge_interval: int = 0
     judge_sample_size: int = 20
     judge_dedup: bool = True
-    judge_backend: str = "zai"
-    judge_model: str = "anthropic/glm-5"
+    judge_backend: str = "openai"
+    judge_model: str = "gpt-5.2"
     judge_api_base: str | None = None
     judge_custom_llm_provider: str | None = None
     judge_api_key_env: str | None = None
@@ -241,6 +246,13 @@ def _validate_config(config: TinkerGRPOConfig) -> None:
         raise ValueError(
             "judge_backend must be one of "
             f"{sorted(_JUDGE_BACKEND_DEFAULTS)}, got {config.judge_backend!r}"
+        )
+    if config.judge_backend == "openai" and _OPENAI_GPT5_DATED_SNAPSHOT.match(
+        config.judge_model
+    ):
+        raise ValueError(
+            "For openai judge backend, use floating model aliases (e.g., gpt-5.2), "
+            f"not dated snapshots: {config.judge_model!r}"
         )
     if config.judge_sample_size <= 0:
         raise ValueError("judge_sample_size must be positive")
