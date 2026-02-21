@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=run7-grpo
+#SBATCH --job-name=run7-tinker
 #SBATCH --partition=short
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=16
@@ -8,7 +8,7 @@
 #SBATCH --output=/data/coml-prog-synthesis/youdar/ppl-synthesis-reward-hacking/grpo_run7_%j.out
 #SBATCH --error=/data/coml-prog-synthesis/youdar/ppl-synthesis-reward-hacking/grpo_run7_%j.err
 
-# Run 7: LH emergence with TRL GRPO on ARC
+# Run 7: LH emergence with Tinker GRPO on ARC (paper-track defaults)
 # Usage: sbatch scripts/arc_run7.sh
 
 set -euo pipefail
@@ -29,12 +29,27 @@ uv venv --python 3.11 .venv 2>/dev/null || true
 source .venv/bin/activate
 uv pip install -e ".[arc,wandb]" --quiet 2>&1 | tail -3
 
-python scripts/hydra_train_trl.py \
-    train.scoring_d=3 \
-    train.temperature=1.28 \
-    train.max_grad_norm=1.0 \
-    train.kl_beta=0.001 \
-    train.top_p=1.0 \
-    train.top_k=0 \
+python scripts/hydra_train_tinker.py \
+    train.paper_track=part_a_emergence \
+    train.claim_mode=formal_lh \
+    train.monitoring_mode=off \
+    train.dataset_name=bernoulli_vector \
+    train.dataset_n_features=3 \
+    train.dataset_n_train=1 \
+    train.dataset_n_holdout=256 \
     train.n_steps=1000 \
-    wandb.tags="[trl,run7,d3,arc]"
+    train.n_prompts=5 \
+    train.rollouts_per_prompt=160 \
+    train.temperature=1.28 \
+    train.top_p=0.95 \
+    train.top_k=50 \
+    train.learning_rate=1e-5 \
+    train.lora_rank=32 \
+    train.reward_metric=log_marginal_likelihood \
+    train.reward_data_split=train \
+    train.predictive_estimator=none \
+    train.smc_draws=500 \
+    train.normalization_method=exact_binary \
+    train.normalization_interval=5 \
+    train.normalization_sample_size=10 \
+    wandb.tags="[tinker,run7,part_a,d3,arc]"
