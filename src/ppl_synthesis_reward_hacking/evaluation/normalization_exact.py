@@ -79,9 +79,10 @@ def check_exact_binary_norm(
     log_mass = float(np.logaddexp.reduce(zs))
     mass = None if log_mass > 700 else float(math.exp(log_mass))
 
-    y_obs_arr = np.asarray(scoring_data["y"]).reshape(-1)
+    # multi-obs paths yield shape (n_train, d); flatten and take first d
+    y_obs_arr = np.asarray(scoring_data["y"]).reshape(-1)[:d]
     y_obs_key = _bits_to_key(tuple(int(v) for v in y_obs_arr.tolist()))
-    z_obs = float(z_by_bits[y_obs_key])
+    z_obs = z_by_bits.get(y_obs_key, float("nan"))
 
     return {
         "ok": True,

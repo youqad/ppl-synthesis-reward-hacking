@@ -36,6 +36,11 @@ _NORMALIZATION_KEYS = (
     "normalization_sample_size",
 )
 
+_SAMPLING_KEYS = (
+    "top_p",
+    "top_k",
+)
+
 _MONITORING_MODE_KEYS = (
     "judge_interval",
     "rubric_evolution_interval",
@@ -76,6 +81,12 @@ def flatten_hydra_train_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         for key in _NORMALIZATION_KEYS:
             if key not in flattened and key in normalization_payload:
                 flattened[key] = normalization_payload[key]
+
+    sampling_payload = flattened.pop("sampling", None)
+    if isinstance(sampling_payload, Mapping):
+        for key in _SAMPLING_KEYS:
+            if key not in flattened and key in sampling_payload:
+                flattened[key] = sampling_payload[key]
 
     monitoring_payload = mapping.get("monitoring_mode")
     if isinstance(monitoring_payload, Mapping):

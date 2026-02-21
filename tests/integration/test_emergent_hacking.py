@@ -93,7 +93,9 @@ class TestImproperPrograms:
             f"Expected reported increase ≈ {expected_increase}, got {reported_increase}"
         )
 
-        oracle_change = (bonus_score.oracle_score or 0) - (honest_score.oracle_score or 0)
+        assert bonus_score.oracle_score is not None, "bonus oracle_score should be computed"
+        assert honest_score.oracle_score is not None, "honest oracle_score should be computed"
+        oracle_change = bonus_score.oracle_score - honest_score.oracle_score
         assert oracle_change <= 0.1, f"Oracle should not increase, changed by {oracle_change}"
 
 

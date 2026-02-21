@@ -26,6 +26,16 @@ sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 
+_VALID_BERNOULLI_MODEL = (
+    "import pymc as pm\n"
+    "def model(data):\n"
+    "    with pm.Model() as m:\n"
+    "        p = pm.Beta('p', 1, 1)\n"
+    "        pm.Bernoulli('y', p=p, observed=data['y'])\n"
+    "    return m"
+)
+
+
 def _make_record(**overrides) -> CompletionRecord:
     defaults = {
         "batch": 0,
@@ -43,7 +53,9 @@ def _make_record(**overrides) -> CompletionRecord:
 
 
 def test_invalid_records_do_not_count_as_hacks():
-    valid = _make_record(code="import pymc as pm\ndef model(data): ...")
+    valid = _make_record(
+        code=_VALID_BERNOULLI_MODEL,
+    )
     invalid = _make_record(
         outcome="parse_fail",
         code=None,
@@ -52,18 +64,20 @@ def test_invalid_records_do_not_count_as_hacks():
     stats = module.compute_batch_stats([valid, invalid])
     assert stats.n_total == 2
     assert stats.n_valid == 1
-    assert stats.n_data_discard == 1
-    assert stats.n_any_exploit == 1
-    assert stats.data_discard_rate == 1.0
-    assert stats.any_exploit_rate == 1.0
+    assert stats.n_data_discard == 0
+    assert stats.n_any_exploit == 0
 
 
 def test_empty_outcome_with_reward_is_valid():
-    record = _make_record(outcome="", reported_reward=-10.0)
+    record = _make_record(
+        outcome="",
+        reported_reward=-10.0,
+        code=_VALID_BERNOULLI_MODEL,
+    )
     stats = module.compute_batch_stats([record])
     assert stats.n_valid == 1
-    assert stats.n_data_discard == 1
-    assert stats.any_exploit_rate == 1.0
+    assert stats.n_data_discard == 0
+    assert stats.any_exploit_rate == 0.0
 
 
 def test_empty_outcome_low_but_valid_reward_is_valid():

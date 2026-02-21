@@ -446,7 +446,7 @@ def _run_batch_normalization(
             result = check_normalization(
                 texts[int(idx)],
                 method=state.normalization_method,
-                d=int(np.asarray(state.scoring_data["y"]).size),
+                d=int(state.scoring_data.get("d", np.asarray(state.scoring_data["y"]).shape[-1])),
                 p_true=p_true,
                 seed=int(state.scoring_data.get("seed", state.call_count * 1000 + int(idx))),
                 timeout=30,
@@ -468,7 +468,7 @@ def _run_batch_normalization(
             if lm is not None:
                 abs_log_masses.append(abs(float(lm)))
         except Exception:
-            pass
+            log.debug("norm check failed idx=%d", idx, exc_info=True)
 
     if n_checked == 0:
         return _NormResults()

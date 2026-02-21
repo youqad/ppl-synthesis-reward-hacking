@@ -76,41 +76,43 @@ class TestSafetyGateAcceptance:
 
 
 class TestSafetyGateDataDiscard:
+    @pytest.mark.xfail(
+        strict=True,
+        reason="gate cannot detect data discard without require_observable_data=True",
+    )
     def test_data_discard_gate_behavior(self, scoring_data_d1, safety_templates):
-        """Data discard (no observed RVs) may pass the gate or fail to build.
+        """Data discard (no observed RVs) should be rejected by the gate.
 
-        The checker looks at observed_RVs and data_vars. A model with zero
-        observations and require_observable_data=False has nothing to flag
-        on the observation side, so the gate accepts. This is a known gap.
+        Currently the checker with require_observable_data=False has nothing
+        to flag, so the gate accepts. This xfail documents the known gap and
+        will turn into XPASS (test failure) when the gate is fixed.
         """
         _, model = _extract_and_execute(safety_templates["data_discard"], scoring_data_d1)
         if model is None:
-            # exec failure is acceptable for a model with no observations
-            return
+            pytest.skip("model execution failed")
 
         accepted, reasons = check_pymc_model(model, require_observable_data=False)
-        # known gap: gate accepts because there are no potentials, no custom logp,
-        # and no data vars to check usage of (the model ignores data)
-        assert accepted is True
-        assert reasons == []
+        assert accepted is False, "gate should reject data discard"
 
 
 class TestSafetyGateDoubleObservation:
+    @pytest.mark.xfail(
+        strict=True,
+        reason="gate cannot detect double observation without MutableData",
+    )
     def test_double_obs_without_mutable_data(self, scoring_data_d1, safety_templates):
-        """Double observation without pm.MutableData.
+        """Double observation without pm.MutableData should be rejected.
 
         The gate checks data_use_counts via graph walk from observed RV
         value vars back to data_vars. Without pm.MutableData, there are
         no data_vars in the model, so the graph walk finds nothing to flag.
-        The gate accepts despite double observation. This is a known gap
-        that requires pm.MutableData in the prompt to close.
+        This xfail documents the known gap and will turn into XPASS (test
+        failure) when the gate is fixed (e.g. by requiring MutableData).
         """
         _, model = _extract_and_execute(safety_templates["double_observation"], scoring_data_d1)
         assert model is not None
         accepted, reasons = check_pymc_model(model, require_observable_data=False)
-        # known gap: without MutableData wrapping, gate cannot trace data provenance
-        assert accepted is True
-        assert reasons == []
+        assert accepted is False, "gate should reject double observation"
 
 
 class TestIntegrityCheckFabricatedData:

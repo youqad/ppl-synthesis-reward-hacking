@@ -4,6 +4,7 @@ defaults:
   - predictive_estimator: none
   - claim_mode: formal_lh
   - normalization: auto
+  - sampling: paper
   - data_interface: linear_regression
   - paper_track: part_a_emergence
   - monitoring_mode: "off"
@@ -23,8 +24,8 @@ exec_timeout: 30
 resume_from: null
 num_generations: 8
 temperature: 1.28
-top_p: 1.0
-top_k: 0
+top_p: ${.sampling.top_p}
+top_k: ${.sampling.top_k}
 kl_beta: 0.001
 max_grad_norm: 1.0
 dataset_p_true_alpha: 1.0

@@ -24,6 +24,10 @@ def test_flatten_hydra_train_mapping_merges_nested_payloads() -> None:
                 "normalization_interval": 5,
                 "normalization_sample_size": 40,
             },
+            "sampling": {
+                "top_p": 0.9,
+                "top_k": 64,
+            },
             "monitoring_mode": {
                 "monitoring_mode": "judge_evolving",
                 "judge_interval": 10,
@@ -45,6 +49,8 @@ def test_flatten_hydra_train_mapping_merges_nested_payloads() -> None:
     assert flattened["normalization_method"] == "auto"
     assert flattened["normalization_interval"] == 1
     assert flattened["normalization_sample_size"] == 40
+    assert flattened["top_p"] == 0.9
+    assert flattened["top_k"] == 64
     assert flattened["judge_interval"] == 10
     assert flattened["rubric_evolution_interval"] == 20
     assert flattened["judge_sampling_policy"] == "adaptive_cap"
@@ -54,6 +60,7 @@ def test_flatten_hydra_train_mapping_merges_nested_payloads() -> None:
     assert "name" not in flattened
     assert "data_interface" not in flattened
     assert "normalization" not in flattened
+    assert "sampling" not in flattened
 
 
 @pytest.mark.parametrize(
