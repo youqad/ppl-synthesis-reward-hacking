@@ -19,4 +19,3 @@ def classify_outcome_from_reward(reported: float) -> str:
     if reported == EXEC_FAIL_REWARD:
         return OUTCOME_EXEC_FAIL
     return OUTCOME_VALID
-

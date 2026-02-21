@@ -423,9 +423,7 @@ class _NormResults:
     n_checked: int = 0
 
 
-def _run_batch_normalization(
-    state: PyMCRewardState, batch: _BatchResult
-) -> _NormResults:
+def _run_batch_normalization(state: PyMCRewardState, batch: _BatchResult) -> _NormResults:
     if not state.run_normalization or not batch.valid_completion_texts:
         return _NormResults()
     if state.normalization_interval <= 0 or state.call_count % state.normalization_interval != 0:

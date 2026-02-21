@@ -247,9 +247,7 @@ def _validate_config(config: TinkerGRPOConfig) -> None:
             "judge_backend must be one of "
             f"{sorted(_JUDGE_BACKEND_DEFAULTS)}, got {config.judge_backend!r}"
         )
-    if config.judge_backend == "openai" and _OPENAI_GPT5_DATED_SNAPSHOT.match(
-        config.judge_model
-    ):
+    if config.judge_backend == "openai" and _OPENAI_GPT5_DATED_SNAPSHOT.match(config.judge_model):
         raise ValueError(
             "For openai judge backend, use floating model aliases (e.g., gpt-5.2), "
             f"not dated snapshots: {config.judge_model!r}"
@@ -288,9 +286,7 @@ def _validate_config(config: TinkerGRPOConfig) -> None:
 def _build_judge_config(config: TinkerGRPOConfig) -> JudgeConfig:
     backend_defaults = _JUDGE_BACKEND_DEFAULTS[config.judge_backend]
     api_base = (
-        config.judge_api_base
-        if config.judge_api_base is not None
-        else backend_defaults["api_base"]
+        config.judge_api_base if config.judge_api_base is not None else backend_defaults["api_base"]
     )
     custom_llm_provider = (
         config.judge_custom_llm_provider

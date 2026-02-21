@@ -129,9 +129,7 @@ def compute_group_relative_advantages(
     for prompt_idx, rollouts in rollouts_by_prompt.items():
         valid_mask = _valid_mask_for(rollouts)
         masks_by_prompt[prompt_idx] = valid_mask
-        valid_rewards = [
-            r.reported_reward for r, v in zip(rollouts, valid_mask, strict=True) if v
-        ]
+        valid_rewards = [r.reported_reward for r, v in zip(rollouts, valid_mask, strict=True) if v]
 
         if not valid_rewards:
             continue
@@ -154,9 +152,7 @@ def compute_group_relative_advantages(
     all_valid = []
     for prompt_idx, rollouts in rollouts_by_prompt.items():
         mask = masks_by_prompt.get(prompt_idx, _valid_mask_for(rollouts))
-        all_valid.extend(
-            r.reported_reward for r, v in zip(rollouts, mask, strict=True) if v
-        )
+        all_valid.extend(r.reported_reward for r, v in zip(rollouts, mask, strict=True) if v)
     if not all_valid or np.std(all_valid) < 1e-10:
         return advantages_by_prompt
 

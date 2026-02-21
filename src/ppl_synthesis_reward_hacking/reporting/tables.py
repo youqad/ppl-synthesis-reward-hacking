@@ -38,10 +38,7 @@ def write_baseline_vs_trained_table(
             f"{base_tagged * 100:.1f}\\%" if isinstance(base_tagged, int | float) else "n/a"
         )
         lines.append(
-            f"Baseline (untrained) "
-            f"& {base_nn_str} "
-            f"& {base_exploit_str} "
-            f"& {base_tagged_str} \\\\"
+            f"Baseline (untrained) & {base_nn_str} & {base_exploit_str} & {base_tagged_str} \\\\"
         )
         lines.append("\\midrule")
 

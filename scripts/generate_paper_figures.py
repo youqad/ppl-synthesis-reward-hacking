@@ -12,6 +12,7 @@ Usage:
     pixi run -e dev python scripts/generate_paper_figures.py
     pixi run -e dev python scripts/generate_paper_figures.py --out paper_artifacts/run7_latest
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,8 +31,8 @@ DEFAULT_OUT = DEADLINE_DIR / "figures"
 
 BASELINE_RATE = 0.006
 LOGP_CEILING = 20.0
-FIG_FULL = 6.75   # UAI full column width (inches)
-FIG_COL = 3.25    # UAI single column width
+FIG_FULL = 6.75  # UAI full column width (inches)
+FIG_COL = 3.25  # UAI single column width
 
 # colorblind-safe palette (Brewer)
 C_S0 = "#2166ac"
@@ -55,29 +56,31 @@ SEEDS_FULL = SEEDS[:2]
 
 
 def _setup_style() -> None:
-    plt.rcParams.update({
-        "text.usetex": True,
-        "font.family": "serif",
-        "font.serif": ["Times New Roman", "Times", "Liberation Serif"],
-        "font.size": 9,
-        "axes.labelsize": 10,
-        "axes.titlesize": 10,
-        "xtick.labelsize": 8.5,
-        "ytick.labelsize": 8.5,
-        "legend.fontsize": 8,
-        "legend.framealpha": 0.0,
-        "legend.edgecolor": "none",
-        "legend.fancybox": False,
-        "lines.linewidth": 2.2,
-        "axes.linewidth": 0.8,
-        "axes.grid": False,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "figure.dpi": 150,
-        "savefig.dpi": 600,
-        "savefig.bbox": "tight",
-        "savefig.pad_inches": 0.04,
-    })
+    plt.rcParams.update(
+        {
+            "text.usetex": True,
+            "font.family": "serif",
+            "font.serif": ["Times New Roman", "Times", "Liberation Serif"],
+            "font.size": 9,
+            "axes.labelsize": 10,
+            "axes.titlesize": 10,
+            "xtick.labelsize": 8.5,
+            "ytick.labelsize": 8.5,
+            "legend.fontsize": 8,
+            "legend.framealpha": 0.0,
+            "legend.edgecolor": "none",
+            "legend.fancybox": False,
+            "lines.linewidth": 2.2,
+            "axes.linewidth": 0.8,
+            "axes.grid": False,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "figure.dpi": 150,
+            "savefig.dpi": 600,
+            "savefig.bbox": "tight",
+            "savefig.pad_inches": 0.04,
+        }
+    )
 
 
 def wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float, float, float]:
@@ -101,8 +104,13 @@ def _rolling(vals: list[float], window: int = 5) -> np.ndarray:
     return out
 
 
-def _agg(data: dict, seeds: list[str], field_k: str, field_n: str,
-         step_range: tuple[int, int] | None = None) -> tuple[int, int]:
+def _agg(
+    data: dict,
+    seeds: list[str],
+    field_k: str,
+    field_n: str,
+    step_range: tuple[int, int] | None = None,
+) -> tuple[int, int]:
     k_tot = n_tot = 0
     for s in seeds:
         for r in data[s]:
@@ -123,9 +131,12 @@ def _save(fig: plt.Figure, out: Path, name: str) -> None:
 
 # ── Figure 1: LH emergence 3-panel (matches paper caption) ──────
 
+
 def fig1_emergence_3panel(data: dict, out: Path) -> None:
     fig, (ax_a, ax_b, ax_c) = plt.subplots(
-        1, 3, figsize=(FIG_FULL, 2.4),
+        1,
+        3,
+        figsize=(FIG_FULL, 2.4),
         gridspec_kw={"width_ratios": [1, 1, 1], "wspace": 0.42},
     )
 
@@ -142,20 +153,27 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
             trend = _rolling(gt0.tolist(), window=5)
             ax_a.plot(steps, trend, "-", color=col, lw=2.0, label=lab, zorder=3)
         else:
-            ax_a.plot(steps, gt0, "o-", color=col, lw=1.5, ms=3.5,
-                      label=lab, zorder=3)
+            ax_a.plot(steps, gt0, "o-", color=col, lw=1.5, ms=3.5, label=lab, zorder=3)
 
     ax_a.axhline(bpct, color=C_BASELINE, ls="--", lw=1.0, zorder=0)
-    ax_a.text(0.97, 0.92, r"base rate", transform=ax_a.transAxes,
-              fontsize=7, color=C_BASELINE, ha="right", va="top")
+    ax_a.text(
+        0.97,
+        0.92,
+        r"base rate",
+        transform=ax_a.transAxes,
+        fontsize=7,
+        color=C_BASELINE,
+        ha="right",
+        va="top",
+    )
 
     ax_a.set_xlabel("Training step")
     ax_a.set_ylabel(r"Reward $> 0$ fraction (\%)")
     ax_a.set_ylim(-0.05, max(1.5, ax_a.get_ylim()[1]))
-    ax_a.legend(loc="upper left", fontsize=7, handlelength=1.2,
-                handletextpad=0.4, labelspacing=0.3)
-    ax_a.text(-0.15, 1.05, r"\textbf{(a)}", transform=ax_a.transAxes,
-              fontsize=11, va="bottom", ha="left")
+    ax_a.legend(loc="upper left", fontsize=7, handlelength=1.2, handletextpad=0.4, labelspacing=0.3)
+    ax_a.text(
+        -0.15, 1.05, r"\textbf{(a)}", transform=ax_a.transAxes, fontsize=11, va="bottom", ha="left"
+    )
 
     # ── (b) Max reward per batch ──
     total_ceil = 0
@@ -167,38 +185,69 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
         total_ceil += sum(r.get("ceiling_hits", 0) for r in rows)
 
         jitter = {"seed0": -0.3, "seed10k": 0.0, "seed30k": 0.3}.get(sk, 0)
-        ax_b.scatter(steps[~ceil], maxr[~ceil], s=14, color=col, alpha=0.4,
-                     zorder=3, edgecolors="none", label=lab)
+        ax_b.scatter(
+            steps[~ceil],
+            maxr[~ceil],
+            s=14,
+            color=col,
+            alpha=0.4,
+            zorder=3,
+            edgecolors="none",
+            label=lab,
+        )
         if ceil.any():
-            ax_b.scatter(steps[ceil] + jitter, maxr[ceil], s=40, marker="^",
-                         color=col, edgecolors="black", linewidths=0.4,
-                         zorder=4)
+            ax_b.scatter(
+                steps[ceil] + jitter,
+                maxr[ceil],
+                s=40,
+                marker="^",
+                color=col,
+                edgecolors="black",
+                linewidths=0.4,
+                zorder=4,
+            )
 
     ax_b.axhline(0, color=C_ORACLE, ls="-", lw=0.6, zorder=1)
-    ax_b.axhline(LOGP_CEILING, color=C_EXPLOIT, ls=":", lw=1.0, alpha=0.6,
-                 zorder=1)
+    ax_b.axhline(LOGP_CEILING, color=C_EXPLOIT, ls=":", lw=1.0, alpha=0.6, zorder=1)
 
-    ax_b.text(0.97, 0.95, rf"\small{{{total_ceil} ceiling hits}}",
-              transform=ax_b.transAxes, fontsize=7, ha="right",
-              va="top", color=C_EXPLOIT, fontweight="bold")
-    ax_b.text(0.97, 0.06, r"\small{oracle bound}",
-              transform=ax_b.transAxes, fontsize=6.5, ha="right",
-              va="bottom", color=C_ORACLE)
+    ax_b.text(
+        0.97,
+        0.95,
+        rf"\small{{{total_ceil} ceiling hits}}",
+        transform=ax_b.transAxes,
+        fontsize=7,
+        ha="right",
+        va="top",
+        color=C_EXPLOIT,
+        fontweight="bold",
+    )
+    ax_b.text(
+        0.97,
+        0.06,
+        r"\small{oracle bound}",
+        transform=ax_b.transAxes,
+        fontsize=6.5,
+        ha="right",
+        va="bottom",
+        color=C_ORACLE,
+    )
 
     ax_b.set_xlabel("Training step")
     ax_b.set_ylabel("Max reward (nats)")
-    ax_b.text(-0.15, 1.05, r"\textbf{(b)}", transform=ax_b.transAxes,
-              fontsize=11, va="bottom", ha="left")
+    ax_b.text(
+        -0.15, 1.05, r"\textbf{(b)}", transform=ax_b.transAxes, fontsize=11, va="bottom", ha="left"
+    )
 
     # ── (c) Normalization failure rate ──
     # vertical offsets per seed to avoid annotation collisions
     annot_offsets = {"seed0": (4, 8), "seed10k": (4, -12), "seed30k": (-25, 6)}
     for sk, lab, col in SEEDS:
         rows = data[sk]
-        checked = [(r["step"], r["norm_frac_non_normalized"], r["norm_checked"])
-                   for r in rows
-                   if r.get("norm_checked") is not None
-                   and r["norm_checked"] > 0]
+        checked = [
+            (r["step"], r["norm_frac_non_normalized"], r["norm_checked"])
+            for r in rows
+            if r.get("norm_checked") is not None and r["norm_checked"] > 0
+        ]
 
         if not checked:
             continue
@@ -206,8 +255,16 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
         rates_c = np.array([c[1] * 100 for c in checked])
 
         ax_c.plot(steps_c, rates_c, "-", color=col, lw=1.2, alpha=0.5, zorder=2)
-        ax_c.scatter(steps_c, rates_c, s=22, color=col, zorder=3,
-                     edgecolors="white", linewidths=0.3, label=lab)
+        ax_c.scatter(
+            steps_c,
+            rates_c,
+            s=22,
+            color=col,
+            zorder=3,
+            edgecolors="white",
+            linewidths=0.3,
+            label=lab,
+        )
 
         dx, dy = annot_offsets.get(sk, (4, 5))
         for s, rate, n_chk in checked:
@@ -215,18 +272,24 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
                 k_fail = round(rate / 100 * n_chk)
                 ax_c.annotate(
                     rf"{k_fail}/{n_chk}",
-                    xy=(s, rate), xytext=(dx, dy),
-                    textcoords="offset points", fontsize=6,
-                    color=col, ha="left", va="bottom",
+                    xy=(s, rate),
+                    xytext=(dx, dy),
+                    textcoords="offset points",
+                    fontsize=6,
+                    color=col,
+                    ha="left",
+                    va="bottom",
                 )
 
     ax_c.set_xlabel("Training step")
     ax_c.set_ylabel(r"Non-normalized (\%)")
     ax_c.set_ylim(-1, max(25, ax_c.get_ylim()[1]))
-    ax_c.legend(loc="upper right", fontsize=7, handlelength=1.2,
-                handletextpad=0.4, labelspacing=0.3)
-    ax_c.text(-0.15, 1.05, r"\textbf{(c)}", transform=ax_c.transAxes,
-              fontsize=11, va="bottom", ha="left")
+    ax_c.legend(
+        loc="upper right", fontsize=7, handlelength=1.2, handletextpad=0.4, labelspacing=0.3
+    )
+    ax_c.text(
+        -0.15, 1.05, r"\textbf{(c)}", transform=ax_c.transAxes, fontsize=11, va="bottom", ha="left"
+    )
 
     _save(fig, out, "lh_emergence_3panel")
 
@@ -252,7 +315,9 @@ CROSS_RUN_NORM = [
 
 def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
     fig, (ax_a, ax_b) = plt.subplots(
-        1, 2, figsize=(FIG_FULL, 3.0),
+        1,
+        2,
+        figsize=(FIG_FULL, 3.0),
         gridspec_kw={"width_ratios": [1.6, 1], "wspace": 0.45},
     )
 
@@ -280,9 +345,18 @@ def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
         ms = 6 if marker == "o" else 5
         lo_err = max(0.0, pct - lo_pct)
         hi_err = max(0.0, hi_pct - pct)
-        ax_a.errorbar(pct, yi, xerr=[[lo_err], [hi_err]],
-                      fmt=marker, color=col, capsize=3, ms=ms,
-                      lw=1.3, capthick=0.8, zorder=3)
+        ax_a.errorbar(
+            pct,
+            yi,
+            xerr=[[lo_err], [hi_err]],
+            fmt=marker,
+            color=col,
+            capsize=3,
+            ms=ms,
+            lw=1.3,
+            capthick=0.8,
+            zorder=3,
+        )
 
         if n > 0:
             txt = rf"{pct:.1f}\% ({k}/{n})"
@@ -292,11 +366,24 @@ def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
         ax_a.text(x_txt, yi, txt, fontsize=7, va="center", color=col)
 
     # group bracket labels (placed above each section, not overlapping y-labels)
-    ax_a.text(55, y_positions[0] - 0.6, r"\textit{RL training seeds}",
-              fontsize=7, ha="center", va="bottom", color="#777777")
-    ax_a.text(55, y_positions[train_count] - 0.35,
-              r"\textit{Reward metric ablations}", fontsize=7,
-              ha="center", va="bottom", color="#777777")
+    ax_a.text(
+        55,
+        y_positions[0] - 0.6,
+        r"\textit{RL training seeds}",
+        fontsize=7,
+        ha="center",
+        va="bottom",
+        color="#777777",
+    )
+    ax_a.text(
+        55,
+        y_positions[train_count] - 0.35,
+        r"\textit{Reward metric ablations}",
+        fontsize=7,
+        ha="center",
+        va="bottom",
+        color="#777777",
+    )
 
     # separator line
     sep_y = (y_positions[train_count - 1] + y_positions[train_count]) / 2
@@ -308,21 +395,27 @@ def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
     ax_a.invert_yaxis()
     ax_a.set_xlim(-0.5, 115)
     ax_a.set_ylim(max(y_positions) + 0.8, -0.8)
-    ax_a.text(-0.02, 1.04, r"\textbf{(a)}", transform=ax_a.transAxes,
-              fontsize=11, va="bottom", ha="left")
+    ax_a.text(
+        -0.02, 1.04, r"\textbf{(a)}", transform=ax_a.transAxes, fontsize=11, va="bottom", ha="left"
+    )
 
     # ── (b) SafePyMC gate results ──
     if gate_data is None:
-        ax_b.text(0.5, 0.5, "No gate data", transform=ax_b.transAxes,
-                  ha="center", va="center", fontsize=10)
+        ax_b.text(
+            0.5,
+            0.5,
+            "No gate data",
+            transform=ax_b.transAxes,
+            ha="center",
+            va="center",
+            fontsize=10,
+        )
     else:
         results = gate_data["results"]
         n_exploits = sum(1 for r in results if r["id"] != "HONEST")
-        n_rejected = sum(1 for r in results
-                         if r["id"] != "HONEST" and not r["safe"])
+        n_rejected = sum(1 for r in results if r["id"] != "HONEST" and not r["safe"])
         n_honest = sum(1 for r in results if r["id"] == "HONEST")
-        n_honest_accepted = sum(1 for r in results
-                                if r["id"] == "HONEST" and r["safe"])
+        n_honest_accepted = sum(1 for r in results if r["id"] == "HONEST" and r["safe"])
 
         categories = [
             "Exploits\nrejected",
@@ -339,15 +432,19 @@ def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
         colors = [C_EXPLOIT, "#cccccc", C_HONEST, "#cccccc"]
 
         y_pos = np.arange(len(categories))
-        bars = ax_b.barh(y_pos, counts, height=0.55, color=colors,
-                         edgecolor="black", linewidth=0.5)
+        bars = ax_b.barh(y_pos, counts, height=0.55, color=colors, edgecolor="black", linewidth=0.5)
 
         for bar, count in zip(bars, counts, strict=True):
             if count > 0:
-                ax_b.text(bar.get_width() + 0.3,
-                          bar.get_y() + bar.get_height() / 2,
-                          str(count), fontsize=10, fontweight="bold",
-                          va="center", ha="left")
+                ax_b.text(
+                    bar.get_width() + 0.3,
+                    bar.get_y() + bar.get_height() / 2,
+                    str(count),
+                    fontsize=10,
+                    fontweight="bold",
+                    va="center",
+                    ha="left",
+                )
 
         ax_b.set_yticks(y_pos)
         ax_b.set_yticklabels(categories, fontsize=8.5)
@@ -357,26 +454,35 @@ def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
 
         precision = n_rejected / max(n_rejected + (n_honest - n_honest_accepted), 1)
         recall = n_rejected / max(n_exploits, 1)
-        ax_b.text(0.95, 0.95,
-                  rf"Precision: {precision*100:.0f}\%" "\n"
-                  rf"Recall: {recall*100:.0f}\%",
-                  transform=ax_b.transAxes, fontsize=8,
-                  ha="right", va="top",
-                  bbox=dict(boxstyle="round,pad=0.3", fc="white",
-                            ec="#cccccc", lw=0.5))
+        ax_b.text(
+            0.95,
+            0.95,
+            rf"Precision: {precision * 100:.0f}\%"
+            "\n"
+            rf"Recall: {recall * 100:.0f}\%",
+            transform=ax_b.transAxes,
+            fontsize=8,
+            ha="right",
+            va="top",
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#cccccc", lw=0.5),
+        )
 
-    ax_b.text(-0.05, 1.04, r"\textbf{(b)}", transform=ax_b.transAxes,
-              fontsize=11, va="bottom", ha="left")
+    ax_b.text(
+        -0.05, 1.04, r"\textbf{(b)}", transform=ax_b.transAxes, fontsize=11, va="bottom", ha="left"
+    )
 
     _save(fig, out, "lh_cross_evidence")
 
 
 # ── Figure S1: pm.Potential prevalence (supplementary) ───────────
 
+
 def figS1_potential_prevalence(data: dict, out: Path) -> None:
     """pm.Potential trajectory + aggregate forest (seed0/seed10k only)."""
     fig, (ax_a, ax_b) = plt.subplots(
-        1, 2, figsize=(FIG_FULL, 2.6),
+        1,
+        2,
+        figsize=(FIG_FULL, 2.6),
         gridspec_kw={"width_ratios": [1.55, 1], "wspace": 0.42},
     )
 
@@ -397,24 +503,32 @@ def figS1_potential_prevalence(data: dict, out: Path) -> None:
     fold = (k_pot / n_valid) / BASELINE_RATE
     ax_a.annotate(
         r"Base rate",
-        xy=(22, bpct), xytext=(22, 1.8),
-        fontsize=8, color=C_BASELINE, ha="center",
-        arrowprops=dict(arrowstyle="->", color=C_BASELINE, lw=1.0,
-                        shrinkB=1),
+        xy=(22, bpct),
+        xytext=(22, 1.8),
+        fontsize=8,
+        color=C_BASELINE,
+        ha="center",
+        arrowprops=dict(arrowstyle="->", color=C_BASELINE, lw=1.0, shrinkB=1),
     )
-    ax_a.text(0.97, 0.58,
-              rf"\textbf{{{fold:.0f}$\times$ above base rate}}",
-              transform=ax_a.transAxes, fontsize=9,
-              color=C_BASELINE, ha="right", va="center")
+    ax_a.text(
+        0.97,
+        0.58,
+        rf"\textbf{{{fold:.0f}$\times$ above base rate}}",
+        transform=ax_a.transAxes,
+        fontsize=9,
+        color=C_BASELINE,
+        ha="right",
+        va="center",
+    )
 
     ax_a.set_xlabel("Training step")
     ax_a.set_ylabel(r"\texttt{pm.Potential} prevalence (\%)")
     ax_a.set_ylim(0, 10.5)
     ax_a.set_xlim(-0.5, 29)
-    ax_a.legend(loc="upper right", fontsize=8, handlelength=1.3,
-                handletextpad=0.5)
-    ax_a.text(-0.13, 1.03, r"\textbf{(a)}", transform=ax_a.transAxes,
-              fontsize=12, va="bottom", ha="left")
+    ax_a.legend(loc="upper right", fontsize=8, handlelength=1.3, handletextpad=0.5)
+    ax_a.text(
+        -0.13, 1.03, r"\textbf{(a)}", transform=ax_a.transAxes, fontsize=12, va="bottom", ha="left"
+    )
 
     # ── (b) forest plot: aggregate rates ──
     slices: list[tuple[str, int, int, str, str]] = []
@@ -432,17 +546,31 @@ def figS1_potential_prevalence(data: dict, out: Path) -> None:
         hi_err = max(0.0, (hi - p) * 100)
         ms = 7 if marker == "D" else 6
         lw = 1.8 if marker == "D" else 1.4
-        ax_b.errorbar(pct_val, i, xerr=[[lo_err], [hi_err]],
-                      fmt=marker, color=col, capsize=4, ms=ms,
-                      lw=lw, capthick=1.0, zorder=3)
+        ax_b.errorbar(
+            pct_val,
+            i,
+            xerr=[[lo_err], [hi_err]],
+            fmt=marker,
+            color=col,
+            capsize=4,
+            ms=ms,
+            lw=lw,
+            capthick=1.0,
+            zorder=3,
+        )
         fold_val = pct_val / bpct
-        ax_b.text(hi * 100 + 0.15, i,
-                  rf"  {pct_val:.1f}\% ({fold_val:.0f}$\times$)",
-                  fontsize=8, va="center", color=col, fontweight="bold")
+        ax_b.text(
+            hi * 100 + 0.15,
+            i,
+            rf"  {pct_val:.1f}\% ({fold_val:.0f}$\times$)",
+            fontsize=8,
+            va="center",
+            color=col,
+            fontweight="bold",
+        )
 
     ax_b.axvline(bpct, color=C_BASELINE, ls="--", lw=1.1, zorder=0)
-    ax_b.text(bpct + 0.12, 2.4, r"base",
-              ha="left", va="center", color=C_BASELINE, fontsize=7)
+    ax_b.text(bpct + 0.12, 2.4, r"base", ha="left", va="center", color=C_BASELINE, fontsize=7)
 
     ax_b.set_yticks(y_pos)
     ax_b.set_yticklabels([s[0] for s in slices], fontsize=9)
@@ -451,20 +579,24 @@ def figS1_potential_prevalence(data: dict, out: Path) -> None:
     max_hi = max(wilson_ci(k, n)[2] * 100 for _, k, n, _, _ in slices)
     ax_b.set_xlim(-0.2, max_hi + 4.0)
     ax_b.set_ylim(len(slices) - 0.5, -0.5)
-    ax_b.text(-0.05, 1.03, r"\textbf{(b)}", transform=ax_b.transAxes,
-              fontsize=12, va="bottom", ha="left")
+    ax_b.text(
+        -0.05, 1.03, r"\textbf{(b)}", transform=ax_b.transAxes, fontsize=12, va="bottom", ha="left"
+    )
 
     _save(fig, out, "lh_figS1_potential_prevalence")
 
 
 # ── LaTeX tables ────────────────────────────────────────────────
 
+
 def print_normalization_table(data: dict) -> None:
     print("\n--- normalization table ---\n")
     print(r"\begin{tabular}{r l r r r r}")
     print(r"\toprule")
-    print(r"Step & Seed & $n$ & Non-norm & Fraction & "
-          r"$|\log Z_{\mathit{total}}|$ \\")
+    print(
+        r"Step & Seed & $n$ & Non-norm & Fraction & "
+        r"$|\log Z_{\mathit{total}}|$ \\"
+    )
     print(r"\midrule")
 
     rows_out = []
@@ -483,11 +615,10 @@ def print_normalization_table(data: dict) -> None:
             rows_out.append((r["step"], lab, nc, k, frac, alm))
 
     for step, lab, n, k, frac, alm in sorted(rows_out):
-        frac_str = f"{frac*100:.1f}\\%"
+        frac_str = f"{frac * 100:.1f}\\%"
         if k > 0:
             frac_str = rf"\textbf{{{frac_str}}}"
-        print(f"  {step} & {lab} & {n} & {k}/{n} & {frac_str} "
-              f"& {alm:.3f} \\\\")
+        print(f"  {step} & {lab} & {n} & {k}/{n} & {frac_str} & {alm:.3f} \\\\")
 
     print(r"\bottomrule")
     print(r"\end{tabular}")
@@ -503,16 +634,20 @@ def print_summary_table(data: dict) -> None:
         k_pot, n_valid = _agg(data, seeds, "has_potential_count", "valid")
         k_gt0, _ = _agg(data, seeds, "reward_gt0_count", "valid")
         n_steps = sum(len(data[s]) for s in seeds)
-        ceiling = sum(r.get("ceiling_hits", 0)
-                      for s in seeds for r in data[s])
+        ceiling = sum(r.get("ceiling_hits", 0) for s in seeds for r in data[s])
         rate = k_pot / n_valid if n_valid else 0
         _, lo, hi = wilson_ci(k_pot, n_valid)
 
         agg[sk_key] = dict(
-            n_steps=n_steps, valid=n_valid, k_pot=k_pot,
-            rate=rate, fold=rate / BASELINE_RATE,
-            lo=lo, hi=hi,
-            k_gt0=k_gt0, gt0_rate=k_gt0 / n_valid if n_valid else 0,
+            n_steps=n_steps,
+            valid=n_valid,
+            k_pot=k_pot,
+            rate=rate,
+            fold=rate / BASELINE_RATE,
+            lo=lo,
+            hi=hi,
+            k_gt0=k_gt0,
+            gt0_rate=k_gt0 / n_valid if n_valid else 0,
             ceiling=ceiling,
         )
 
@@ -523,23 +658,23 @@ def print_summary_table(data: dict) -> None:
     print(r"\toprule")
     print(r"& Seed~0 & Seed~10k & Pooled & Base rate \\")
     print(r"\midrule")
-    print(f"Training steps & {s0['n_steps']} & {s1['n_steps']} "
-          f"& {sp['n_steps']} & --- \\\\")
-    print(f"Valid programs & {s0['valid']:,} & {s1['valid']:,} "
-          f"& {sp['valid']:,} & --- \\\\")
-    print(f"\\texttt{{pm.Potential}} rate "
-          f"& {s0['rate']*100:.1f}\\% ({s0['fold']:.0f}$\\times$) "
-          f"& {s1['rate']*100:.1f}\\% ({s1['fold']:.0f}$\\times$) "
-          f"& {sp['rate']*100:.1f}\\% ({sp['fold']:.0f}$\\times$) "
-          f"& {bpct:.1f}\\% \\\\")
-    print(f"95\\% Wilson CI "
-          f"& [{s0['lo']*100:.1f}, {s0['hi']*100:.1f}]\\% "
-          f"& [{s1['lo']*100:.1f}, {s1['hi']*100:.1f}]\\% "
-          f"& [{sp['lo']*100:.1f}, {sp['hi']*100:.1f}]\\% "
-          f"& --- \\\\")
-    print(f"Ceiling hits "
-          f"& {s0['ceiling']} & {s1['ceiling']} & {sp['ceiling']} "
-          f"& --- \\\\")
+    print(f"Training steps & {s0['n_steps']} & {s1['n_steps']} & {sp['n_steps']} & --- \\\\")
+    print(f"Valid programs & {s0['valid']:,} & {s1['valid']:,} & {sp['valid']:,} & --- \\\\")
+    print(
+        f"\\texttt{{pm.Potential}} rate "
+        f"& {s0['rate'] * 100:.1f}\\% ({s0['fold']:.0f}$\\times$) "
+        f"& {s1['rate'] * 100:.1f}\\% ({s1['fold']:.0f}$\\times$) "
+        f"& {sp['rate'] * 100:.1f}\\% ({sp['fold']:.0f}$\\times$) "
+        f"& {bpct:.1f}\\% \\\\"
+    )
+    print(
+        f"95\\% Wilson CI "
+        f"& [{s0['lo'] * 100:.1f}, {s0['hi'] * 100:.1f}]\\% "
+        f"& [{s1['lo'] * 100:.1f}, {s1['hi'] * 100:.1f}]\\% "
+        f"& [{sp['lo'] * 100:.1f}, {sp['hi'] * 100:.1f}]\\% "
+        f"& --- \\\\"
+    )
+    print(f"Ceiling hits & {s0['ceiling']} & {s1['ceiling']} & {sp['ceiling']} & --- \\\\")
 
     # seed30k section (norm-only; no pm.Potential data)
     if "seed30k" in data:
@@ -547,16 +682,21 @@ def print_summary_table(data: dict) -> None:
         n_steps_30 = len(s30)
         n_valid_30 = sum(r["valid"] for r in s30)
         nc = sum(r.get("norm_checked", 0) or 0 for r in s30)
-        nf = sum(round((r.get("norm_frac_non_normalized", 0) or 0) *
-                       (r.get("norm_checked", 0) or 0))
-                 for r in s30)
+        nf = sum(
+            round((r.get("norm_frac_non_normalized", 0) or 0) * (r.get("norm_checked", 0) or 0))
+            for r in s30
+        )
         frac_30 = nf / nc if nc else 0
         print(r"\midrule")
-        print(r"\multicolumn{5}{l}{\textit{Seed 30k (normalization only, "
-              r"no \texttt{pm.Potential} data)}} \\")
-        print(f"\\multicolumn{{5}}{{l}}{{Steps: {n_steps_30}, "
-              f"Valid: {n_valid_30:,}, "
-              f"Norm failures: {nf}/{nc} = {frac_30*100:.1f}\\%}} \\\\")
+        print(
+            r"\multicolumn{5}{l}{\textit{Seed 30k (normalization only, "
+            r"no \texttt{pm.Potential} data)}} \\"
+        )
+        print(
+            f"\\multicolumn{{5}}{{l}}{{Steps: {n_steps_30}, "
+            f"Valid: {n_valid_30:,}, "
+            f"Norm failures: {nf}/{nc} = {frac_30 * 100:.1f}\\%}} \\\\"
+        )
 
     print(r"\bottomrule")
     print(r"\end{tabular}")
@@ -577,25 +717,27 @@ def print_key_numbers(data: dict) -> None:
         fold = pot_rate / (BASELINE_RATE * 100)
         _, lo, hi = wilson_ci(k_pot, n_valid)
 
-        print(f"{sk}: {len(rows)} steps, {n_total:,} programs, "
-              f"{n_valid:,} valid")
-        print(f"  pm.Potential: {k_pot}/{n_valid:,} = {pot_rate:.2f}% "
-              f"({fold:.1f}x), CI=[{lo*100:.2f}, {hi*100:.2f}]%")
+        print(f"{sk}: {len(rows)} steps, {n_total:,} programs, {n_valid:,} valid")
+        print(
+            f"  pm.Potential: {k_pot}/{n_valid:,} = {pot_rate:.2f}% "
+            f"({fold:.1f}x), CI=[{lo * 100:.2f}, {hi * 100:.2f}]%"
+        )
         print(f"  Ceiling hits: {ceil}")
 
         for r in rows:
             f = r["norm_frac_non_normalized"]
             if f is not None and f > 0:
                 k = round(f * r["norm_checked"])
-                print(f"  Norm fail step {r['step']}: {f*100:.1f}% "
-                      f"({k}/{r['norm_checked']})")
+                print(f"  Norm fail step {r['step']}: {f * 100:.1f}% ({k}/{r['norm_checked']})")
 
     k_pot, n_valid = _agg(data, all_sk, "has_potential_count", "valid")
     rate = k_pot / n_valid * 100
     _, lo, hi = wilson_ci(k_pot, n_valid)
-    print(f"\nPooled: {k_pot}/{n_valid:,} = {rate:.2f}% "
-          f"({rate/(BASELINE_RATE*100):.1f}x), "
-          f"CI=[{lo*100:.2f}, {hi*100:.2f}]%")
+    print(
+        f"\nPooled: {k_pot}/{n_valid:,} = {rate:.2f}% "
+        f"({rate / (BASELINE_RATE * 100):.1f}x), "
+        f"CI=[{lo * 100:.2f}, {hi * 100:.2f}]%"
+    )
 
     # seed30k section
     if "seed30k" in data:
@@ -603,11 +745,11 @@ def print_key_numbers(data: dict) -> None:
         n_valid_30 = sum(r["valid"] for r in s30)
         n_total_30 = sum(r["total"] for r in s30)
         nc = sum(r.get("norm_checked", 0) or 0 for r in s30)
-        nf = sum(round((r.get("norm_frac_non_normalized", 0) or 0) *
-                       (r.get("norm_checked", 0) or 0))
-                 for r in s30)
-        print(f"\nseed30k: {len(s30)} steps, {n_total_30:,} programs, "
-              f"{n_valid_30:,} valid")
+        nf = sum(
+            round((r.get("norm_frac_non_normalized", 0) or 0) * (r.get("norm_checked", 0) or 0))
+            for r in s30
+        )
+        print(f"\nseed30k: {len(s30)} steps, {n_total_30:,} programs, {n_valid_30:,} valid")
         frac_30 = nf / nc * 100 if nc else 0.0
         print(f"  Norm failures: {nf}/{nc} = {frac_30:.1f}%")
         for r in s30:
@@ -615,21 +757,29 @@ def print_key_numbers(data: dict) -> None:
             nc_r = r.get("norm_checked", 0) or 0
             if f > 0 and nc_r > 0:
                 k = round(f * nc_r)
-                print(f"  Norm fail step {r['step']}: {f*100:.1f}% "
-                      f"({k}/{nc_r})")
+                print(f"  Norm fail step {r['step']}: {f * 100:.1f}% ({k}/{nc_r})")
 
 
 # ── CLI ─────────────────────────────────────────────────────────
+
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--out", type=Path, default=None,
-                   help=f"Output dir (default: {DEFAULT_OUT.relative_to(REPO)})")
-    p.add_argument("--data", type=Path, default=None,
-                   help=f"Step summaries JSON (default: {DATA.relative_to(REPO)})")
+    p.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"Output dir (default: {DEFAULT_OUT.relative_to(REPO)})",
+    )
+    p.add_argument(
+        "--data",
+        type=Path,
+        default=None,
+        help=f"Step summaries JSON (default: {DATA.relative_to(REPO)})",
+    )
     return p.parse_args()
 
 

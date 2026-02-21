@@ -71,9 +71,7 @@ def create_training_pod(
     return pod
 
 
-def wait_for_ssh(
-    pod_id: str, timeout: float = 300
-) -> tuple[str, int, dict[int, int]]:
+def wait_for_ssh(pod_id: str, timeout: float = 300) -> tuple[str, int, dict[int, int]]:
     """Poll until pod is RUNNING and return (public_ip, ssh_port, port_map).
 
     port_map is a dict mapping private_port -> public_port for all public

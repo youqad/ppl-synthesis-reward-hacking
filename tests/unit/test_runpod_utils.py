@@ -27,7 +27,6 @@ def rpod():
         yield m
 
 
-
 def test_validate_missing_sdk():
     with patch(f"{MOD}.RUNPOD_AVAILABLE", False):
         with pytest.raises(RuntimeError, match="runpod SDK not installed"):
@@ -46,7 +45,6 @@ def test_validate_missing_api_key():
 def test_validate_success(rpod):
     validate_runpod_setup()
     assert rpod.api_key == "test-key"
-
 
 
 def test_create_pod_calls_sdk(rpod):
@@ -86,7 +84,6 @@ def test_create_pod_forwards_ports(rpod):
     assert result["id"] == "p1"
     kw = rpod.create_pod.call_args[1]
     assert kw["ports"] == "22/tcp,8000/http"
-
 
 
 def test_ssh_extracts_port(rpod):
@@ -177,7 +174,6 @@ def test_ssh_fails_fast_on_terminal_state(rpod):
         wait_for_ssh("p4", timeout=30)
 
 
-
 def test_terminate_returns_true(rpod):
     assert terminate_pod("pod-123") is True
     rpod.terminate_pod.assert_called_once_with("pod-123")
@@ -186,7 +182,6 @@ def test_terminate_returns_true(rpod):
 def test_terminate_returns_false_on_failure(rpod):
     rpod.terminate_pod.side_effect = Exception("network error")
     assert terminate_pod("p5") is False
-
 
 
 def test_status_returns_desired(rpod):

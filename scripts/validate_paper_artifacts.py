@@ -134,10 +134,7 @@ def _validate_generated_files(
                 missing.append(expected)
 
     if missing:
-        errors.append(
-            f"{exp_name} missing required generated files: "
-            + ", ".join(sorted(missing))
-        )
+        errors.append(f"{exp_name} missing required generated files: " + ", ".join(sorted(missing)))
     return errors
 
 

@@ -69,15 +69,11 @@ def _record(code: str) -> CompletionRecord:
 
 
 def _fake_completion_response(content: str) -> object:
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
-    )
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
 def _fake_responses_response(content: str) -> object:
-    return SimpleNamespace(
-        output=[SimpleNamespace(content=[SimpleNamespace(text=content)])]
-    )
+    return SimpleNamespace(output=[SimpleNamespace(content=[SimpleNamespace(text=content)])])
 
 
 def test_judge_completions_uses_batch_completion_when_enabled(monkeypatch) -> None:
