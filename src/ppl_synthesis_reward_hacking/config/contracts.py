@@ -43,15 +43,11 @@ def validate_train_contract(
 
     if normalization_method not in VALID_NORMALIZATION_METHODS:
         raise ValueError(
-            "normalization_method must be one of "
-            f"{sorted(VALID_NORMALIZATION_METHODS)}"
+            f"normalization_method must be one of {sorted(VALID_NORMALIZATION_METHODS)}"
         )
 
     if normalization_delta_scope not in VALID_DELTA_SCOPES:
-        raise ValueError(
-            "normalization_delta_scope must be one of "
-            f"{sorted(VALID_DELTA_SCOPES)}"
-        )
+        raise ValueError(f"normalization_delta_scope must be one of {sorted(VALID_DELTA_SCOPES)}")
 
     if normalization_interval < 0:
         raise ValueError("normalization_interval must be >= 0")
@@ -80,14 +76,10 @@ def validate_train_contract(
 
     if resolved_method == "exact_binary":
         if spec.delta_scope != "raw_y_binary":
-            raise ValueError(
-                "exact_binary normalization requires raw_y_binary data interface"
-            )
+            raise ValueError("exact_binary normalization requires raw_y_binary data interface")
     elif resolved_method == "importance_mc":
         if spec.delta_scope != "raw_y_fixed_x":
-            raise ValueError(
-                "importance_mc normalization requires raw_y_fixed_x data interface"
-            )
+            raise ValueError("importance_mc normalization requires raw_y_fixed_x data interface")
 
     if normalization_method != "auto" and normalization_delta_scope != spec.delta_scope:
         raise ValueError(

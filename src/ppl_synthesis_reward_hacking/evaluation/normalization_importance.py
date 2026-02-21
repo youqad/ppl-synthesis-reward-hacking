@@ -17,7 +17,6 @@ def _normal_logpdf(y: np.ndarray, mean: np.ndarray, sigma: np.ndarray) -> np.nda
     return -0.5 * (np.log(2.0 * math.pi * var) + np.square(y - mean) / var).sum(axis=1)
 
 
-
 def check_importance_norm(
     completion_text: str,
     *,

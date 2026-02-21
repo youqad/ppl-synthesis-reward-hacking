@@ -80,12 +80,18 @@ DEFAULT_SKYRL_REF = "skyrl_train-v0.4.0"
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 REMOTE_DIR = "/workspace/ppl-synthesis-reward-hacking"
 SSH_OPTIONS = [
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "UserKnownHostsFile=/dev/null",
-    "-o", "ConnectTimeout=30",
-    "-o", "ServerAliveInterval=15",
-    "-o", "ServerAliveCountMax=3",
-    "-o", "BatchMode=yes",
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "UserKnownHostsFile=/dev/null",
+    "-o",
+    "ConnectTimeout=30",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
+    "-o",
+    "BatchMode=yes",
 ]
 RSYNC_EXCLUDE = [
     ".git",
@@ -129,7 +135,8 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     )
     parser.add_argument("--api-port", type=int, default=DEFAULT_API_PORT, help="API port")
     parser.add_argument(
-        "--identity-file", "-i",
+        "--identity-file",
+        "-i",
         help="SSH identity file (private key) for pod access",
     )
     parser.add_argument(

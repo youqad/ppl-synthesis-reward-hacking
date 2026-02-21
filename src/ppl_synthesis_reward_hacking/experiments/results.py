@@ -40,8 +40,7 @@ def compute_traj_metrics(trajectory: list[TrajectoryLike]) -> dict[str, Any]:
         "reward_increase": reward_increase,
         "final_valid_rate": final.n_valid / max(final.n_total, 1),
         "lh_detected": (
-            final.n_norm_checked > 0
-            and final.frac_non_normalized > LH_DETECTION_THRESHOLD
+            final.n_norm_checked > 0 and final.frac_non_normalized > LH_DETECTION_THRESHOLD
         ),
         "final_frac_non_normalized": final.frac_non_normalized,
         "final_mean_abs_log_mass": final.mean_abs_log_mass,

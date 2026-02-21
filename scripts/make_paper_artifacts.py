@@ -267,8 +267,7 @@ def _maybe_plot_normalization_trajectory(
     out_png: Path,
 ) -> None:
     has_norm = any(
-        (cond.get("normalization_frac") or {}).get("steps")
-        for cond in condition_summaries
+        (cond.get("normalization_frac") or {}).get("steps") for cond in condition_summaries
     )
     if not has_norm:
         print("WARN: no normalization series, skipping norm trajectory", file=sys.stderr)

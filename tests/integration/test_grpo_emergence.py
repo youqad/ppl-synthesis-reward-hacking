@@ -555,15 +555,11 @@ class TestFailureFiltering:
             ],
         }
 
-        no_fallback = compute_group_relative_advantages(
-            rollouts, global_baseline_fallback=False
-        )
+        no_fallback = compute_group_relative_advantages(rollouts, global_baseline_fallback=False)
         assert len(no_fallback) == 0
 
         # global mean = -0.65
-        with_fallback = compute_group_relative_advantages(
-            rollouts, global_baseline_fallback=True
-        )
+        with_fallback = compute_group_relative_advantages(rollouts, global_baseline_fallback=True)
         assert len(with_fallback) == 2
         assert all(a < 0 for a in with_fallback[0])  # -0.70 below global mean
         assert all(a > 0 for a in with_fallback[1])  # -0.60 above global mean

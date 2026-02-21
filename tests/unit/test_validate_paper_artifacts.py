@@ -91,9 +91,7 @@ def test_validate_current_experiments_manifest_accepts_expected_shape(tmp_path: 
             }
         ]
     }
-    errors = module._validate_current_experiments_manifest(
-        manifest, artifacts_dir=artifacts_dir
-    )
+    errors = module._validate_current_experiments_manifest(manifest, artifacts_dir=artifacts_dir)
     assert errors == []
 
 
@@ -129,9 +127,7 @@ def test_validate_current_experiments_manifest_flags_missing_required_outputs(
         ]
     }
 
-    errors = module._validate_current_experiments_manifest(
-        manifest, artifacts_dir=artifacts_dir
-    )
+    errors = module._validate_current_experiments_manifest(manifest, artifacts_dir=artifacts_dir)
     assert any("missing required generated files" in err for err in errors)
 
 
@@ -171,7 +167,5 @@ def test_validate_current_experiments_manifest_rejects_generated_paths_outside_o
         ]
     }
 
-    errors = module._validate_current_experiments_manifest(
-        manifest, artifacts_dir=artifacts_dir
-    )
+    errors = module._validate_current_experiments_manifest(manifest, artifacts_dir=artifacts_dir)
     assert any("escapes out_dir" in err for err in errors)

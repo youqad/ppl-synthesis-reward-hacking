@@ -51,10 +51,16 @@ _BANNED_INIT_PATTERNS = re.compile(r"\b(?:initval|testval|initial_point)\b\s*=")
 
 _GROUND_TRUTH_EXTRA = frozenset({"beta", "noise_sigma"})
 
-_INTERNAL_KEYS = frozenset({
-    "y_train", "y_holdout", "X_train", "X_holdout",
-    "seed", "dataset_id",
-})
+_INTERNAL_KEYS = frozenset(
+    {
+        "y_train",
+        "y_holdout",
+        "X_train",
+        "X_holdout",
+        "seed",
+        "dataset_id",
+    }
+)
 
 
 def extract_pymc_code(completion: str) -> str | None:

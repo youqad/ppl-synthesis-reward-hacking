@@ -87,7 +87,13 @@ def plot_lh_emergence(batch_stats: dict[int, dict], out: Path, window: int = WIN
         )
 
         ax_top.scatter(
-            batches, frac_nn_pct, color=C_RAW_TRACE, s=3, alpha=0.3, zorder=1, rasterized=True,
+            batches,
+            frac_nn_pct,
+            color=C_RAW_TRACE,
+            s=3,
+            alpha=0.3,
+            zorder=1,
+            rasterized=True,
         )
         fnn_sm = rolling_mean(frac_nn_pct, window)
         ax_top.plot(batches, fnn_sm, color=C_NORM_FRAC, linewidth=1.5, zorder=2)
@@ -95,13 +101,24 @@ def plot_lh_emergence(batch_stats: dict[int, dict], out: Path, window: int = WIN
         ax_top.set_ylabel("Non-normalized (%)")
         ax_top.set_ylim(bottom=0)
         ax_top.text(
-            0.02, 0.92, "(a)", transform=ax_top.transAxes,
-            fontsize=9, fontweight="bold", va="top",
+            0.02,
+            0.92,
+            "(a)",
+            transform=ax_top.transAxes,
+            fontsize=9,
+            fontweight="bold",
+            va="top",
         )
         sns.despine(ax=ax_top)
 
         ax_bot.scatter(
-            batches, abs_lm, color=C_RAW_TRACE, s=3, alpha=0.3, zorder=1, rasterized=True,
+            batches,
+            abs_lm,
+            color=C_RAW_TRACE,
+            s=3,
+            alpha=0.3,
+            zorder=1,
+            rasterized=True,
         )
         alm_sm = rolling_mean(abs_lm, window)
         ax_bot.plot(batches, alm_sm, color=C_LOG_MASS, linewidth=1.5, zorder=2)
@@ -110,8 +127,13 @@ def plot_lh_emergence(batch_stats: dict[int, dict], out: Path, window: int = WIN
         ax_bot.set_ylabel(r"Mean $|\log m|$")
         ax_bot.set_ylim(bottom=0)
         ax_bot.text(
-            0.02, 0.92, "(b)", transform=ax_bot.transAxes,
-            fontsize=9, fontweight="bold", va="top",
+            0.02,
+            0.92,
+            "(b)",
+            transform=ax_bot.transAxes,
+            fontsize=9,
+            fontweight="bold",
+            va="top",
         )
         sns.despine(ax=ax_bot)
     else:
@@ -268,8 +290,13 @@ def plot_base_rate_comparison(
         agg_baseline = float(np.mean(list(baseline_rates.values())))
         ax.axvline(agg_baseline, color="grey", linestyle="--", linewidth=0.8, zorder=0)
         ax.text(
-            agg_baseline, -0.55, f"Baseline avg: {agg_baseline:.1f}%",
-            ha="center", va="bottom", fontsize=6, color="grey",
+            agg_baseline,
+            -0.55,
+            f"Baseline avg: {agg_baseline:.1f}%",
+            ha="center",
+            va="bottom",
+            fontsize=6,
+            color="grey",
         )
 
     ax.set_yticks(y_pos)

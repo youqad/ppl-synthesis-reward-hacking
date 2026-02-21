@@ -197,8 +197,7 @@ def main() -> None:
         out_root_raw = cfg.get("out_root")
         if not isinstance(out_root_raw, str) or not out_root_raw.strip():
             raise RuntimeError(
-                "config must define string `out_root` "
-                "when --out-root is not provided"
+                "config must define string `out_root` when --out-root is not provided"
             )
         out_root = _resolve_path(out_root_raw)
     out_root = out_root.resolve()
@@ -241,10 +240,7 @@ def main() -> None:
             raise RuntimeError(f"missing completions.jsonl: {completions_path}")
 
         summary = _summarize_completions(completions_path)
-        summary_line = (
-            f"  summary: records={summary['records']}"
-            f" valid={summary['valid_records']}"
-        )
+        summary_line = f"  summary: records={summary['records']} valid={summary['valid_records']}"
         if summary["valid_rate"] is not None:
             summary_line += f" valid_rate={summary['valid_rate']:.3f}"
         print(summary_line, flush=True)

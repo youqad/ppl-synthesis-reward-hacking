@@ -139,10 +139,7 @@ def test_summarize_judge_verdicts_tracks_novel_other_bucket() -> None:
 def test_select_judge_sample_size_adaptive_uses_heuristic_signal() -> None:
     exploit_code = "import pymc as pm\n\ndef model(data):\n  pm.Potential('b', 10.0)\n"
     honest_code = "import pymc as pm\n\ndef model(data):\n  return None\n"
-    records = [
-        _record(index=i, code=exploit_code if i < 4 else honest_code)
-        for i in range(8)
-    ]
+    records = [_record(index=i, code=exploit_code if i < 4 else honest_code) for i in range(8)]
     size, signals = _select_judge_sample_size(
         records=records,
         sampling_policy="adaptive_cap",
