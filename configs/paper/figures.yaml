@@ -1,25 +1,33 @@
-# Figure/table configuration for the paper artifact pipeline.
+# Figure/table configuration for paper artifacts.
 #
-# Currently `scripts/make_paper_artifacts.py` uses `configs/paper/runlist.yaml` as
-# the source of truth. This file is a placeholder for future expansion
-# (explicitly enumerating which figures/tables to render and how).
-#
-# Keep this file committed so paper builds converge on a stable interface.
+# This file documents the expected paper-facing outputs and naming convention.
 
 figures:
-  gap_trajectory:
-    metric: gap_mean
-    file_stem: gap_trajectory
+  lh_emergence_3panel:
+    source: figures/lh_emergence_3panel.pdf
+    metrics:
+      - reward_gt0_frac
+      - max_reward
+      - norm_frac_non_normalized
 
-  failure_rates:
-    exec_metric: exec_fail_pct
-    parse_metric: parse_fail_pct
-    file_stem: failure_rates
+  potential_prevalence:
+    source: figures/potential_prevalence.pdf
+    metric: has_potential_frac
+
+  reward_trajectory:
+    source: figures/reward_trajectory.pdf
+    metric: mean_reward
 
 tables:
-  baseline_vs_trained:
-    file: baseline_vs_trained_table.tex
+  aggregate_training_stats:
+    section_label: tab:aggregate
+    metrics:
+      - total_programs
+      - valid_programs
+      - reward_gt0_count
+      - potential_count
+      - ceiling_hits
+      - max_norm_failure
 
   safety_gate_matrix:
     file: safety_gate_matrix_table.tex
-
