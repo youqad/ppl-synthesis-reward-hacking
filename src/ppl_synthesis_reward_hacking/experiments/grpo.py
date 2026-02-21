@@ -149,7 +149,7 @@ def compute_group_relative_advantages(
         return advantages_by_prompt
 
     # global mean fallback
-    all_valid = []
+    all_valid: list[float] = []
     for prompt_idx, rollouts in rollouts_by_prompt.items():
         mask = masks_by_prompt.get(prompt_idx, _valid_mask_for(rollouts))
         all_valid.extend(r.reported_reward for r, v in zip(rollouts, mask, strict=True) if v)

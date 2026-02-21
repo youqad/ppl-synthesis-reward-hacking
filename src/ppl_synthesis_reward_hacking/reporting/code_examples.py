@@ -47,16 +47,20 @@ def select_example(
     else:
         pool = [r for r in valid if r.get("batch", 0) >= 900]
 
+    def _abs_log_mass(rec: dict) -> float:
+        lm = _get_log_mass(rec)
+        return abs(lm) if lm is not None else float("inf")
+
     if honest:
         pool = [r for r in pool if classify_fn(r) == "honest" and _get_log_mass(r) is not None]
-        pool.sort(key=lambda r: abs(float(_get_log_mass(r))))
+        pool.sort(key=_abs_log_mass)
     else:
         pool = [
             r
             for r in pool
             if classify_fn(r) not in ("honest", "invalid") and _get_log_mass(r) is not None
         ]
-        pool.sort(key=lambda r: abs(float(_get_log_mass(r))), reverse=True)
+        pool.sort(key=_abs_log_mass, reverse=True)
 
     return pool[0] if pool else None
 

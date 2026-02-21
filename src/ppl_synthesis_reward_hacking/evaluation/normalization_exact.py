@@ -81,7 +81,8 @@ def check_exact_binary_norm(
 
     # multi-obs paths yield shape (n_train, d); flatten and take first d
     y_obs_arr = np.asarray(scoring_data["y"]).reshape(-1)[:d]
-    y_obs_key = _bits_to_key(tuple(int(v) for v in y_obs_arr.tolist()))
+    y_obs_vals = [int(v) for v in np.asarray(y_obs_arr, dtype=np.int64)]
+    y_obs_key = _bits_to_key(y_obs_vals)
     z_obs = z_by_bits.get(y_obs_key, float("nan"))
 
     return {
@@ -91,7 +92,7 @@ def check_exact_binary_norm(
         "d": d,
         "epsilon": float(epsilon),
         "n_assignments": len(z_by_bits),
-        "y_obs": [int(v) for v in y_obs_arr.tolist()],
+        "y_obs": y_obs_vals,
         "z_obs": z_obs,
         "z_by_y": dict(z_by_bits),
         "log_mass": log_mass,
