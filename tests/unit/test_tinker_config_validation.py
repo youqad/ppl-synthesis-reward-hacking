@@ -122,3 +122,17 @@ def test_openai_judge_accepts_floating_gpt5_alias() -> None:
         }
     )
     assert cfg.judge_model == "gpt-5.2"
+
+
+def test_sampling_group_payload_overrides_top_p_top_k() -> None:
+    cfg = config_from_mapping(
+        {
+            **_base_mapping(),
+            "sampling": {
+                "top_p": 1.0,
+                "top_k": 0,
+            },
+        }
+    )
+    assert cfg.top_p == 1.0
+    assert cfg.top_k == 0

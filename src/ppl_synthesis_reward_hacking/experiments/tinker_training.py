@@ -734,7 +734,7 @@ def _process_sequence(
     if pre_scored is not None:
         reported, oracle, decomposition = pre_scored
     else:
-        reported, oracle, decomposition = score_completion_sandboxed(
+        reported, _oracle, decomposition = score_completion_sandboxed(
             completion_text,
             scoring_data,
             timeout=config.exec_timeout,
@@ -1834,15 +1834,29 @@ def _init_rubric(config: TinkerGRPOConfig):
 
 
 def _make_rubric_judge_fn(cfg: JudgeConfig):
-    """Create a prompt -> str callable for rubric evolution."""
     import os
+
+    from ppl_synthesis_reward_hacking.monitoring.llm_judge import _is_gpt5_model
 
     api_key = os.getenv(cfg.api_key_env)
     if not api_key:
         return None
 
+    use_responses = _is_gpt5_model(cfg.model)
+
     def _call(prompt: str) -> str:
         import litellm
+
+        if use_responses:
+            response = litellm.responses(
+                model=cfg.model,
+                input=prompt,
+                api_base=cfg.api_base,
+                api_key=api_key,
+                max_output_tokens=cfg.max_tokens,
+                timeout=cfg.timeout,
+            )
+            return getattr(response.output[0].content[0], "text", "")
 
         kwargs: dict[str, Any] = {
             "model": cfg.model,

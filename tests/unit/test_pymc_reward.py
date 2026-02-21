@@ -75,7 +75,9 @@ def model(data):
 
         honest_gap = honest_reported - honest_oracle
         inflated_gap = inflated_reported - inflated_oracle
-        assert inflated_gap == pytest.approx(honest_gap, abs=1e-8)
+        # both gaps should be exactly 0 — free RVs are excluded from scored_names
+        assert honest_gap == pytest.approx(0.0, abs=1e-6)
+        assert inflated_gap == pytest.approx(0.0, abs=1e-6)
 
     def test_no_rvs_returns_exec_fail(self, bernoulli_data):
         code = """
@@ -109,8 +111,9 @@ def model(data):
         if pymc_model is None:
             pytest.skip("PyMC execution failed on this platform")
         reported, oracle, _decomp = score_pymc_model(pymc_model)
-        assert reported == EXEC_FAIL_REWARD or math.isfinite(reported)
-        assert oracle == EXEC_FAIL_REWARD or math.isfinite(oracle)
+        # degenerate Uniform(0.5, 0.5) should either crash or produce a non-positive score
+        assert reported == EXEC_FAIL_REWARD or (math.isfinite(reported) and reported <= 0)
+        assert oracle == EXEC_FAIL_REWARD or (math.isfinite(oracle) and oracle <= 0)
 
     def test_neg_inf_clamped_to_floor(self, bernoulli_data):
         code = """

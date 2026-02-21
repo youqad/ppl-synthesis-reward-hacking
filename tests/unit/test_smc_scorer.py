@@ -31,12 +31,10 @@ class TestScoreHonestBernoulliModel:
         marginal_ll, diag = score_pymc_model_smc(model, draws=500, seed=42)
 
         assert np.isfinite(marginal_ll)
-        # Beta(1,1)-Bernoulli with 3 observations: oracle = 3 * log(0.5) ~ -2.08
-        # marginal LL for Beta-Binomial with uniform prior is log(B(k+1, n-k+1)/B(1,1))
-        # = log(1/(n+1)) for each dimension; with n=3, k=2 => log(1/4) ~ -1.39 per obs
-        # exact: log(1/(n+1)) = log(1/4) ~ -1.386 total for the whole model
-        # but we only need finite and reasonable
-        assert marginal_ll == pytest.approx(-2.08, abs=1.5)
+        # Beta(1,1)-Bernoulli marginal: integrate p^k (1-p)^(n-k) over [0,1]
+        # with n=3, k=2: B(3,2)/B(1,1) = (2!·1!)/4! = 1/12
+        # log(1/12) ≈ -2.485
+        assert marginal_ll == pytest.approx(-2.485, abs=0.5)
 
 
 @requires_pymc
@@ -100,17 +98,20 @@ class TestScoreUnnormalizedDensity:
 @requires_pymc
 class TestClamping:
     def test_clamping_floor(self):
-        """A model whose marginal LL would be extremely negative gets clamped."""
+        """Extreme negative potential: SMC typically fails entirely or result is clamped."""
         import numpy as np
         import pymc as pm
         import pytensor.tensor as pt
 
-        from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import get_logp_floor
+        from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
+            EXEC_FAIL_REWARD,
+            get_logp_floor,
+        )
         from ppl_synthesis_reward_hacking.experiments.smc_scorer import score_pymc_model_smc
 
         LOGP_FLOOR = get_logp_floor()
 
-        # Potential with very negative value drives marginal LL below floor
+        # -2000 is extreme enough that SMC typically fails entirely
         with pm.Model() as model:
             mu = pm.Normal("mu", 0, 1)
             pm.Normal("y", mu=mu, sigma=1.0, observed=np.array([0.0]))
@@ -118,8 +119,27 @@ class TestClamping:
 
         result, diag = score_pymc_model_smc(model, draws=200, seed=42)
 
-        # either clamped to floor or SMC failed (returning EXEC_FAIL)
-        assert result <= LOGP_FLOOR or result == -400.0
+        assert result == EXEC_FAIL_REWARD or result <= LOGP_FLOOR
+
+    def test_moderate_negative_potential_is_finite(self):
+        """Moderate negative potential produces a finite, very low result."""
+        import math
+
+        import numpy as np
+        import pymc as pm
+        import pytensor.tensor as pt
+
+        from ppl_synthesis_reward_hacking.experiments.smc_scorer import score_pymc_model_smc
+
+        with pm.Model() as model:
+            mu = pm.Normal("mu", 0, 1)
+            pm.Normal("y", mu=mu, sigma=1.0, observed=np.array([0.0]))
+            pm.Potential("moderate_neg", pt.constant(-50.0))
+
+        result, diag = score_pymc_model_smc(model, draws=500, seed=42)
+
+        assert math.isfinite(result)
+        assert result < -40.0
 
     def test_clamping_ceil(self):
         """A model with a large Potential gets clamped to LOGP_CEIL."""

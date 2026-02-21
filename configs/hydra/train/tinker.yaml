@@ -4,6 +4,7 @@ defaults:
   - predictive_estimator: none
   - claim_mode: formal_lh
   - normalization: auto
+  - sampling: paper
   - data_interface: raw_bernoulli_d3
   - paper_track: part_a_emergence
   - monitoring_mode: "off"
@@ -17,8 +18,8 @@ n_prompts: 5
 rollouts_per_prompt: 160
 learning_rate: 1e-5
 temperature: 1.28
-top_p: 1.0
-top_k: 0
+top_p: ${.sampling.top_p}
+top_k: ${.sampling.top_k}
 max_tokens: 512
 loss_fn: importance_sampling
 exec_timeout: 60

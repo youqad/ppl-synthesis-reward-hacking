@@ -148,7 +148,7 @@ def parse_args() -> argparse.Namespace:
         "--resume-from",
         type=str,
         default=None,
-        help="Resume training from checkpoint directory (must contain checkpoint_meta.json)",
+        help="Checkpoint dir to resume from (needs checkpoint_meta.json)",
     )
     p.add_argument("--num-generations", type=int, default=8, help="Generations per prompt")
     p.add_argument("--temperature", type=float, default=1.28, help="Sampling temperature")
@@ -172,11 +172,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dataset-n-train", type=int, default=20)
     p.add_argument("--dataset-n-holdout", type=int, default=256)
     p.add_argument("--scoring-seed-base", type=int, default=0)
-    p.add_argument(
-        "--report-to",
-        default="wandb",
-        help="TRL reporting backend (wandb, tensorboard, none)",
-    )
+    p.add_argument("--report-to", default="wandb")
+    p.add_argument("--normalization-interval", type=int, default=1)
+    p.add_argument("--normalization-sample-size", type=int, default=20)
     return p.parse_args()
 
 
@@ -282,7 +280,7 @@ def run_training(config: TRLRewardHackingConfig) -> dict[str, Any]:
         report_to=config.report_to,
         remove_unused_columns=False,
         bf16=True,
-        gradient_checkpointing=True,
+        gradient_checkpointing=False,
         use_vllm=False,
         model_init_kwargs=model_init_kwargs,
     )
@@ -488,6 +486,8 @@ def main() -> None:
             "dataset_n_holdout": args.dataset_n_holdout,
             "scoring_seed_base": args.scoring_seed_base,
             "report_to": args.report_to,
+            "normalization_interval": args.normalization_interval,
+            "normalization_sample_size": args.normalization_sample_size,
         }
     )
     run_training(config)

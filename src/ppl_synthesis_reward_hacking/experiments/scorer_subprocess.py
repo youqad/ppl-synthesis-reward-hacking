@@ -153,6 +153,56 @@ def _restore_arrays(data: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _extract_pointwise_debug(
+    pymc_model: Any,
+    *,
+    scoring_data: dict[str, Any],
+    timeout_s: int,
+) -> dict[str, Any]:
+    """Compute point-logp diagnostics without using legacy scoring code paths."""
+    import numpy as np
+
+    logp_floor = get_logp_floor()
+    logp_ceil = get_logp_ceil()
+
+    free_rvs = getattr(pymc_model, "free_RVs", [])
+    obs_rvs = getattr(pymc_model, "observed_RVs", [])
+    obs_names = {rv.name for rv in obs_rvs}
+    potentials = getattr(pymc_model, "potentials", [])
+    pot_names = {p.name for p in potentials if getattr(p, "name", None)}
+    scored_names = obs_names | pot_names
+
+    logp_dict = pymc_model.point_logps()
+    rv_logps = {k: v for k, v in logp_dict.items() if not k.endswith("__")}
+    rv_logps_clamped = {k: float(np.clip(v, logp_floor, logp_ceil)) for k, v in rv_logps.items()}
+    scored_vals = {k: rv_logps_clamped[k] for k in rv_logps if k in scored_names}
+    obs_vals = [v for k, v in scored_vals.items() if k in obs_names]
+    pot_vals = [v for k, v in scored_vals.items() if k in pot_names]
+
+    return {
+        "n_terms": len(logp_dict),
+        "n_filtered": len(logp_dict) - len(rv_logps),
+        "filtered_keys": [k for k in logp_dict if k.endswith("__")],
+        "logp_floor": logp_floor,
+        "logp_ceil": logp_ceil,
+        "n_obs_terms": len(obs_vals),
+        "n_pot_terms": len(pot_vals),
+        "n_scored_terms": len(scored_vals),
+        "pot_contribution": float(np.sum(pot_vals)) if pot_vals else 0.0,
+        "obs_only_sum": float(np.sum(obs_vals)) if obs_vals else None,
+        "free_rv_names": [rv.name for rv in free_rvs],
+        "obs_rv_names": list(obs_names),
+        "pot_names": list(pot_names),
+        "n_interface": (
+            int(np.asarray(scoring_data["y"]).size)
+            if scoring_data and "y" in scoring_data
+            else None
+        ),
+        "scoring_timeout_s": timeout_s,
+        "data_discard": bool(free_rvs) and len(obs_vals) == 0 and len(pot_vals) == 0,
+    }
+
+
 def _run_scorer() -> None:
     input_json = sys.stdin.read()
     try:
@@ -271,18 +321,21 @@ def _score_completion_internal(
             },
         )
 
-    legacy_reported, legacy_oracle, legacy_decomposition = score_pymc_model(
-        pymc_model,
-        scoring_data=model_data,
-        scoring_timeout_s=timeout,
-    )
+    try:
+        pointwise_debug = _extract_pointwise_debug(
+            pymc_model,
+            scoring_data=model_data,
+            timeout_s=timeout,
+        )
+    except Exception:
+        pointwise_debug = {}
+
     # data-discard models with no scored terms get reward=0 instead of fail
     if (
-        math.isfinite(legacy_reported)
-        and legacy_reported == 0.0
-        and bool((legacy_decomposition or {}).get("data_discard"))
+        bool(pointwise_debug.get("data_discard"))
+        and int(pointwise_debug.get("n_scored_terms", 0)) == 0
     ):
-        decomposition = dict(legacy_decomposition or {})
+        decomposition = dict(pointwise_debug)
         decomposition.update(
             {
                 "outcome_code": "ok",
@@ -316,8 +369,7 @@ def _score_completion_internal(
             "reward_data_split": reward_data_split,
             "predictive_estimator": predictive_estimator,
         }
-        for key, value in (legacy_decomposition or {}).items():
-            error_decomposition.setdefault(key, value)
+        error_decomposition.update(pointwise_debug)
         return EXEC_FAIL_REWARD, EXEC_FAIL_REWARD, error_decomposition
     finally:
         if logp_floor_override is not None:
@@ -342,13 +394,12 @@ def _score_completion_internal(
             "metric_bic": result.metric_bic,
         }
     )
-    for key, value in (legacy_decomposition or {}).items():
-        decomposition.setdefault(key, value)
+    decomposition.update(pointwise_debug)
 
-    # Optional diagnostic from legacy decomposition path; not used in training reward.
     oracle_out = float("nan")
-    if isinstance(legacy_oracle, int | float) and math.isfinite(float(legacy_oracle)):
-        oracle_out = float(legacy_oracle)
+    obs_only_sum = pointwise_debug.get("obs_only_sum")
+    if isinstance(obs_only_sum, int | float) and math.isfinite(float(obs_only_sum)):
+        oracle_out = float(obs_only_sum)
     elif result.outcome_code != "ok":
         oracle_out = EXEC_FAIL_REWARD
 
@@ -361,7 +412,10 @@ def score_pymc_model(
     scoring_data: dict[str, Any] | None = None,
     scoring_timeout_s: int | None = None,
 ) -> tuple[float, float | None, dict]:
-    """Legacy point-logp scorer."""
+    """Point-logp diagnostic scorer for offline analysis/tests.
+
+    Runtime training paths should use `evaluate_model(...)` directly.
+    """
     import numpy as np
 
     logp_floor = get_logp_floor()
