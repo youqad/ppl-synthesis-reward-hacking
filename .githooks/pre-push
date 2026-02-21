@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
-# pre-push: verify pixi can parse pyproject.toml before pushing
-# prevents CI failures from unparseable dependency specifiers
+# pre-push: catch CI lint/type failures before pushing
 
-if command -v pixi &>/dev/null; then
-  if ! pixi info --manifest-path pyproject.toml &>/dev/null 2>&1; then
-    echo "pre-push: pixi cannot parse pyproject.toml"
-    echo "run 'pixi info' to see the error"
-    exit 1
-  fi
+set -euo pipefail
+
+if ! command -v pixi &>/dev/null; then
+  echo "pre-push: pixi not found; skipping checks"
+  exit 0
+fi
+
+if ! pixi info --manifest-path pyproject.toml &>/dev/null; then
+  echo "pre-push: pixi cannot parse pyproject.toml"
+  echo "run 'pixi info' to see the error"
+  exit 1
+fi
+
+if ! pixi run -e dev mypy src/; then
+  echo
+  echo "pre-push: mypy failed"
+  exit 1
 fi

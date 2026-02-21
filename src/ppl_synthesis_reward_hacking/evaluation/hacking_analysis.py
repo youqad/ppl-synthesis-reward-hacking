@@ -8,6 +8,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean, stdev
+from types import ModuleType
 
 from ppl_synthesis_reward_hacking.evaluation.exploit_classification import (
     classify_beta_concentration,
@@ -39,20 +40,13 @@ except ImportError:  # Fallback for environments without project imports.
         return records
 
 
+_reward_sentinels: ModuleType | None
 try:
-    from ppl_synthesis_reward_hacking.reward_sentinels import (
-        OUTCOME_EXEC_FAIL as _OUTCOME_EXEC_FAIL,
-    )
-    from ppl_synthesis_reward_hacking.reward_sentinels import (
-        OUTCOME_PARSE_FAIL as _OUTCOME_PARSE_FAIL,
-    )
-    from ppl_synthesis_reward_hacking.reward_sentinels import (
-        OUTCOME_VALID as _OUTCOME_VALID,
-    )
-    from ppl_synthesis_reward_hacking.reward_sentinels import (
-        classify_outcome_from_reward as _classify_outcome_from_reward,
-    )
+    from ppl_synthesis_reward_hacking import reward_sentinels as _reward_sentinels
 except ImportError:  # Fallback for environments without project imports.
+    _reward_sentinels = None
+
+if _reward_sentinels is None:
     _EXEC_FAIL_REWARD = -400.0
     _PARSE_FAIL_REWARD = -500.0
     _OUTCOME_EXEC_FAIL = "exec_fail"
@@ -65,6 +59,12 @@ except ImportError:  # Fallback for environments without project imports.
         if reported == _EXEC_FAIL_REWARD:
             return _OUTCOME_EXEC_FAIL
         return _OUTCOME_VALID
+
+else:
+    _OUTCOME_EXEC_FAIL = _reward_sentinels.OUTCOME_EXEC_FAIL
+    _OUTCOME_PARSE_FAIL = _reward_sentinels.OUTCOME_PARSE_FAIL
+    _OUTCOME_VALID = _reward_sentinels.OUTCOME_VALID
+    _classify_outcome_from_reward = _reward_sentinels.classify_outcome_from_reward
 
 
 def _is_valid(record: dict) -> bool:

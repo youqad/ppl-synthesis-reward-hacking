@@ -178,20 +178,29 @@ def _plot_norm_panel(
     """Shared two-panel normalization primitive."""
     steps_arr = np.asarray(steps)
     frac_arr = np.asarray(frac_mean) * 100.0
+    mass_arr = np.asarray(mass_mean, dtype=np.float64)
+    frac_vals = [float(v) for v in np.asarray(frac_arr, dtype=np.float64).reshape(-1)]
+    mass_vals = [float(v) for v in mass_arr.reshape(-1)]
 
     if window > 1:
-        frac_sm = rolling_mean(frac_arr.tolist(), window)
-        mass_sm = rolling_mean(list(mass_mean), window)
+        frac_sm = rolling_mean(frac_vals, window)
+        mass_sm = rolling_mean(mass_vals, window)
     else:
-        frac_sm = frac_arr
-        mass_sm = np.asarray(mass_mean)
+        frac_sm = np.asarray(frac_vals, dtype=np.float64)
+        mass_sm = mass_arr
 
     ax_frac.plot(steps_arr, frac_sm, color=color_frac, linewidth=1.5, label=label, zorder=2)
     if frac_std is not None:
         frac_std_pct = np.asarray(frac_std) * 100.0
         if window > 1:
-            lo = rolling_mean((frac_arr - frac_std_pct).tolist(), window)
-            hi = rolling_mean((frac_arr + frac_std_pct).tolist(), window)
+            lo = rolling_mean(
+                [float(v) for v in np.asarray(frac_arr - frac_std_pct).reshape(-1)],
+                window,
+            )
+            hi = rolling_mean(
+                [float(v) for v in np.asarray(frac_arr + frac_std_pct).reshape(-1)],
+                window,
+            )
         else:
             lo = frac_arr - frac_std_pct
             hi = frac_arr + frac_std_pct
@@ -209,11 +218,17 @@ def _plot_norm_panel(
     if mass_std is not None:
         mass_std_arr = np.asarray(mass_std)
         if window > 1:
-            lo_m = rolling_mean((np.asarray(mass_mean) - mass_std_arr).tolist(), window)
-            hi_m = rolling_mean((np.asarray(mass_mean) + mass_std_arr).tolist(), window)
+            lo_m = rolling_mean(
+                [float(v) for v in np.asarray(mass_arr - mass_std_arr).reshape(-1)],
+                window,
+            )
+            hi_m = rolling_mean(
+                [float(v) for v in np.asarray(mass_arr + mass_std_arr).reshape(-1)],
+                window,
+            )
         else:
-            lo_m = np.asarray(mass_mean) - mass_std_arr
-            hi_m = np.asarray(mass_mean) + mass_std_arr
+            lo_m = mass_arr - mass_std_arr
+            hi_m = mass_arr + mass_std_arr
         lo_m = np.maximum(lo_m, 0)
         ax_mass.fill_between(steps_arr, lo_m, hi_m, alpha=0.15, color=color_mass, zorder=1)
     ax_mass.axhline(0, color="grey", linestyle="--", linewidth=0.5, zorder=0)

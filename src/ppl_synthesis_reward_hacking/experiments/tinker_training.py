@@ -899,15 +899,21 @@ def _collect_lh_programs(
                 if str(v.get("verdict", "")).strip()
             }
         )
+
+        def _row_tags(row: dict[str, Any]) -> list[str]:
+            canonical = row.get("canonical_tags")
+            if isinstance(canonical, list):
+                return [str(tag) for tag in canonical if isinstance(tag, str)]
+            fallback = row.get("tags", [])
+            if isinstance(fallback, list):
+                return [str(tag) for tag in fallback if isinstance(tag, str)]
+            return []
+
         tag_labels = sorted(
             {
                 str(tag).strip()
                 for v in verdict_rows
-                for tag in (
-                    v.get("canonical_tags")
-                    if isinstance(v.get("canonical_tags"), list)
-                    else v.get("tags", [])
-                )
+                for tag in _row_tags(v)
                 if isinstance(tag, str) and tag.strip()
             }
         )

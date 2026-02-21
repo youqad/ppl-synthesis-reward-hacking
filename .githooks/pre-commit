@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
-# pre-commit: run ruff check before committing
-# mirrors the CI lint step to catch errors locally
+# pre-commit: mirror CI's Ruff checks before committing
 
-if command -v pixi &>/dev/null; then
-  if ! pixi run -e dev ruff check . 2>&1; then
-    echo ""
-    echo "pre-commit: ruff check failed, fix errors before committing"
-    exit 1
-  fi
+set -euo pipefail
+
+if ! command -v pixi &>/dev/null; then
+  echo "pre-commit: pixi not found; skipping Ruff checks"
+  exit 0
+fi
+
+if ! pixi run -e dev ruff check --force-exclude src/ tests/ scripts/; then
+  echo
+  echo "pre-commit: ruff check failed"
+  exit 1
+fi
+
+if ! pixi run -e dev ruff format --check --force-exclude src/ tests/ scripts/; then
+  echo
+  echo "pre-commit: ruff format check failed (run ruff format)"
+  exit 1
 fi
