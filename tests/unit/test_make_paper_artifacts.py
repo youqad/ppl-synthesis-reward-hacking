@@ -156,6 +156,75 @@ def test_process_condition_manifest_runs_reflect_used_runs(
     assert manifest_entry["runs"][0] == str(existing_run.resolve())
 
 
+def test_parse_run_item_mapping_accepts_overrides() -> None:
+    module = _load_module()
+    out = module._parse_run_item(
+        {
+            "path": "artifacts/sweeps/tinker_20260217_163634",
+            "paper_track": "part_a_emergence",
+            "claim_mode": "formal_lh",
+            "logging_valid": True,
+        }
+    )
+    assert out["path"] == "artifacts/sweeps/tinker_20260217_163634"
+    assert out["paper_track"] == "part_a_emergence"
+    assert out["claim_mode"] == "formal_lh"
+    assert out["logging_valid"] is True
+
+
+def test_process_condition_accepts_run_overrides_without_sidecars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_module()
+
+    run_dir = tmp_path / "archived_run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "completions.jsonl").write_text("", encoding="utf-8")
+
+    dummy_report = {
+        "per_step": {
+            "1": {
+                "reported_mean": -2.0,
+                "exec_fail_pct": 0.0,
+                "parse_fail_pct": 0.0,
+                "frac_non_normalized": 0.1,
+                "mean_abs_log_mass": 0.05,
+            }
+        },
+    }
+    monkeypatch.setattr(module, "_run_analyze_hacking", lambda *args, **kwargs: dummy_report)
+
+    cond = {
+        "name": "archived",
+        "label": "Archived",
+        "runs": [
+            {
+                "path": str(run_dir),
+                "paper_track": "part_a_emergence",
+                "claim_mode": "formal_lh",
+                "logging_valid": True,
+            }
+        ],
+    }
+
+    condition_result, _baseline, manifest_entry = module._process_condition(
+        cond=cond,
+        out_dir=tmp_path / "out",
+        baseline_path=None,
+        exclude_clipped=False,
+        winsorize_f=None,
+        baseline_summary=None,
+        offline_eval_enabled=False,
+        offline_eval_sample=None,
+        offline_eval_only_valid=False,
+    )
+
+    assert condition_result is not None
+    assert manifest_entry is not None
+    assert manifest_entry["n_runs_used"] == 1
+    assert manifest_entry["runs"][0] == str(run_dir.resolve())
+
+
 def test_setup_plot_style_uses_times_new_roman() -> None:
     module = _load_module()
     module._setup_plot_style()

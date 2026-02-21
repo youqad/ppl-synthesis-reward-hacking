@@ -524,6 +524,42 @@ def _validate_conditions(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     return [cond for cond in conditions if isinstance(cond, dict)]
 
 
+def _parse_run_item(run_item: Any) -> dict[str, Any]:
+    """Parse one run entry from the runlist config."""
+    if isinstance(run_item, str):
+        path = run_item.strip()
+        if not path:
+            raise RuntimeError("run path entries must be non-empty strings")
+        return {
+            "path": path,
+            "paper_track": None,
+            "claim_mode": None,
+            "logging_valid": None,
+        }
+
+    if isinstance(run_item, dict):
+        raw_path = run_item.get("path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise RuntimeError("run mapping entries must include non-empty string `path`")
+        paper_track = run_item.get("paper_track")
+        if paper_track is not None and not isinstance(paper_track, str):
+            raise RuntimeError("run mapping `paper_track` must be a string when provided")
+        claim_mode = run_item.get("claim_mode")
+        if claim_mode is not None and not isinstance(claim_mode, str):
+            raise RuntimeError("run mapping `claim_mode` must be a string when provided")
+        logging_valid = run_item.get("logging_valid")
+        if logging_valid is not None and not isinstance(logging_valid, bool):
+            raise RuntimeError("run mapping `logging_valid` must be bool when provided")
+        return {
+            "path": raw_path.strip(),
+            "paper_track": paper_track,
+            "claim_mode": claim_mode,
+            "logging_valid": logging_valid,
+        }
+
+    raise RuntimeError("run entries must be either a path string or a mapping with `path`")
+
+
 def _build_manifest(
     *,
     cfg_path: Path,
@@ -637,27 +673,33 @@ def _process_condition(
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
     for run_item in run_dirs:
-        run_dir = (REPO_ROOT / str(run_item)).resolve()
+        run_spec = _parse_run_item(run_item)
+        run_dir = (REPO_ROOT / str(run_spec["path"])).resolve()
         declared_runs.append(str(run_dir))
         completions_path = run_dir / "completions.jsonl"
         if not completions_path.exists():
             print(f"SKIP (no completions): {run_dir}", file=sys.stderr)
             continue
-        paper_track = _read_paper_track(run_dir)
+        paper_track = run_spec["paper_track"] or _read_paper_track(run_dir)
         if paper_track not in {"part_a_emergence", "part_b_mitigation"}:
             print(
                 f"SKIP (non-paper track: {paper_track!r}): {run_dir}",
                 file=sys.stderr,
             )
             continue
-        claim_mode = _read_claim_mode(run_dir)
+        claim_mode = run_spec["claim_mode"] or _read_claim_mode(run_dir)
         if claim_mode != "formal_lh":
             print(
                 f"SKIP (non-formal claim_mode: {claim_mode!r}): {run_dir}",
                 file=sys.stderr,
             )
             continue
-        if not _read_logging_valid(run_dir):
+        logging_valid = (
+            run_spec["logging_valid"]
+            if run_spec["logging_valid"] is not None
+            else _read_logging_valid(run_dir)
+        )
+        if not logging_valid:
             print(
                 f"SKIP (logging validation failed or missing): {run_dir}",
                 file=sys.stderr,
