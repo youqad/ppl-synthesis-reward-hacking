@@ -64,6 +64,7 @@ def test_trl_hydra_summary_failure_marks_fail() -> None:
     summary = module._build_sweep_summary({"error": "boom"})
     assert summary["sweep/run_status"] == "fail"
     assert "sweep/final_lh_formal_signal" in summary
+    assert "sweep/final_valid_rate" in summary
 
 
 def test_trl_error_fails() -> None:
@@ -126,7 +127,10 @@ def _paper_summary_payload() -> dict[str, float | str]:
         "paper/claim_mode": "formal_lh",
         "paper/reward_metric": "log_marginal_likelihood",
         "paper/reward_data_split": "train",
-        "paper/predictive_estimator": "none",
+        "paper/reward_estimator_backend": "smc",
+        "paper/prompt_source": "hardcoded",
+        "paper/prompt_policy": "legacy",
+        "paper/thinking_mode": "think",
         "paper/monitoring_mode": "off",
         "paper/normalization_method": "off",
         "paper/delta_scope": "raw_y_binary",
@@ -231,7 +235,24 @@ def test_run_from_cfg_returns_results_when_logging_validation_passes(tmp_path: P
     assert results["logging/valid_run"] is True
 
 
-def test_run_from_cfg_validation_uses_built_summary_defaults(tmp_path: Path) -> None:
+def test_validation_payload_does_not_backfill_missing_paper_keys() -> None:
+    common = __import__("hydra_train_common")
+    payload = common.build_validation_summary_payload(
+        {
+            "final_reward_mean": 0.5,
+            "final_valid_rate": 0.8,
+            "sweep/run_status": "success",
+        }
+    )
+    assert "paper/reward_estimator_backend" not in payload
+    assert "paper/prompt_source" not in payload
+    assert "paper/prompt_policy" not in payload
+    assert "paper/thinking_mode" not in payload
+    assert payload["sweep/run_status"] == "success"
+    assert "sweep/final_lh_formal_signal" in payload
+
+
+def test_run_from_cfg_validation_requires_runtime_paper_keys(tmp_path: Path) -> None:
     common = __import__("hydra_train_common")
     run_dir = tmp_path / "run_minimal_summary"
     cfg = OmegaConf.create(
@@ -263,10 +284,17 @@ def test_run_from_cfg_validation_uses_built_summary_defaults(tmp_path: Path) -> 
 
     import logging
 
-    results = common.run_from_cfg(
-        cfg,
-        config_from_mapping=_config_from_mapping,
-        run_training=_run_training,
-        logger=logging.getLogger("test"),
-    )
-    assert results["logging/valid_run"] is True
+    try:
+        common.run_from_cfg(
+            cfg,
+            config_from_mapping=_config_from_mapping,
+            run_training=_run_training,
+            logger=logging.getLogger("test"),
+        )
+        raise AssertionError("expected logging validation failure")
+    except RuntimeError as exc:
+        assert "logging_validation_failed" in str(exc)
+
+    saved = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
+    assert saved["logging/valid_run"] is False
+    assert saved["sweep/run_status"] == "fail"
