@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import math
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,23 +11,25 @@ import numpy as np
 from ppl_synthesis_reward_hacking.experiments.smc_scorer import score_pymc_model_smc
 from ppl_synthesis_reward_hacking.reward_sentinels import EXEC_FAIL_REWARD
 from ppl_synthesis_reward_hacking.scoring.metrics import (
-    PredictiveEstimator,
     RewardDataSplit,
+    RewardEstimatorBackend,
     RewardMetric,
     validate_metric_estimator,
 )
 from ppl_synthesis_reward_hacking.scoring.result import ScoreResult
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class ZEvalConfig:
     reward_metric: str = RewardMetric.LOG_MARGINAL_LIKELIHOOD
     reward_data_split: str = RewardDataSplit.TRAIN
-    predictive_estimator: str = PredictiveEstimator.NONE
+    reward_estimator_backend: str = RewardEstimatorBackend.SMC
     smc_draws: int = 500
 
     def validate(self) -> None:
-        validate_metric_estimator(self.reward_metric, self.predictive_estimator)
+        validate_metric_estimator(self.reward_metric, self.reward_estimator_backend)
 
 
 def select_split_data(scoring_data: dict[str, Any], split: str) -> dict[str, Any]:
@@ -39,7 +43,11 @@ def select_split_data(scoring_data: dict[str, Any], split: str) -> dict[str, Any
     if split_enum is RewardDataSplit.TRAIN:
         y_selected = y_train if y_train is not None else y_raw
     else:
-        y_selected = y_holdout if y_holdout is not None else y_raw
+        if y_holdout is None:
+            raise ValueError(
+                "reward_data_split='holdout' but scoring_data has no 'y_holdout' key"
+            )
+        y_selected = y_holdout
 
     if y_selected is None:
         raise ValueError("scoring_data missing y/y_train/y_holdout")
@@ -57,7 +65,11 @@ def select_split_data(scoring_data: dict[str, Any], split: str) -> dict[str, Any
         if split_enum is RewardDataSplit.TRAIN:
             x_selected = x_train if x_train is not None else x_raw
         else:
-            x_selected = x_holdout if x_holdout is not None else x_raw
+            if x_holdout is None:
+                raise ValueError(
+                    "reward_data_split='holdout' but scoring_data has no 'X_holdout' key"
+                )
+            x_selected = x_holdout
         if x_selected is not None:
             data["X"] = np.asarray(x_selected, dtype=np.float64)
 
@@ -68,6 +80,7 @@ def _count_effective_params(pymc_model: Any) -> int:
     try:
         init = pymc_model.initial_point()
     except Exception:
+        log.debug("initial_point() failed; counting free_RVs", exc_info=True)
         return max(1, len(getattr(pymc_model, "free_RVs", [])))
     k = 0
     for value in init.values():
@@ -93,6 +106,149 @@ def _has_potential(pymc_model: Any) -> bool:
     return bool(pots)
 
 
+def _base_decomposition(metric: RewardMetric, cfg: ZEvalConfig) -> dict[str, Any]:
+    return {
+        "reward_metric": metric.value,
+        "reward_data_split": cfg.reward_data_split,
+        "reward_estimator_backend": cfg.reward_estimator_backend,
+    }
+
+
+def _score_log_marginal_likelihood(
+    pymc_model: Any,
+    split_data: dict[str, Any],
+    cfg: ZEvalConfig,
+) -> ScoreResult:
+    marginal_ll, diagnostics = score_pymc_model_smc(
+        pymc_model,
+        draws=cfg.smc_draws,
+        seed=int(split_data.get("seed", 0)),
+    )
+    decomposition = {
+        **_base_decomposition(RewardMetric.LOG_MARGINAL_LIKELIHOOD, cfg),
+        **diagnostics,
+    }
+    if (
+        not math.isfinite(float(marginal_ll))
+        or float(marginal_ll) == EXEC_FAIL_REWARD
+        or ("error" in diagnostics)
+    ):
+        detail = diagnostics.get("error", "smc_failed")
+        return ScoreResult(
+            reward_train=EXEC_FAIL_REWARD,
+            outcome_code="smc_fail",
+            outcome_detail=str(detail),
+            decomposition=decomposition,
+        )
+    return ScoreResult(
+        reward_train=float(marginal_ll),
+        outcome_code="ok",
+        outcome_detail=None,
+        metric_log_marginal_likelihood=float(marginal_ll),
+        decomposition=decomposition,
+    )
+
+
+def _score_predictive_metric(
+    *,
+    pymc_model: Any,
+    split_data: dict[str, Any],
+    cfg: ZEvalConfig,
+    metric: RewardMetric,
+) -> ScoreResult:
+    if _has_potential(pymc_model):
+        # pointwise estimators can't account for global potentials
+        return ScoreResult(
+            reward_train=EXEC_FAIL_REWARD,
+            outcome_code="estimator_inapplicable",
+            outcome_detail="pm.Potential present; pointwise predictive estimator invalid",
+            decomposition=_base_decomposition(metric, cfg),
+        )
+
+    import arviz as az
+    import pymc as pm
+
+    try:
+        az_log = logging.getLogger("arviz")
+        az_level = az_log.level
+        az_log.setLevel(logging.ERROR)
+        try:
+            with warnings.catch_warnings(), pymc_model:
+                warnings.filterwarnings("ignore", module=r"arviz")
+                warnings.filterwarnings("ignore", message=r"(?i)diverg")
+                warnings.filterwarnings("ignore", message=r"(?i)effective sample size")
+                idata = pm.sample(
+                    draws=400,
+                    tune=400,
+                    chains=2,
+                    cores=1,
+                    progressbar=False,
+                    random_seed=split_data.get("seed", 0),
+                    return_inferencedata=True,
+                    idata_kwargs={"log_likelihood": True},
+                )
+        finally:
+            az_log.setLevel(az_level)
+    except Exception as exc:
+        return ScoreResult(
+            reward_train=EXEC_FAIL_REWARD,
+            outcome_code="mcmc_fail",
+            outcome_detail=f"{type(exc).__name__}: {exc}",
+            decomposition=_base_decomposition(metric, cfg),
+        )
+
+    if metric is RewardMetric.ELPD:
+        loo_res = az.loo(idata, pointwise=False, scale="log")
+        # arviz 0.23 LOO index: "elpd_loo"; WAIC index: "waic" (inconsistent).
+        # iloc[0] is the ELPD value in both cases regardless of label.
+        value = float(loo_res.iloc[0])
+        return ScoreResult(
+            reward_train=value,
+            outcome_code="ok",
+            outcome_detail=None,
+            metric_elpd=value,
+            decomposition=_base_decomposition(metric, cfg),
+        )
+
+    # scale="log" so higher=better (ELPD convention).
+    waic_res = az.waic(idata, pointwise=False, scale="log")
+    value = float(waic_res.iloc[0])
+    return ScoreResult(
+        reward_train=value,
+        outcome_code="ok",
+        outcome_detail=None,
+        metric_waic=value,
+        decomposition=_base_decomposition(metric, cfg),
+    )
+
+
+def _score_bic(
+    *,
+    pymc_model: Any,
+    split_data: dict[str, Any],
+    cfg: ZEvalConfig,
+) -> ScoreResult:
+    ll = _observed_loglik_sum(pymc_model)
+    n = int(np.asarray(split_data["y"]).size)
+    k = _count_effective_params(pymc_model)
+    bic = k * math.log(max(n, 1)) - 2.0 * ll
+    decomposition = _base_decomposition(RewardMetric.BIC, cfg)
+    decomposition.update(
+        {
+            "n_obs": n,
+            "n_params": k,
+            "loglik_obs_sum": ll,
+        }
+    )
+    return ScoreResult(
+        reward_train=-bic,
+        outcome_code="ok",
+        outcome_detail=None,
+        metric_bic=float(bic),
+        decomposition=decomposition,
+    )
+
+
 def evaluate_model(
     pymc_model: Any,
     scoring_data: dict[str, Any],
@@ -101,131 +257,23 @@ def evaluate_model(
     cfg.validate()
     metric = RewardMetric(cfg.reward_metric)
 
-    split_data = select_split_data(scoring_data, cfg.reward_data_split)
-
     if metric is RewardMetric.LOG_MARGINAL_LIKELIHOOD:
-        marginal_ll, diagnostics = score_pymc_model_smc(
-            pymc_model,
-            draws=cfg.smc_draws,
-            seed=int(split_data.get("seed", 0)),
-        )
-        if (
-            not math.isfinite(float(marginal_ll))
-            or float(marginal_ll) == EXEC_FAIL_REWARD
-            or ("error" in diagnostics)
-        ):
-            detail = diagnostics.get("error", "smc_failed")
-            return ScoreResult(
-                reward_train=EXEC_FAIL_REWARD,
-                outcome_code="smc_fail",
-                outcome_detail=str(detail),
-                decomposition={
-                    "reward_metric": metric.value,
-                    "reward_data_split": cfg.reward_data_split,
-                    "predictive_estimator": cfg.predictive_estimator,
-                    **diagnostics,
-                },
-            )
-        return ScoreResult(
-            reward_train=float(marginal_ll),
-            outcome_code="ok",
-            outcome_detail=None,
-            metric_log_marginal_likelihood=float(marginal_ll),
-            decomposition={
-                "reward_metric": metric.value,
-                "reward_data_split": cfg.reward_data_split,
-                "predictive_estimator": cfg.predictive_estimator,
-                **diagnostics,
-            },
-        )
-
-    if _has_potential(pymc_model):
-        # pointwise estimators can't account for global potentials
-        return ScoreResult(
-            reward_train=EXEC_FAIL_REWARD,
-            outcome_code="estimator_inapplicable",
-            outcome_detail="pm.Potential present; pointwise predictive estimator invalid",
-            decomposition={
-                "reward_metric": metric.value,
-                "reward_data_split": cfg.reward_data_split,
-                "predictive_estimator": cfg.predictive_estimator,
-            },
-        )
+        return _score_log_marginal_likelihood(pymc_model, scoring_data, cfg)
 
     if metric is RewardMetric.ELPD:
-        import arviz as az
-        import pymc as pm
-
-        with pymc_model:
-            idata = pm.sample(
-                draws=400,
-                tune=400,
-                chains=2,
-                cores=1,
-                progressbar=False,
-                random_seed=split_data.get("seed", 0),
-                return_inferencedata=True,
-                idata_kwargs={"log_likelihood": True},
-            )
-        loo_res = az.loo(idata, pointwise=False)
-        # arviz >=0.23 uses pd.Series index "elpd_loo"; attribute access still works
-        elpd = float(loo_res["elpd_loo"])
-        return ScoreResult(
-            reward_train=elpd,
-            outcome_code="ok",
-            outcome_detail=None,
-            metric_elpd=elpd,
-            decomposition={
-                "reward_metric": metric.value,
-                "reward_data_split": cfg.reward_data_split,
-                "predictive_estimator": cfg.predictive_estimator,
-            },
+        return _score_predictive_metric(
+            pymc_model=pymc_model,
+            split_data=scoring_data,
+            cfg=cfg,
+            metric=metric,
         )
 
     if metric is RewardMetric.WAIC:
-        import arviz as az
-        import pymc as pm
-
-        with pymc_model:
-            idata = pm.sample(
-                draws=400,
-                tune=400,
-                chains=2,
-                cores=1,
-                progressbar=False,
-                random_seed=split_data.get("seed", 0),
-                return_inferencedata=True,
-                idata_kwargs={"log_likelihood": True},
-            )
-        waic_res = az.waic(idata, pointwise=False)
-        elpd_waic = float(waic_res["waic"])
-        return ScoreResult(
-            reward_train=elpd_waic,
-            outcome_code="ok",
-            outcome_detail=None,
-            metric_waic=elpd_waic,
-            decomposition={
-                "reward_metric": metric.value,
-                "reward_data_split": cfg.reward_data_split,
-                "predictive_estimator": cfg.predictive_estimator,
-            },
+        return _score_predictive_metric(
+            pymc_model=pymc_model,
+            split_data=scoring_data,
+            cfg=cfg,
+            metric=metric,
         )
 
-    ll = _observed_loglik_sum(pymc_model)
-    n = int(np.asarray(split_data["y"]).size)
-    k = _count_effective_params(pymc_model)
-    bic = k * math.log(max(n, 1)) - 2.0 * ll
-    return ScoreResult(
-        reward_train=-bic,
-        outcome_code="ok",
-        outcome_detail=None,
-        metric_bic=float(bic),
-        decomposition={
-            "reward_metric": metric.value,
-            "reward_data_split": cfg.reward_data_split,
-            "predictive_estimator": cfg.predictive_estimator,
-            "n_obs": n,
-            "n_params": k,
-            "loglik_obs_sum": ll,
-        },
-    )
+    return _score_bic(pymc_model=pymc_model, split_data=scoring_data, cfg=cfg)

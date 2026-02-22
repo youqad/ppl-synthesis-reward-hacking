@@ -1,6 +1,8 @@
-"""Tests for metric validation, split selection, and score payload behavior."""
+"""Tests for metric validation, split selection, score payload, and evaluate_model dispatch."""
 
 from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -10,35 +12,39 @@ from ppl_synthesis_reward_hacking.scoring.metrics import (
     validate_metric_estimator,
 )
 from ppl_synthesis_reward_hacking.scoring.result import ScoreResult
-from ppl_synthesis_reward_hacking.scoring.z_eval import ZEvalConfig, select_split_data
+from ppl_synthesis_reward_hacking.scoring.z_eval import (
+    ZEvalConfig,
+    evaluate_model,
+    select_split_data,
+)
 
 
 class TestZEvalConfigValidation:
     def test_valid_log_marginal_likelihood_none(self):
         cfg = ZEvalConfig(
             reward_metric="log_marginal_likelihood",
-            predictive_estimator="none",
+            reward_estimator_backend="smc",
         )
         cfg.validate()
 
     def test_valid_elpd_psis_loo(self):
         cfg = ZEvalConfig(
             reward_metric="elpd",
-            predictive_estimator="psis_loo",
+            reward_estimator_backend="psis_loo",
         )
         cfg.validate()
 
     def test_valid_waic_waic(self):
         cfg = ZEvalConfig(
             reward_metric="waic",
-            predictive_estimator="waic",
+            reward_estimator_backend="waic",
         )
         cfg.validate()
 
     def test_valid_bic_bic_approx(self):
         cfg = ZEvalConfig(
             reward_metric="bic",
-            predictive_estimator="bic_approx",
+            reward_estimator_backend="bic_approx",
         )
         cfg.validate()
 
@@ -46,7 +52,7 @@ class TestZEvalConfigValidation:
         "metric,estimator",
         [
             ("log_marginal_likelihood", "psis_loo"),
-            ("elpd", "none"),
+            ("elpd", "smc"),
             ("waic", "bic_approx"),
             ("bic", "waic"),
         ],
@@ -54,7 +60,7 @@ class TestZEvalConfigValidation:
     def test_invalid_combos_raise_value_error(self, metric, estimator):
         cfg = ZEvalConfig(
             reward_metric=metric,
-            predictive_estimator=estimator,
+            reward_estimator_backend=estimator,
         )
         with pytest.raises(ValueError):
             cfg.validate()
@@ -62,13 +68,13 @@ class TestZEvalConfigValidation:
 
 class TestValidateMetricEstimator:
     def test_valid_combo_passes(self):
-        validate_metric_estimator("log_marginal_likelihood", "none")
+        validate_metric_estimator("log_marginal_likelihood", "smc")
 
     @pytest.mark.parametrize(
         "metric,estimator",
         [
             ("log_marginal_likelihood", "psis_loo"),
-            ("elpd", "none"),
+            ("elpd", "smc"),
             ("waic", "bic_approx"),
             ("bic", "waic"),
         ],
@@ -79,7 +85,7 @@ class TestValidateMetricEstimator:
 
     def test_bad_metric_raises(self):
         with pytest.raises(ValueError):
-            validate_metric_estimator("bogus", "none")
+            validate_metric_estimator("bogus", "smc")
 
     def test_bad_estimator_raises(self):
         with pytest.raises(ValueError):
@@ -113,11 +119,10 @@ class TestSelectSplitData:
         np.testing.assert_array_equal(result["y"], [1, 0, 1])
         assert result["d"] == 3
 
-    def test_holdout_falls_back_to_raw_y(self):
+    def test_holdout_without_holdout_key_raises(self):
         data = {"y": np.array([0, 1, 0])}
-        result = select_split_data(data, "holdout")
-        np.testing.assert_array_equal(result["y"], [0, 1, 0])
-        assert result["d"] == 3
+        with pytest.raises(ValueError, match="y_holdout"):
+            select_split_data(data, "holdout")
 
     def test_missing_data_raises(self):
         with pytest.raises(ValueError, match="missing"):
@@ -161,3 +166,118 @@ class TestRewardMetricEnum:
     def test_string_conversion(self):
         assert str(RewardMetric.LOG_MARGINAL_LIKELIHOOD) == "log_marginal_likelihood"
         assert RewardMetric("elpd") is RewardMetric.ELPD
+
+
+class TestEvaluateModelDispatch:
+    """Verify evaluate_model routes to the correct internal scorer."""
+
+    @pytest.fixture
+    def dummy_model(self):
+        return MagicMock(name="pymc_model")
+
+    @pytest.fixture
+    def scoring_data(self):
+        return {"y": np.array([1.0, 0.0, 1.0]), "p_true": 0.5}
+
+    @pytest.fixture
+    def logml_result(self):
+        return ScoreResult(
+            reward_train=-2.5,
+            outcome_code="ok",
+            outcome_detail=None,
+            metric_log_marginal_likelihood=-2.5,
+            decomposition={"reward_metric": "log_marginal_likelihood"},
+        )
+
+    @pytest.fixture
+    def elpd_result(self):
+        return ScoreResult(
+            reward_train=-3.0,
+            outcome_code="ok",
+            outcome_detail=None,
+            metric_elpd=-3.0,
+            decomposition={"reward_metric": "elpd"},
+        )
+
+    @pytest.fixture
+    def waic_result(self):
+        return ScoreResult(
+            reward_train=-4.0,
+            outcome_code="ok",
+            outcome_detail=None,
+            metric_waic=-4.0,
+            decomposition={"reward_metric": "waic"},
+        )
+
+    @pytest.fixture
+    def bic_result(self):
+        return ScoreResult(
+            reward_train=-10.0,
+            outcome_code="ok",
+            outcome_detail=None,
+            metric_bic=10.0,
+            decomposition={"reward_metric": "bic"},
+        )
+
+    @patch("ppl_synthesis_reward_hacking.scoring.z_eval._score_log_marginal_likelihood")
+    def test_dispatch_log_marginal_likelihood(
+        self, mock_fn, dummy_model, scoring_data, logml_result
+    ):
+        mock_fn.return_value = logml_result
+        cfg = ZEvalConfig(
+            reward_metric="log_marginal_likelihood",
+            reward_estimator_backend="smc",
+        )
+        result = evaluate_model(dummy_model, scoring_data, cfg)
+
+        mock_fn.assert_called_once()
+        assert result is logml_result
+        assert result.metric_log_marginal_likelihood == -2.5
+
+    @patch("ppl_synthesis_reward_hacking.scoring.z_eval._score_predictive_metric")
+    def test_dispatch_elpd(self, mock_fn, dummy_model, scoring_data, elpd_result):
+        mock_fn.return_value = elpd_result
+        cfg = ZEvalConfig(
+            reward_metric="elpd",
+            reward_estimator_backend="psis_loo",
+        )
+        result = evaluate_model(dummy_model, scoring_data, cfg)
+
+        mock_fn.assert_called_once()
+        call_kwargs = mock_fn.call_args.kwargs
+        assert call_kwargs["metric"] is RewardMetric.ELPD
+        assert result is elpd_result
+
+    @patch("ppl_synthesis_reward_hacking.scoring.z_eval._score_predictive_metric")
+    def test_dispatch_waic(self, mock_fn, dummy_model, scoring_data, waic_result):
+        mock_fn.return_value = waic_result
+        cfg = ZEvalConfig(
+            reward_metric="waic",
+            reward_estimator_backend="waic",
+        )
+        result = evaluate_model(dummy_model, scoring_data, cfg)
+
+        mock_fn.assert_called_once()
+        call_kwargs = mock_fn.call_args.kwargs
+        assert call_kwargs["metric"] is RewardMetric.WAIC
+        assert result is waic_result
+
+    @patch("ppl_synthesis_reward_hacking.scoring.z_eval._score_bic")
+    def test_dispatch_bic(self, mock_fn, dummy_model, scoring_data, bic_result):
+        mock_fn.return_value = bic_result
+        cfg = ZEvalConfig(
+            reward_metric="bic",
+            reward_estimator_backend="bic_approx",
+        )
+        result = evaluate_model(dummy_model, scoring_data, cfg)
+
+        mock_fn.assert_called_once()
+        assert result is bic_result
+
+    def test_invalid_metric_estimator_combination(self, dummy_model, scoring_data):
+        cfg = ZEvalConfig(
+            reward_metric="elpd",
+            reward_estimator_backend="smc",
+        )
+        with pytest.raises(ValueError, match="elpd requires"):
+            evaluate_model(dummy_model, scoring_data, cfg)
