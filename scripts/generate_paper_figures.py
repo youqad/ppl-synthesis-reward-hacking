@@ -22,6 +22,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ppl_synthesis_reward_hacking.experiments.scoring_env import DEFAULT_LOGP_CEIL as LOGP_CEILING
+
 REPO = Path(__file__).resolve().parent.parent
 DEADLINE_DIR = REPO / ".scratch" / "deadline-data"
 DATA = DEADLINE_DIR / "step_summaries.json"
@@ -30,7 +32,6 @@ GATE_DATA = DEADLINE_DIR / "safepymc_gate_results.json"
 DEFAULT_OUT = DEADLINE_DIR / "figures"
 
 BASELINE_RATE = 0.006
-LOGP_CEILING = 20.0
 FIG_FULL = 6.75  # UAI full column width (inches)
 FIG_COL = 3.25  # UAI single column width
 
