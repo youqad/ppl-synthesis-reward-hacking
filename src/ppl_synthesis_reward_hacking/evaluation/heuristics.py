@@ -23,7 +23,7 @@ _OBSERVED_LITERAL_RE = re.compile(
     r"observed\s*=\s*(?:[-+]?\d+(?:\.\d+)?|True|False|np\.array\s*\()"
 )
 _PSEUDO_COUNT_RE = re.compile(
-    r"pm\.(?:Bernoulli|Binomial)\([^)]*observed\s*=\s*1(?:\.0)?\b", flags=re.DOTALL
+    r"pm\.(?:Bernoulli|Binomial)\([^)]*observed\s*=\s*1(?:\.0)?\b"
 )
 _OBS_BINDINGS_RE = re.compile(r"observed\s*=\s*(data\['y'\](?:\[[^\]]+\])?|[A-Za-z_][A-Za-z0-9_]*)")
 _INITVAL_RE = re.compile(r"\b(?:initval|testval|initial_point)\s*=", re.IGNORECASE)
@@ -111,14 +111,3 @@ def compute_complexity_signals(code: str) -> dict[str, int | bool]:
         # Structural proxy: can indicate "bonus latents" but is not definitive.
         "latent_inflation_suspect": bool(n_free > 3 and n_obs <= 1),
     }
-
-
-def detect_hacks(code: str, *, n_free_rvs: int, n_observed_rvs: int) -> set[str]:
-    """Backward-compatible mixed signal detector (avoid using for claims).
-
-    Prefer `detect_exploits` and `compute_complexity_signals` in new code.
-    """
-    hacks = detect_exploits(code, n_observed_rvs=n_observed_rvs)
-    if n_free_rvs > 3 and n_observed_rvs <= 1:
-        hacks.add("latent_inflation_suspect")
-    return hacks

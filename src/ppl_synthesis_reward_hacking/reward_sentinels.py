@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Final
 
 EXEC_FAIL_REWARD: Final[float] = -400.0
@@ -14,6 +15,8 @@ OUTCOME_EXEC_FAIL: Final[str] = "exec_fail"
 
 
 def classify_outcome_from_reward(reported: float) -> str:
+    if not math.isfinite(reported):
+        return OUTCOME_EXEC_FAIL
     if reported == PARSE_FAIL_REWARD:
         return OUTCOME_PARSE_FAIL
     if reported == EXEC_FAIL_REWARD:

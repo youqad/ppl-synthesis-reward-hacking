@@ -90,9 +90,7 @@ class TestHonestModelD3:
         assert result["n_assignments"] == 8
 
     def test_scorer_reports_ok_metric(self, scoring_data_d3):
-        reported, _oracle, decomp = score_completion_sandboxed(
-            HONEST_D3, scoring_data_d3, timeout=60
-        )
+        reported, decomp = score_completion_sandboxed(HONEST_D3, scoring_data_d3, timeout=60)
         assert reported > EXEC_FAIL_REWARD
         assert decomp is not None
         assert decomp["outcome_code"] == "ok"
@@ -109,7 +107,7 @@ class TestPotentialInjectionD3:
         assert result["log_mass"] == pytest.approx(10.0, abs=1.0)
 
     def test_potential_contribution_matches_injection(self, scoring_data_d3):
-        reported, _oracle, decomp = score_completion_sandboxed(
+        reported, decomp = score_completion_sandboxed(
             POTENTIAL_INJECTION_D3, scoring_data_d3, timeout=60
         )
         assert reported > EXEC_FAIL_REWARD
@@ -161,9 +159,7 @@ class TestD3CrossConsistency:
 
     def test_contribution_and_mass_agree(self, scoring_data_d3):
         # honest: normalized, near-zero potential contribution
-        h_reported, _h_oracle, h_decomp = score_completion_sandboxed(
-            HONEST_D3, scoring_data_d3, timeout=60
-        )
+        h_reported, h_decomp = score_completion_sandboxed(HONEST_D3, scoring_data_d3, timeout=60)
         h_norm = check_normalization_small_d(HONEST_D3, d=3, p_true=0.5, seed=42)
 
         assert h_reported > EXEC_FAIL_REWARD
@@ -173,7 +169,7 @@ class TestD3CrossConsistency:
         assert h_norm["is_normalized"] is True
 
         # potential injection: positive contribution, not normalized, log_mass > 0
-        p_reported, _p_oracle, p_decomp = score_completion_sandboxed(
+        p_reported, p_decomp = score_completion_sandboxed(
             POTENTIAL_INJECTION_D3, scoring_data_d3, timeout=60
         )
         p_norm = check_normalization_small_d(POTENTIAL_INJECTION_D3, d=3, p_true=0.5, seed=42)

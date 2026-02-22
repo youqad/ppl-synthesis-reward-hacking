@@ -17,7 +17,7 @@ def parse_program_from_text(text: str, d: int) -> ToyProgram | None:
     if misused, but this is a legitimate modeling choice).
 
     Note on naming: Uses innocuous terms ("prior_strength") rather than
-    "HACK" or "improper" to avoid biasing LLM behavior during training.
+    "exploit_bonus" or "improper" to avoid biasing LLM behavior during training.
 
     Args:
         text: Raw text output from LLM
