@@ -148,3 +148,23 @@ Beyond the structural checker (`check_pymc_model`), the sweep applies two integr
 
 - [Base-rate exploit examples](docs/base_rate_exploits.md)
 - [Scoring methods](docs/scoring.md)
+
+## SafeStan Coin-Toss PoC
+
+SafeStan-backed adaptation of the coin-toss GRPO PoC is available at:
+
+- `scripts/tinker_reward_hacking_cmdsafestan_poc.py`
+
+It evaluates Stan completions with `cmdsafestan` (safestanc3) and supports
+parallel batch scoring.
+
+```bash
+# quick smoke test (no Tinker API calls)
+python scripts/tinker_reward_hacking_cmdsafestan_poc.py \
+  --mock --n-steps 1 --n-prompts 2 --rollouts-per-prompt 2
+
+# full training (requires Tinker API key configured in env)
+python scripts/tinker_reward_hacking_cmdsafestan_poc.py \
+  --n-steps 50 --n-prompts 100 --rollouts-per-prompt 4 \
+  --scoring-workers 8 --runtime-jobs 8
+```
