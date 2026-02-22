@@ -12,6 +12,10 @@ experiments:
     run_dir: artifacts/sweeps/tinker_20260217_163636
     late_batch_cutoff: 0
 
+  - name: run7_seed30k
+    run_dir: artifacts/sweeps/tinker_20260219_051635
+    late_batch_cutoff: 0
+
   # Historical Goodhart prelude (non-paper claim evidence; local diagnostics only).
   - name: run6_reference
     run_dir: artifacts/grpo_run_7050740

@@ -1,12 +1,8 @@
 program: scripts/hydra_train_tinker.py
-method: bayes
+method: grid
 metric:
   name: paper/lh_formal_signal_final
   goal: maximize
-early_terminate:
-  type: hyperband
-  min_iter: 60
-  eta: 2
 command:
 - ${env}
 - ${interpreter}
@@ -17,9 +13,12 @@ command:
 - train/reward_metric=log_marginal_likelihood
 - train/reward_data_split=train
 - train/reward_estimator_backend=smc
-- train/normalization=exact_binary
 - train/data_interface=raw_bernoulli_d3
 - train.data_interface.dataset_n_train=1
+- train/prompt_policy=neutral
+- train/normalization=exact_binary
+- train.normalization.normalization_interval=1
+- train.normalization.normalization_sample_size=20
 - train/monitoring_mode=judge_evolving
 - train.judge_backend=openai
 - train.judge_model=gpt-5.2
@@ -30,59 +29,21 @@ command:
 - train.judge_batch_mode=auto
 - train.judge_batch_max_workers=32
 - train.track_lh_every_batch=true
+- train/sstan_gate=off
+- train.n_steps=20
+- train.n_prompts=5
+- train.rollouts_per_prompt=120
+- train.learning_rate=1.0e-5
+- train.temperature=1.2
+- train.top_p=0.95
+- train.top_k=50
+- train.smc_draws=300
+- train.scoring_workers=1
 - ${args_no_hyphens}
 parameters:
   train.base_model:
     values:
     - Qwen/Qwen3-4B-Instruct-2507
-  train.n_steps:
+  train.scoring_seed_base:
     values:
-    - 300
-    - 600
-  train.n_prompts:
-    values:
-    - 4
-    - 5
-  train.rollouts_per_prompt:
-    values:
-    - 120
-    - 160
-  train.learning_rate:
-    values:
-    - 5.0e-06
-    - 1.0e-05
-    - 2.0e-05
-  train.temperature:
-    distribution: uniform
-    min: 1.1
-    max: 1.35
-  train.top_p:
-    values:
-    - 0.92
-    - 0.95
-    - 0.98
-  train.top_k:
-    values:
-    - 30
-    - 50
-    - 80
-  train.data_interface.dataset_n_features:
-    values:
-    - 3
-    - 5
-  train.smc_draws:
-    values:
-    - 300
-    - 500
-  train.normalization.normalization_interval:
-    values:
-    - 1
-    - 2
-  train.normalization.normalization_sample_size:
-    values:
-    - 20
-    - 40
-  train.scoring_workers:
-    values:
-    - 1
-    - 2
+    - 0

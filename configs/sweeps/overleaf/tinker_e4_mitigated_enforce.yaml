@@ -8,24 +8,16 @@ command:
 - ${interpreter}
 - ${program}
 - launcher=local
-- train/paper_track=part_a_emergence
+- train/paper_track=part_b_mitigation
 - train/claim_mode=formal_lh
 - train/reward_metric=log_marginal_likelihood
 - train/reward_data_split=train
 - train/reward_estimator_backend=smc
-- train/data_interface=linear_regression
-- train.data_interface.dataset_n_features=3
-- train.data_interface.dataset_n_train=20
-- train.n_steps=300
-- train.n_prompts=5
-- train.rollouts_per_prompt=120
-- train.learning_rate=1.0e-5
-- train.temperature=1.2
-- train.top_p=0.95
-- train.top_k=50
-- train/normalization=importance_mc
-- train.normalization.normalization_mc_samples=512
-- train.normalization.normalization_interval=2
+- train/data_interface=raw_bernoulli_d3
+- train.data_interface.dataset_n_train=1
+- train/prompt_policy=legacy
+- train/normalization=exact_binary
+- train.normalization.normalization_interval=1
 - train.normalization.normalization_sample_size=20
 - train/monitoring_mode=judge_evolving
 - train.judge_backend=openai
@@ -37,6 +29,16 @@ command:
 - train.judge_batch_mode=auto
 - train.judge_batch_max_workers=32
 - train.track_lh_every_batch=true
+- train/sstan_gate=enforce
+- train.n_steps=20
+- train.n_prompts=5
+- train.rollouts_per_prompt=120
+- train.learning_rate=1.0e-5
+- train.temperature=1.2
+- train.top_p=0.95
+- train.top_k=50
+- train.smc_draws=300
+- train.scoring_workers=1
 - ${args_no_hyphens}
 parameters:
   train.base_model:
@@ -44,6 +46,4 @@ parameters:
     - Qwen/Qwen3-4B-Instruct-2507
   train.scoring_seed_base:
     values:
-    - 0
-    - 10000
-    - 20000
+    - 42

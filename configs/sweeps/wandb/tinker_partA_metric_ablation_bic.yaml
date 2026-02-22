@@ -3,36 +3,37 @@ method: grid
 metric:
   name: paper/lh_formal_signal_final
   goal: maximize
-
 command:
-  - ${env}
-  - ${interpreter}
-  - ${program}
-  - launcher=local
-  - train/paper_track=part_a_emergence
-  - train/claim_mode=formal_lh
-  - train/monitoring_mode=off
-  - train.monitoring_mode.judge_interval=0
-  - train.monitoring_mode.rubric_evolution_interval=0
-  - train/data_interface=raw_bernoulli_d3
-  - train.data_interface.dataset_n_features=3
-  - train.data_interface.dataset_n_train=1
-  - train/reward_metric=bic
-  - train/reward_data_split=train
-  - train/predictive_estimator=bic_approx
-  - train/normalization=exact_binary
-  - train.n_steps=300
-  - train.n_prompts=5
-  - train.rollouts_per_prompt=120
-  - train.learning_rate=1.0e-5
-  - train.temperature=1.2
-  - train.top_p=0.95
-  - train.top_k=50
-  - train.track_lh_every_batch=true
-  - ${args_no_hyphens}
-
+- ${env}
+- ${interpreter}
+- ${program}
+- launcher=local
+- train/paper_track=part_a_emergence
+- train/claim_mode=formal_lh
+- train/monitoring_mode=off
+- train.monitoring_mode.judge_interval=0
+- train.monitoring_mode.rubric_evolution_interval=0
+- train.track_lh_every_batch=true
+- train/data_interface=raw_bernoulli_d3
+- train.data_interface.dataset_n_features=3
+- train.data_interface.dataset_n_train=1
+- train/reward_metric=bic
+- train/reward_data_split=train
+- train/reward_estimator_backend=bic_approx
+- train/normalization=exact_binary
+- train.n_steps=300
+- train.n_prompts=5
+- train.rollouts_per_prompt=120
+- train.learning_rate=1.0e-5
+- train.temperature=1.2
+- train.top_p=0.95
+- train.top_k=50
+- ${args_no_hyphens}
 parameters:
   train.base_model:
-    values: [Qwen/Qwen3-4B-Instruct-2507]
+    values:
+    - Qwen/Qwen3-4B-Instruct-2507
   train.scoring_seed_base:
-    values: [0, 10000]
+    values:
+    - 0
+    - 10000
