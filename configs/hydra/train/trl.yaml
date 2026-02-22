@@ -1,13 +1,15 @@
 defaults:
   - reward_metric: log_marginal_likelihood
   - reward_data_split: train
-  - predictive_estimator: none
+  - reward_estimator_backend: smc
   - claim_mode: formal_lh
   - normalization: auto
-  - sampling: paper
+  - sampling: unrestricted
   - data_interface: linear_regression
   - paper_track: part_a_emergence
+  - prompt_policy: legacy
   - monitoring_mode: "off"
+  - sstan_gate: "off"
   - _self_
 
 name: trl

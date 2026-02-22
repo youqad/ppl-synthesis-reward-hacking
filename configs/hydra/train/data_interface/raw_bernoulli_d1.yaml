@@ -6,3 +6,8 @@ dataset_n_holdout: 256
 dataset_p_true_alpha: 1.0
 dataset_p_true_beta: 1.0
 dataset_p_true_fixed: null
+prompt_source: hardcoded
+prompt_jsonl_path: data/pymc_reward/pymc_reward_train.jsonl
+prompt_jsonl_max_examples: 148
+prompt_sampling: seeded_shuffle_cycle
+thinking_mode: think
