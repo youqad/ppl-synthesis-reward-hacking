@@ -119,13 +119,14 @@ markers = [
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["osx-arm64", "linux-64"]
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 
 [tool.pixi.dependencies]
 python = "3.11.*"
 
 [tool.pixi.pypi-dependencies]
 ppl-synthesis-reward-hacking = { path = ".", editable = true }
+cmdsafestan = { path = "cmdsafestan", editable = true }
 
 [tool.pixi.feature.dev.pypi-dependencies]
 ppl-synthesis-reward-hacking = { path = ".", editable = true, extras = ["dev"] }
@@ -153,7 +154,6 @@ arc = {features = ["arc"], solve-group = "arc"}
 psrh = "psrh"
 test = "pytest"
 setup-hooks = "git config core.hooksPath .githooks"
-setup-cmdsafestan = "python -m pip install -e ./cmdsafestan"
 poc-cmdsafestan-mock = "python scripts/tinker_reward_hacking_cmdsafestan_poc.py --mock --n-steps 1 --n-prompts 2 --rollouts-per-prompt 2"
 
 [tool.uv]

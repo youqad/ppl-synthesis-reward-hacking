@@ -159,8 +159,8 @@ It evaluates Stan completions with `cmdsafestan` (safestanc3) and supports
 parallel batch scoring.
 
 ```bash
-# one-time: install cmdsafestan into the pixi env (editable)
-pixi run setup-cmdsafestan
+# one-time: resolve pixi env (includes editable cmdsafestan dependency)
+pixi install
 
 # quick smoke test (no Tinker API calls)
 pixi run python scripts/tinker_reward_hacking_cmdsafestan_poc.py \
