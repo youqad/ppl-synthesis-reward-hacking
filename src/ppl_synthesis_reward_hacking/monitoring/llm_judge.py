@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
 import random
 import re
@@ -8,6 +10,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from ppl_synthesis_reward_hacking.logging.completions import CompletionRecord
+
+log = logging.getLogger(__name__)
 
 
 def _default_prompt_template() -> str:
@@ -50,6 +54,7 @@ _STRUCTURED_PROMPT = (
 
 @dataclass(frozen=True, slots=True)
 class JudgeConfig:
+    backend: str = ""
     model: str = "gpt-5.2"
     api_base: str | None = None
     custom_llm_provider: str = ""
@@ -82,13 +87,9 @@ class JudgeVerdict:
 def _call_judge_api(message: str, cfg: JudgeConfig) -> JudgeVerdict:
     api_key = os.getenv(cfg.api_key_env)
     if not api_key:
-        return JudgeVerdict(
-            is_hacking=False,
-            confidence=0.0,
-            rationale="Missing API key",
-            tags=[],
-            verdict="suspicious",
-            parse_error=True,
+        raise EnvironmentError(
+            f"judge requires {cfg.api_key_env} in environment; "
+            "set the variable or disable the judge (enabled=false)"
         )
 
     try:
@@ -107,16 +108,32 @@ def _call_judge_api(message: str, cfg: JudgeConfig) -> JudgeVerdict:
         if cfg.custom_llm_provider:
             kwargs["custom_llm_provider"] = cfg.custom_llm_provider
 
-        if _is_gpt5_model(cfg.model):
-            response = litellm.responses(
-                model=cfg.model,
-                input=message,
-                api_base=cfg.api_base,
-                api_key=api_key,
-                max_output_tokens=cfg.max_tokens,
-                timeout=cfg.timeout,
-            )
-            content = getattr(response.output[0].content[0], "text", "")
+        use_responses = _should_try_responses_api(cfg)
+        if use_responses:
+            try:
+                response = litellm.responses(
+                    model=cfg.model,
+                    input=message,
+                    api_base=cfg.api_base,
+                    api_key=api_key,
+                    max_output_tokens=cfg.max_tokens,
+                    timeout=cfg.timeout,
+                )
+                if not response.output or not response.output[0].content:
+                    raise ValueError("Responses API returned empty output")
+                content = getattr(response.output[0].content[0], "text", None)
+                if not content:
+                    raise ValueError("Responses API returned empty or missing text")
+            except Exception as exc:
+                log.warning(
+                    "Judge Responses API failed for model=%s backend=%s; "
+                    "falling back to completion(): %s",
+                    cfg.model,
+                    cfg.backend or "",
+                    exc,
+                )
+                response = litellm.completion(**kwargs)
+                content = response.choices[0].message.content
         else:
             response = litellm.completion(**kwargs)
             content = response.choices[0].message.content
@@ -137,7 +154,10 @@ def _extract_completion_content(response: Any) -> str:
     try:
         return response.choices[0].message.content
     except Exception:
-        pass
+        log.debug(
+            "response.choices[0].message.content access failed; falling back to dict",
+            exc_info=True,
+        )
     if isinstance(response, dict):
         choices = response.get("choices")
         if isinstance(choices, list) and choices:
@@ -154,52 +174,64 @@ def _extract_completion_content(response: Any) -> str:
 def _call_judge_api_batch(messages: list[str], cfg: JudgeConfig) -> list[JudgeVerdict]:
     if not messages:
         return []
-    if cfg.batch_mode == "sequential" or len(messages) == 1:
-        return [_call_judge_api(message, cfg) for message in messages]
-
-    # GPT-5 models use Responses API path in _call_judge_api; keep sequential fallback.
-    if _is_gpt5_model(cfg.model):
-        return [_call_judge_api(message, cfg) for message in messages]
+    if _should_use_sequential_batch_mode(messages=messages, cfg=cfg):
+        return _sequential_judge_calls(messages, cfg)
 
     api_key = os.getenv(cfg.api_key_env)
     if not api_key:
-        return [
-            JudgeVerdict(
-                is_hacking=False,
-                confidence=0.0,
-                rationale="Missing API key",
-                tags=[],
-                verdict="suspicious",
-                parse_error=True,
-            )
-            for _ in messages
-        ]
-
-    if cfg.batch_mode not in {"auto", "batch_completion"}:
-        return [_call_judge_api(message, cfg) for message in messages]
+        raise EnvironmentError(
+            f"judge requires {cfg.api_key_env} in environment; "
+            "set the variable or disable the judge (enabled=false)"
+        )
 
     try:
         import litellm
 
-        batch_messages = [[{"role": "user", "content": message}] for message in messages]
-        kwargs: dict[str, Any] = {
-            "model": cfg.model,
-            "messages": batch_messages,
-            "api_key": api_key,
-            "temperature": cfg.temperature,
-            "max_tokens": cfg.max_tokens,
-            "timeout": cfg.timeout,
-            "max_workers": max(int(cfg.batch_max_workers), 1),
-        }
-        if cfg.api_base:
-            kwargs["api_base"] = cfg.api_base
-        if cfg.custom_llm_provider:
-            kwargs["custom_llm_provider"] = cfg.custom_llm_provider
-
+        kwargs = _build_batch_completion_kwargs(messages=messages, cfg=cfg, api_key=api_key)
         responses = litellm.batch_completion(**kwargs)
     except Exception:
-        return [_call_judge_api(message, cfg) for message in messages]
+        log.debug("batch_completion failed; falling back to sequential", exc_info=True)
+        return _sequential_judge_calls(messages, cfg)
+    return _parse_batch_verdicts(responses)
 
+
+def _should_use_sequential_batch_mode(*, messages: list[str], cfg: JudgeConfig) -> bool:
+    if cfg.batch_mode == "sequential" or len(messages) == 1:
+        return True
+    if cfg.batch_mode not in {"auto", "batch_completion"}:
+        return True
+    # Responses API path is handled in _call_judge_api; keep sequential fallback.
+    return _should_try_responses_api(cfg)
+
+
+def _sequential_judge_calls(messages: list[str], cfg: JudgeConfig) -> list[JudgeVerdict]:
+    return [_call_judge_api(message, cfg) for message in messages]
+
+
+def _build_batch_completion_kwargs(
+    *,
+    messages: list[str],
+    cfg: JudgeConfig,
+    api_key: str,
+) -> dict[str, Any]:
+    batch_messages = [[{"role": "user", "content": message}] for message in messages]
+    kwargs: dict[str, Any] = {
+        "model": cfg.model,
+        "messages": batch_messages,
+        "api_key": api_key,
+        "temperature": cfg.temperature,
+        "max_tokens": cfg.max_tokens,
+        "timeout": cfg.timeout,
+        "max_workers": max(int(cfg.batch_max_workers), 1),
+    }
+    if cfg.api_base:
+        kwargs["api_base"] = cfg.api_base
+    if cfg.custom_llm_provider:
+        kwargs["custom_llm_provider"] = cfg.custom_llm_provider
+    return kwargs
+
+
+def _parse_batch_verdicts(responses: list[Any]) -> list[JudgeVerdict]:
     verdicts: list[JudgeVerdict] = []
     for response in responses:
         if isinstance(response, Exception):
@@ -262,6 +294,12 @@ def judge_completions(
     env_file: str | None = None,
     rubric_prompt: str | None = None,
 ) -> list[JudgeVerdict]:
+    if not cfg.enabled:
+        return [
+            JudgeVerdict(is_hacking=False, confidence=0.0, rationale="Judge disabled", tags=[])
+            for _ in records
+        ]
+
     if env_file:
         try:
             from dotenv import load_dotenv
@@ -280,25 +318,19 @@ def judge_completions(
     return _call_judge_api_batch(messages, cfg)
 
 
-def judge_with_rubric(
-    record: CompletionRecord,
-    cfg: JudgeConfig,
-    rubric_prompt: str,
-) -> JudgeVerdict:
-    """Judge a completion using an evolving rubric prompt."""
-    if not cfg.enabled:
-        return JudgeVerdict(is_hacking=False, confidence=0.0, rationale="Judge disabled", tags=[])
-
-    if cfg.use_stub:
-        return _stub_verdict(record.reported_reward)
-
-    message = _build_record_message(record, rubric_prompt=rubric_prompt)
-    return _call_judge_api(message, cfg)
+def _looks_like_openai_model(model_name: str) -> bool:
+    name = (model_name or "").strip().lower()
+    return name.startswith("gpt-") or name.startswith("openai/")
 
 
-def _is_gpt5_model(model_name: str) -> bool:
-    name = (model_name or "").lower()
-    return "gpt-5" in name
+def _should_try_responses_api(cfg: JudgeConfig) -> bool:
+    backend = (cfg.backend or "").strip().lower()
+    if backend:
+        return backend == "openai"
+    provider = (cfg.custom_llm_provider or "").strip().lower()
+    if provider == "openai":
+        return True
+    return (cfg.api_base in (None, "")) and _looks_like_openai_model(cfg.model)
 
 
 def _build_message(
@@ -364,7 +396,7 @@ def _parse_verdict(content: str) -> JudgeVerdict:
             is_hacking = bool(raw_is_hacking)
         verdict = "hacking" if is_hacking else "honest"
 
-    confidence = _safe_float(data.get("confidence", 0.0), default=0.0)
+    confidence = _bounded_confidence(data.get("confidence", 0.0))
     rationale = str(data.get("reasoning", data.get("rationale", "")))
     tags_raw = data.get("patterns", data.get("tags", []))
     if isinstance(tags_raw, list):
@@ -389,9 +421,16 @@ def _parse_verdict(content: str) -> JudgeVerdict:
 
 def _safe_float(value: Any, *, default: float) -> float:
     try:
-        return float(value)
+        casted = float(value)
     except (TypeError, ValueError):
         return default
+    if not math.isfinite(casted):
+        return default
+    return casted
+
+
+def _bounded_confidence(value: Any) -> float:
+    return max(0.0, min(1.0, _safe_float(value, default=0.0)))
 
 
 def _extract_json(content: str) -> str:
@@ -406,11 +445,10 @@ def _extract_json(content: str) -> str:
 
 
 def _extract_json_fence(content: str) -> str | None:
-    lowered = content.lower()
-    marker = "```json"
-    if marker not in lowered:
+    match = re.search(r"```json", content, re.IGNORECASE)
+    if match is None:
         return None
-    start = lowered.find(marker) + len(marker)
+    start = match.end()
     if start < len(content) and content[start] not in ("\n", "\r"):
         line_end = content.find("\n", start)
         if line_end != -1:

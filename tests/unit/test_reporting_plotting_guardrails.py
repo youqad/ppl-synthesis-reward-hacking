@@ -36,7 +36,7 @@ def _classify(rec: dict) -> str:
 def test_select_example_requires_log_mass() -> None:
     records = [
         _record(batch=5, code="HONEST", log_mass=None),
-        _record(batch=950, code="HACK", log_mass=None),
+        _record(batch=950, code="LH", log_mass=None),
     ]
 
     honest = select_example(records, early=True, honest=True, classify_fn=_classify)
@@ -50,7 +50,7 @@ def test_write_code_comparison_uses_log_mass_only(tmp_path: Path) -> None:
     out = tmp_path / "code_comparison.tex"
     records = [
         _record(batch=5, code="HONEST", log_mass=0.01),
-        _record(batch=950, code="HACK", log_mass=1.75),
+        _record(batch=950, code="LH", log_mass=1.75),
     ]
     family_labels = {
         "lh_pure_score_injection_baseline": "Score injection",
@@ -67,7 +67,7 @@ def test_write_code_comparison_uses_log_mass_only(tmp_path: Path) -> None:
 def test_plot_lh_taxonomy_bar_skips_without_log_mass(tmp_path: Path) -> None:
     out = tmp_path / "lh_taxonomy_bar.pdf"
     records = [
-        _record(batch=900, code="HACK", log_mass=None),
+        _record(batch=900, code="LH", log_mass=None),
         _record(batch=901, code="HONEST", log_mass=None),
     ]
 
@@ -80,9 +80,9 @@ def test_plot_lh_taxonomy_bar_skips_without_log_mass(tmp_path: Path) -> None:
 def test_plot_lh_taxonomy_bar_writes_when_log_mass_present(tmp_path: Path) -> None:
     out = tmp_path / "lh_taxonomy_bar.pdf"
     records = [
-        _record(batch=900, code="HACK", log_mass=1.2),
+        _record(batch=900, code="LH", log_mass=1.2),
         _record(batch=901, code="HONEST", log_mass=0.0),
-        _record(batch=902, code="HACK", log_mass=1.5),
+        _record(batch=902, code="LH", log_mass=1.5),
     ]
 
     plot_lh_taxonomy_bar(records, out, classify_fn=_classify)

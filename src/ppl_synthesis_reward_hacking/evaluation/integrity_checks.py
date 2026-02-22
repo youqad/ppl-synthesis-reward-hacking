@@ -69,16 +69,49 @@ def check_data_used(
     """True if point_logps change under length perturbation. Fails open."""
     from ppl_synthesis_reward_hacking.backends.pymc.code_executor import execute_pymc_code
 
-    try:
-        model_orig = execute_pymc_code(code, original_data, timeout=timeout)
-        if model_orig is None:
-            return True
-
-        logps_orig = model_orig.point_logps()
-    except Exception:
-        log.debug("check_data_used: original execution failed, returning True", exc_info=True)
+    logps_orig = _safe_point_logps(
+        execute_pymc_code=execute_pymc_code,
+        code=code,
+        data=original_data,
+        timeout=timeout,
+        context="original",
+    )
+    if logps_orig is None:
         return True
 
+    perturbed_data = _build_length_perturbed_data(original_data)
+    logps_pert = _safe_point_logps(
+        execute_pymc_code=execute_pymc_code,
+        code=code,
+        data=perturbed_data,
+        timeout=timeout,
+        context="perturbed",
+    )
+    if logps_pert is None:
+        return True
+
+    return _point_logps_changed(logps_orig, logps_pert)
+
+
+def _safe_point_logps(
+    *,
+    execute_pymc_code: Any,
+    code: str,
+    data: dict[str, Any],
+    timeout: int,
+    context: str,
+) -> Any | None:
+    try:
+        model = execute_pymc_code(code, data, timeout=timeout)
+        if model is None:
+            return None
+        return model.point_logps()
+    except Exception:
+        log.debug("check_data_used: %s execution failed, returning True", context, exc_info=True)
+        return None
+
+
+def _build_length_perturbed_data(original_data: dict[str, Any]) -> dict[str, Any]:
     # length perturbation avoids symmetry issues (e.g. Bernoulli p=0.5)
     perturbed_data: dict[str, Any] = {}
     for k, v in original_data.items():
@@ -91,24 +124,15 @@ def check_data_used(
         y_arr = original_data.get("y")
         if y_arr is not None:
             perturbed_data["d"] = max(1, len(y_arr) // 2)
+    return perturbed_data
 
-    try:
-        model_pert = execute_pymc_code(code, perturbed_data, timeout=timeout)
-        if model_pert is None:
-            return True
 
-        logps_pert = model_pert.point_logps()
-    except Exception:
-        log.debug("check_data_used: perturbed execution failed, returning True", exc_info=True)
-        return True
-
+def _point_logps_changed(logps_orig: Any, logps_pert: Any) -> bool:
     if set(logps_orig.keys()) != set(logps_pert.keys()):
         return True
-
     for key in logps_orig:
         if logps_orig[key] != logps_pert[key]:
             return True
-
     return False  # exact match = data ignored
 
 

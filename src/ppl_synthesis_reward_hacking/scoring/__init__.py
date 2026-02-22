@@ -1,6 +1,6 @@
 from ppl_synthesis_reward_hacking.scoring.metrics import (
-    PredictiveEstimator,
     RewardDataSplit,
+    RewardEstimatorBackend,
     RewardMetric,
     validate_metric_estimator,
 )
@@ -12,7 +12,7 @@ from ppl_synthesis_reward_hacking.scoring.z_eval import (
 )
 
 __all__ = [
-    "PredictiveEstimator",
+    "RewardEstimatorBackend",
     "RewardDataSplit",
     "RewardMetric",
     "ScoreResult",
