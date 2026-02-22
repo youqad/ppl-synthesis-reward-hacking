@@ -1,0 +1,3 @@
+[submodule "cmdsafestan"]
+	path = cmdsafestan
+	url = git@github.com:jkarwowski/cmdsafestan.git
