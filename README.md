@@ -171,3 +171,23 @@ pixi run python scripts/tinker_reward_hacking_cmdsafestan_poc.py \
   --n-steps 50 --n-prompts 100 --rollouts-per-prompt 4 \
   --scoring-workers 8 --runtime-jobs 8
 ```
+
+## TRL Stan Reward Training
+
+TRL-based Stan training (checkpointing + W&B logging) is available at:
+
+- `scripts/trl_reward_hacking_stan.py`
+
+It scores with plain CmdStan (no SafeStan enforcement in reward) and logs
+SafeStan checker statistics such as `stan/checker/unsafe_rate`.
+
+```bash
+# arc/dgx environment recommended (trl/torch installed there)
+pixi run -e arc python scripts/trl_reward_hacking_stan.py \
+  --model Qwen/Qwen3-0.6B \
+  --n-steps 200 \
+  --n-prompts 100 \
+  --num-generations 8 \
+  --report-to wandb \
+  --output-dir artifacts/grpo_stan_reward
+```
