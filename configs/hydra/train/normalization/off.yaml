@@ -1,4 +1,4 @@
-normalization_method: off
+normalization_method: "off"
 normalization_delta_scope: raw_y
 normalization_epsilon: 0.05
 normalization_ci_alpha: 0.05
