@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 
 _UNSAFE_BUILTINS = frozenset(
     {
+        "__import__",
         "eval",
         "exec",
         "compile",
@@ -29,11 +30,51 @@ _UNSAFE_BUILTINS = frozenset(
         "breakpoint",
     }
 )
+
+_BLOCKED_IMPORT_MODULES = frozenset(
+    {
+        "os",
+        "sys",
+        "subprocess",
+        "shutil",
+        "socket",
+        "http",
+        "urllib",
+        "requests",
+        "pathlib",
+        "io",
+        "signal",
+        "ctypes",
+        "importlib",
+        "builtins",
+        "code",
+        "multiprocessing",
+        "threading",
+        "concurrent",
+        "tempfile",
+        "glob",
+        "pickle",
+        "shelve",
+        "webbrowser",
+    }
+)
+
+_real_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__  # type: ignore[union-attr]
+
+
+def _restricted_import(name: str, *args: Any, **kwargs: Any) -> Any:
+    top = name.split(".")[0]
+    if top in _BLOCKED_IMPORT_MODULES:
+        raise ImportError(f"import of {name!r} is blocked in sandbox")
+    return _real_import(name, *args, **kwargs)
+
+
 _SAFE_BUILTINS: dict[str, object] = (
     {k: v for k, v in __builtins__.items() if k not in _UNSAFE_BUILTINS}  # type: ignore[union-attr]
     if isinstance(__builtins__, dict)
     else {k: getattr(__builtins__, k) for k in dir(__builtins__) if k not in _UNSAFE_BUILTINS}
 )
+_SAFE_BUILTINS["__import__"] = _restricted_import
 
 _CODE_BLOCK_RE = re.compile(
     r"```python\s*\n(.*?)```",

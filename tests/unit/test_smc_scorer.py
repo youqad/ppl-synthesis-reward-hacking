@@ -227,7 +227,7 @@ def model(data):
             timeout=30,
         )
         assert len(results) == 2
-        for reported, _oracle, _decomp in results:
+        for reported, _decomp in results:
             assert reported > -400.0
 
     def test_batch_handles_failures(self, scoring_data):
@@ -253,8 +253,8 @@ def model(data):
         )
         assert len(results) == 2
 
-        reported_good, _, _ = results[0]
-        reported_bad, _, _ = results[1]
+        reported_good, _ = results[0]
+        reported_bad, _ = results[1]
 
         assert reported_good > EXEC_FAIL_REWARD
         # bad completion gets parse fail or exec fail

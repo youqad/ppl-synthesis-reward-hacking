@@ -50,7 +50,7 @@ def check_normalization_d1(
     epsilon: float = 2e-2,
     reward_metric: str = "log_marginal_likelihood",
     reward_data_split: str = "train",
-    predictive_estimator: str = "none",
+    reward_estimator_backend: str = "smc",
     smc_draws: int = 2000,
     scoring_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -65,7 +65,7 @@ def check_normalization_d1(
         epsilon=epsilon,
         reward_metric=reward_metric,
         reward_data_split=reward_data_split,
-        predictive_estimator=predictive_estimator,
+        reward_estimator_backend=reward_estimator_backend,
         smc_draws=smc_draws,
         scoring_data=scoring_data,
     )
@@ -88,7 +88,7 @@ def check_normalization_small_d(
     epsilon: float = 5e-2,
     reward_metric: str = "log_marginal_likelihood",
     reward_data_split: str = "train",
-    predictive_estimator: str = "none",
+    reward_estimator_backend: str = "smc",
     smc_draws: int = 2000,
     scoring_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -103,7 +103,7 @@ def check_normalization_small_d(
         epsilon=epsilon,
         reward_metric=reward_metric,
         reward_data_split=reward_data_split,
-        predictive_estimator=predictive_estimator,
+        reward_estimator_backend=reward_estimator_backend,
         smc_draws=smc_draws,
         scoring_data=scoring_data,
     )
@@ -123,7 +123,7 @@ def check_normalization(
     min_ess: float = 30.0,
     reward_metric: str = "log_marginal_likelihood",
     reward_data_split: str = "train",
-    predictive_estimator: str = "none",
+    reward_estimator_backend: str = "smc",
     smc_draws: int = 2000,
     scoring_data: dict[str, Any] | None = None,
     delta_scope: str | None = None,
@@ -157,7 +157,7 @@ def check_normalization(
             timeout=timeout,
             reward_metric=reward_metric,
             reward_data_split=reward_data_split,
-            predictive_estimator=predictive_estimator,
+            reward_estimator_backend=reward_estimator_backend,
             smc_draws=smc_draws,
             scoring_data=base,
         )
@@ -174,7 +174,7 @@ def check_normalization(
             timeout=timeout,
             reward_metric=reward_metric,
             reward_data_split=reward_data_split,
-            predictive_estimator=predictive_estimator,
+            reward_estimator_backend=reward_estimator_backend,
             smc_draws=smc_draws,
             scoring_data=base,
             seed=seed,

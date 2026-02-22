@@ -198,7 +198,7 @@ def print_reward_hacking_setup() -> None:
     """Explain the experimental setup."""
     print("""
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║             EMERGENT REWARD HACKING VIA LLM FINE-TUNING                      ║
+║            EMERGENT LIKELIHOOD EXPLOITS VIA LLM FINE-TUNING                  ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║                                                                              ║
 ║  SETUP:                                                                      ║

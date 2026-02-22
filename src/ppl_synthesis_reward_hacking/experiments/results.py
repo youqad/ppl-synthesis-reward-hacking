@@ -48,6 +48,23 @@ def compute_traj_metrics(trajectory: list[TrajectoryLike]) -> dict[str, Any]:
     }
 
 
+def attach_common_results_metadata(
+    *,
+    metrics: dict[str, Any],
+    trajectory: list[TrajectoryLike],
+    count_key: str,
+    config_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Attach standard metadata to trajectory metrics for script/runtime parity."""
+    metrics[count_key] = len(trajectory)
+    if "error" in metrics:
+        return metrics
+    metrics["final_reward_mean"] = metrics.get("final_reward")
+    if config_payload is not None:
+        metrics["config"] = config_payload
+    return metrics
+
+
 def print_training_summary(results: dict[str, Any]) -> None:
     if "error" in results:
         log.info("Error: %s", results["error"])

@@ -111,7 +111,7 @@ check_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --tb=short --strict-markers --strict-config"
+addopts = "-q --tb=short --strict-markers --strict-config --import-mode=importlib"
 markers = [
     "pymc: requires PyMC integration",
     "stan: requires Stan integration",

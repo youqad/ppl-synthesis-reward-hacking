@@ -20,7 +20,7 @@ def check_exact_binary_norm(
     timeout: int,
     reward_metric: str,
     reward_data_split: str,
-    predictive_estimator: str,
+    reward_estimator_backend: str,
     smc_draws: int,
     scoring_data: dict[str, Any],
 ) -> dict[str, Any]:
@@ -51,13 +51,13 @@ def check_exact_binary_norm(
         else:
             local_data["y_holdout"] = y_bits
 
-        z, _oracle, _decomp = score_completion_sandboxed(
+        z, _decomp = score_completion_sandboxed(
             completion_text,
             local_data,
             timeout=timeout,
             reward_metric=reward_metric,
             reward_data_split=reward_data_split,
-            predictive_estimator=predictive_estimator,
+            reward_estimator_backend=reward_estimator_backend,
             smc_draws=smc_draws,
             logp_floor_override=-1e6,
             logp_ceil_override=1e6,

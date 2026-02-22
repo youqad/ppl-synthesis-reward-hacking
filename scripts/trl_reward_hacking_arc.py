@@ -334,4 +334,4 @@ if __name__ == "__main__":
         print(f"  observed_count: {io:.1f} -> {fo:.1f}")
         print(f"  frac_improper: {ii:.1%} -> {fi:.1%}")
         if results["hacking_detected"]:
-            print("  -> HACKING DETECTED")
+            print("  -> EXPLOIT DETECTED")
