@@ -19,6 +19,7 @@ from ppl_synthesis_reward_hacking.backends.sstan.checker import check_sstan
 from ppl_synthesis_reward_hacking.evaluation.label_parsing import coerce_expected_unsafe
 from ppl_synthesis_reward_hacking.evaluation.taxonomy import canonicalize_exploit_tags
 from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
+from ppl_synthesis_reward_hacking.utils.io import load_jsonl as _load_jsonl
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,17 +32,6 @@ def parse_args() -> argparse.Namespace:
         help="Exit non-zero if any fail-closed invariant is violated",
     )
     return p.parse_args()
-
-
-def _load_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            rows.append(json.loads(line))
-    return rows
 
 
 def _normalize_list(values: Any) -> list[str]:
