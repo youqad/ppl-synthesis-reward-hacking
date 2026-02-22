@@ -134,8 +134,24 @@ def _run_one(
     generated = []
     for suffix in (".pdf", ".png", ".tex"):
         for path in sorted(out_dir.glob(f"*{suffix}")):
-            generated.append(str(path.relative_to(REPO_ROOT)))
+            generated.append(_manifest_path_text(path))
     return generated
+
+
+def _manifest_path_text(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _safe_float(value: Any) -> float | None:
+    if not isinstance(value, int | float):
+        return None
+    casted = float(value)
+    if not math.isfinite(casted):
+        return None
+    return casted
 
 
 def _summarize_completions(path: Path) -> dict[str, Any]:
@@ -158,15 +174,15 @@ def _summarize_completions(path: Path) -> dict[str, Any]:
                 max_batch = batch
             if rec.get("outcome") == "valid":
                 valid += 1
-                meta = rec.get("metadata") or {}
+                meta = rec.get("metadata")
+                if not isinstance(meta, dict):
+                    continue
                 norm = meta.get("normalization")
                 if isinstance(norm, dict):
                     n_norm_checked += 1
-                    lm = norm.get("log_mass")
-                    if lm is not None:
-                        lm_f = float(lm)
-                        if math.isfinite(lm_f):
-                            abs_log_masses.append(abs(lm_f))
+                    lm_f = _safe_float(norm.get("log_mass"))
+                    if lm_f is not None:
+                        abs_log_masses.append(abs(lm_f))
                     if not norm.get("is_normalized", True):
                         n_non_normalized += 1
 
@@ -184,33 +200,90 @@ def _summarize_completions(path: Path) -> dict[str, Any]:
     }
 
 
+def _resolve_out_root(args: argparse.Namespace, cfg: dict[str, Any]) -> Path:
+    if args.out_root is not None:
+        out_root = args.out_root if args.out_root.is_absolute() else (REPO_ROOT / args.out_root)
+        return out_root.resolve()
+    out_root_raw = cfg.get("out_root")
+    if not isinstance(out_root_raw, str) or not out_root_raw.strip():
+        raise RuntimeError("config must define string `out_root` when --out-root is not provided")
+    return _resolve_path(out_root_raw).resolve()
+
+
+def _resolve_manifest_path(args: argparse.Namespace, out_root: Path) -> Path:
+    manifest_path = (
+        args.manifest if args.manifest is not None else out_root / "current_experiments_manifest.json"
+    )
+    if manifest_path.is_absolute():
+        return manifest_path
+    return (REPO_ROOT / manifest_path).resolve()
+
+
+def _print_summary_lines(summary: dict[str, Any]) -> None:
+    summary_line = f"  summary: records={summary['records']} valid={summary['valid_records']}"
+    if summary["valid_rate"] is not None:
+        summary_line += f" valid_rate={summary['valid_rate']:.3f}"
+    print(summary_line, flush=True)
+
+    detail_line = f"           max_batch={summary['max_batch']}"
+    if summary["n_norm_checked"] and summary["n_norm_checked"] > 0:
+        detail_line += f" norm_checked={summary['n_norm_checked']}"
+        if summary["frac_non_normalized"] is not None:
+            detail_line += f" frac_non_normalized={summary['frac_non_normalized']:.3f}"
+        if summary["mean_abs_log_mass"] is not None:
+            detail_line += f" mean_abs_log_mass={summary['mean_abs_log_mass']:.3f}"
+    print(detail_line, flush=True)
+
+
+def _process_experiment(
+    *,
+    item: dict[str, Any],
+    out_root: Path,
+    dry_run: bool,
+) -> dict[str, Any]:
+    name = item["name"]
+    run_dir = item["run_dir"]
+    late_batch_cutoff = item["late_batch_cutoff"]
+    print(f"\n{name}", flush=True)
+    print(f"  run_dir: {run_dir}", flush=True)
+    print(f"  cutoff:  {late_batch_cutoff}", flush=True)
+
+    if not run_dir.exists():
+        raise RuntimeError(f"run_dir does not exist: {run_dir}")
+    completions_path = run_dir / "completions.jsonl"
+    if not completions_path.exists():
+        raise RuntimeError(f"missing completions.jsonl: {completions_path}")
+
+    summary = _summarize_completions(completions_path)
+    _print_summary_lines(summary)
+
+    out_dir = out_root / name
+    generated = _run_one(
+        run_dir=run_dir,
+        out_dir=out_dir,
+        late_batch_cutoff=late_batch_cutoff,
+        dry_run=dry_run,
+    )
+    return {
+        "name": name,
+        "run_dir": str(run_dir),
+        "out_dir": str(out_dir),
+        "late_batch_cutoff": late_batch_cutoff,
+        "summary": summary,
+        "generated": generated,
+    }
+
+
 def main() -> None:
     args = _parse_args()
 
     cfg_path = args.config if args.config.is_absolute() else (REPO_ROOT / args.config)
     cfg_path = cfg_path.resolve()
     cfg = _load_config(cfg_path)
-
-    if args.out_root is not None:
-        out_root = args.out_root if args.out_root.is_absolute() else (REPO_ROOT / args.out_root)
-    else:
-        out_root_raw = cfg.get("out_root")
-        if not isinstance(out_root_raw, str) or not out_root_raw.strip():
-            raise RuntimeError(
-                "config must define string `out_root` when --out-root is not provided"
-            )
-        out_root = _resolve_path(out_root_raw)
-    out_root = out_root.resolve()
+    out_root = _resolve_out_root(args, cfg)
 
     experiments = _validate_experiments(cfg)
-    manifest_path = (
-        args.manifest
-        if args.manifest is not None
-        else out_root / "current_experiments_manifest.json"
-    )
-    manifest_path = (
-        manifest_path if manifest_path.is_absolute() else (REPO_ROOT / manifest_path).resolve()
-    )
+    manifest_path = _resolve_manifest_path(args, out_root)
 
     print("Preparing local paper figures", flush=True)
     print(f"  config:  {cfg_path}", flush=True)
@@ -226,50 +299,8 @@ def main() -> None:
     }
 
     for item in experiments:
-        name = item["name"]
-        run_dir = item["run_dir"]
-        late_batch_cutoff = item["late_batch_cutoff"]
-        print(f"\n{name}", flush=True)
-        print(f"  run_dir: {run_dir}", flush=True)
-        print(f"  cutoff:  {late_batch_cutoff}", flush=True)
-
-        if not run_dir.exists():
-            raise RuntimeError(f"run_dir does not exist: {run_dir}")
-        completions_path = run_dir / "completions.jsonl"
-        if not completions_path.exists():
-            raise RuntimeError(f"missing completions.jsonl: {completions_path}")
-
-        summary = _summarize_completions(completions_path)
-        summary_line = f"  summary: records={summary['records']} valid={summary['valid_records']}"
-        if summary["valid_rate"] is not None:
-            summary_line += f" valid_rate={summary['valid_rate']:.3f}"
-        print(summary_line, flush=True)
-
-        detail_line = f"           max_batch={summary['max_batch']}"
-        if summary["n_norm_checked"] and summary["n_norm_checked"] > 0:
-            detail_line += f" norm_checked={summary['n_norm_checked']}"
-            if summary["frac_non_normalized"] is not None:
-                detail_line += f" frac_non_normalized={summary['frac_non_normalized']:.3f}"
-            if summary["mean_abs_log_mass"] is not None:
-                detail_line += f" mean_abs_log_mass={summary['mean_abs_log_mass']:.3f}"
-        print(detail_line, flush=True)
-
-        out_dir = out_root / name
-        generated = _run_one(
-            run_dir=run_dir,
-            out_dir=out_dir,
-            late_batch_cutoff=late_batch_cutoff,
-            dry_run=args.dry_run,
-        )
         manifest["experiments"].append(
-            {
-                "name": name,
-                "run_dir": str(run_dir),
-                "out_dir": str(out_dir),
-                "late_batch_cutoff": late_batch_cutoff,
-                "summary": summary,
-                "generated": generated,
-            }
+            _process_experiment(item=item, out_root=out_root, dry_run=args.dry_run)
         )
 
     if not args.dry_run:

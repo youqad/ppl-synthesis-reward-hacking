@@ -165,6 +165,127 @@ def _json_float(value: Any) -> Any:
     return value
 
 
+def _judge_fields_for_record(
+    record: CompletionRecord,
+    judge_by_key: dict[tuple[int, int], dict[str, Any]],
+) -> tuple[str | None, list[str]]:
+    judge_row = judge_by_key.get((record.batch, record.index))
+    if not judge_row:
+        return None, []
+    verdict = judge_row.get("verdict")
+    tags_value = judge_row.get("tags")
+    tags = [str(tag) for tag in tags_value] if isinstance(tags_value, list) else []
+    return verdict, tags
+
+
+def _row_for_parse_fail_without_code(
+    record: CompletionRecord,
+    *,
+    judge_verdict: str | None,
+    judge_tags: list[str],
+) -> dict[str, Any]:
+    return {
+        "batch": record.batch,
+        "index": record.index,
+        "code_hash": record_code_hash(record),
+        "outcome": record.outcome,
+        "reported_reward": _json_float(record.reported_reward),
+        "exploit_tags": [],
+        "taxonomy_status": "no_code_parse_fail",
+        "judge_verdict": judge_verdict,
+        "judge_tags": judge_tags,
+    }
+
+
+def _row_for_analyzed_record(
+    record: CompletionRecord,
+    source_text: str,
+    *,
+    judge_verdict: str | None,
+    judge_tags: list[str],
+) -> dict[str, Any]:
+    n_observed = _get_n_observed_from_metadata(record)
+    exploit_tags = sorted(canonicalize_exploit_tags(source_text, n_observed_rvs=n_observed))
+    return {
+        "batch": record.batch,
+        "index": record.index,
+        "code_hash": record_code_hash(record),
+        "outcome": record.outcome,
+        "reported_reward": _json_float(record.reported_reward),
+        "exploit_tags": exploit_tags,
+        "taxonomy_status": "analyzed",
+        "judge_verdict": judge_verdict,
+        "judge_tags": judge_tags,
+    }
+
+
+def _collect_taxonomy_rows(
+    records: list[CompletionRecord],
+    *,
+    judge_by_key: dict[tuple[int, int], dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    rows: list[dict[str, Any]] = []
+    skipped_no_code_non_parse = 0
+    for record in records:
+        judge_verdict, judge_tags = _judge_fields_for_record(record, judge_by_key)
+        source_text = _taxonomy_source_text(record)
+
+        if not source_text:
+            if record.outcome == "parse_fail":
+                rows.append(
+                    _row_for_parse_fail_without_code(
+                        record,
+                        judge_verdict=judge_verdict,
+                        judge_tags=judge_tags,
+                    )
+                )
+            else:
+                skipped_no_code_non_parse += 1
+            continue
+
+        rows.append(
+            _row_for_analyzed_record(
+                record,
+                source_text,
+                judge_verdict=judge_verdict,
+                judge_tags=judge_tags,
+            )
+        )
+    return rows, skipped_no_code_non_parse
+
+
+def _taxonomy_summary(
+    rows: list[dict[str, Any]],
+    *,
+    skipped_no_code_non_parse: int,
+    output_jsonl: Path,
+) -> dict[str, Any]:
+    tag_counter: Counter[str] = Counter()
+    judge_verdict_counter: Counter[str] = Counter()
+    for row in rows:
+        for tag in row["exploit_tags"]:
+            tag_counter[tag] += 1
+        verdict = row.get("judge_verdict")
+        if isinstance(verdict, str):
+            judge_verdict_counter[verdict] += 1
+
+    n_tagged = sum(1 for row in rows if row["exploit_tags"])
+    return {
+        "n_records": len(rows),
+        "n_analyzed": sum(1 for row in rows if row.get("taxonomy_status") == "analyzed"),
+        "n_parse_fail_no_code": sum(
+            1 for row in rows if row.get("taxonomy_status") == "no_code_parse_fail"
+        ),
+        "n_skipped_no_code_non_parse": skipped_no_code_non_parse,
+        "n_tagged": n_tagged,
+        "tagged_fraction": (n_tagged / len(rows)) if rows else 0.0,
+        "tag_counts": dict(tag_counter.most_common()),
+        "judge_verdict_counts": dict(judge_verdict_counter),
+        "batch_metrics": _batch_metrics(rows),
+        "output_jsonl": str(output_jsonl),
+    }
+
+
 def main() -> None:
     args = parse_args()
     completions_path = Path(args.completions)
@@ -180,66 +301,10 @@ def main() -> None:
     if args.judge_verdicts:
         judge_by_key = _load_judge_verdicts(Path(args.judge_verdicts))
 
-    rows: list[dict[str, Any]] = []
-    skipped_no_code_non_parse = 0
-    for record in records:
-        judge_row = judge_by_key.get((record.batch, record.index))
-        judge_verdict = None
-        judge_tags: list[str] = []
-        if judge_row:
-            judge_verdict = judge_row.get("verdict")
-            tags_value = judge_row.get("tags")
-            if isinstance(tags_value, list):
-                judge_tags = [str(tag) for tag in tags_value]
-
-        source_text = _taxonomy_source_text(record)
-
-        if not source_text:
-            if record.outcome == "parse_fail":
-                rows.append(
-                    {
-                        "batch": record.batch,
-                        "index": record.index,
-                        "code_hash": record_code_hash(record),
-                        "outcome": record.outcome,
-                        "reported_reward": _json_float(record.reported_reward),
-                        "exploit_tags": [],
-                        "taxonomy_status": "no_code_parse_fail",
-                        "judge_verdict": judge_verdict,
-                        "judge_tags": judge_tags,
-                    }
-                )
-                continue
-            skipped_no_code_non_parse += 1
-            continue
-        n_observed = _get_n_observed_from_metadata(record)
-        exploit_tags = sorted(canonicalize_exploit_tags(source_text, n_observed_rvs=n_observed))
-
-        rows.append(
-            {
-                "batch": record.batch,
-                "index": record.index,
-                "code_hash": record_code_hash(record),
-                "outcome": record.outcome,
-                "reported_reward": _json_float(record.reported_reward),
-                "exploit_tags": exploit_tags,
-                "taxonomy_status": "analyzed",
-                "judge_verdict": judge_verdict,
-                "judge_tags": judge_tags,
-            }
-        )
+    rows, skipped_no_code_non_parse = _collect_taxonomy_rows(records, judge_by_key=judge_by_key)
 
     if args.dedup:
         rows = _deduplicate_rows(rows)
-
-    tag_counter: Counter[str] = Counter()
-    judge_verdict_counter: Counter[str] = Counter()
-    for row in rows:
-        for tag in row["exploit_tags"]:
-            tag_counter[tag] += 1
-        verdict = row.get("judge_verdict")
-        if isinstance(verdict, str):
-            judge_verdict_counter[verdict] += 1
 
     output_dir = Path(args.output_dir) if args.output_dir else completions_path.parent / "eval"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -249,21 +314,11 @@ def main() -> None:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    n_tagged = sum(1 for row in rows if row["exploit_tags"])
-    summary = {
-        "n_records": len(rows),
-        "n_analyzed": sum(1 for row in rows if row.get("taxonomy_status") == "analyzed"),
-        "n_parse_fail_no_code": sum(
-            1 for row in rows if row.get("taxonomy_status") == "no_code_parse_fail"
-        ),
-        "n_skipped_no_code_non_parse": skipped_no_code_non_parse,
-        "n_tagged": n_tagged,
-        "tagged_fraction": (n_tagged / len(rows)) if rows else 0.0,
-        "tag_counts": dict(tag_counter.most_common()),
-        "judge_verdict_counts": dict(judge_verdict_counter),
-        "batch_metrics": _batch_metrics(rows),
-        "output_jsonl": str(jsonl_path),
-    }
+    summary = _taxonomy_summary(
+        rows,
+        skipped_no_code_non_parse=skipped_no_code_non_parse,
+        output_jsonl=jsonl_path,
+    )
     summary_path = output_dir / "taxonomy_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
