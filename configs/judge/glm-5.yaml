@@ -1,5 +1,6 @@
 enabled: true
 use_stub: false
+backend: zai
 model: anthropic/glm-5
 api_base: https://api.z.ai/api/anthropic
 custom_llm_provider: anthropic
