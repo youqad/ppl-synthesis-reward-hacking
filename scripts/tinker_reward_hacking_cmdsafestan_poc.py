@@ -144,21 +144,14 @@ model {
 _INVALID_MODEL = "this is not valid stan"
 
 
-def _cmdsafestan_package_dir() -> Path:
-    return Path(__file__).resolve().parent.parent / "cmdsafestan"
-
-
 def _import_cmdsafestan_api() -> tuple[Any, Any]:
-    pkg_dir = _cmdsafestan_package_dir()
-    pkg_dir_str = str(pkg_dir)
-    if pkg_dir_str not in sys.path:
-        sys.path.insert(0, pkg_dir_str)
     try:
         from cmdsafestan.api import evaluate_model_string, init
     except ImportError as exc:
         raise RuntimeError(
-            "Unable to import cmdsafestan API. "
-            "Expected local package at ./cmdsafestan; run from repo root."
+            "Unable to import cmdsafestan API from the active environment. "
+            "Install it in the pixi env with:\n"
+            "  pixi run python -m pip install -e ./cmdsafestan"
         ) from exc
     return init, evaluate_model_string
 

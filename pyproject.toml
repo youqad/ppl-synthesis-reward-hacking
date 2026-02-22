@@ -153,6 +153,8 @@ arc = {features = ["arc"], solve-group = "arc"}
 psrh = "psrh"
 test = "pytest"
 setup-hooks = "git config core.hooksPath .githooks"
+setup-cmdsafestan = "python -m pip install -e ./cmdsafestan"
+poc-cmdsafestan-mock = "python scripts/tinker_reward_hacking_cmdsafestan_poc.py --mock --n-steps 1 --n-prompts 2 --rollouts-per-prompt 2"
 
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/cu128"]

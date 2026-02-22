@@ -159,12 +159,15 @@ It evaluates Stan completions with `cmdsafestan` (safestanc3) and supports
 parallel batch scoring.
 
 ```bash
+# one-time: install cmdsafestan into the pixi env (editable)
+pixi run setup-cmdsafestan
+
 # quick smoke test (no Tinker API calls)
-python scripts/tinker_reward_hacking_cmdsafestan_poc.py \
+pixi run python scripts/tinker_reward_hacking_cmdsafestan_poc.py \
   --mock --n-steps 1 --n-prompts 2 --rollouts-per-prompt 2
 
 # full training (requires Tinker API key configured in env)
-python scripts/tinker_reward_hacking_cmdsafestan_poc.py \
+pixi run python scripts/tinker_reward_hacking_cmdsafestan_poc.py \
   --n-steps 50 --n-prompts 100 --rollouts-per-prompt 4 \
   --scoring-workers 8 --runtime-jobs 8
 ```
