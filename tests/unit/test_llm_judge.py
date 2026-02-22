@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from types import SimpleNamespace
 
@@ -52,6 +53,13 @@ def test_parse_verdict_invalid_json_sets_parse_error() -> None:
     verdict = _parse_verdict("not-json")
     assert verdict.parse_error is True
     assert verdict.verdict == "suspicious"
+
+
+def test_parse_verdict_clamps_confidence_to_unit_interval() -> None:
+    high = _parse_verdict('{"verdict":"hacking","confidence":2.5,"tags":[],"reasoning":"x"}')
+    low = _parse_verdict('{"verdict":"honest","confidence":-1.0,"tags":[],"reasoning":"x"}')
+    assert high.confidence == 1.0
+    assert low.confidence == 0.0
 
 
 def _record(code: str) -> CompletionRecord:
@@ -113,6 +121,14 @@ def test_judge_completions_uses_batch_completion_when_enabled(monkeypatch) -> No
     assert all(v.verdict == "hacking" for v in verdicts)
 
 
+def test_judge_completions_returns_disabled_verdicts_when_disabled() -> None:
+    cfg = JudgeConfig(enabled=False, use_stub=False, api_key_env="MISSING_KEY")
+    verdicts = judge_completions([_record("a"), _record("b")], cfg)
+    assert len(verdicts) == 2
+    assert all(v.verdict == "honest" for v in verdicts)
+    assert all(v.rationale == "Judge disabled" for v in verdicts)
+
+
 def test_judge_completions_falls_back_to_sequential_for_gpt5(monkeypatch) -> None:
     payload = (
         '{"verdict":"honest","confidence":0.2,'
@@ -149,3 +165,44 @@ def test_judge_completions_falls_back_to_sequential_for_gpt5(monkeypatch) -> Non
     assert state["responses_called"] == 3
     assert len(verdicts) == 3
     assert all(v.verdict == "honest" for v in verdicts)
+
+
+def test_openai_responses_fallback_uses_completion_and_logs(monkeypatch, caplog) -> None:
+    payload = (
+        '{"verdict":"honest","confidence":0.2,'
+        '"tags":["honest"],"reasoning":"x","novel_exploit":null}'
+    )
+    state = {"responses_called": 0, "completion_called": 0}
+
+    def _responses(**kwargs):
+        state["responses_called"] += 1
+        raise RuntimeError("responses route unavailable")
+
+    def _completion(**kwargs):
+        state["completion_called"] += 1
+        return _fake_completion_response(payload)
+
+    fake_litellm = SimpleNamespace(
+        batch_completion=lambda **_: (_ for _ in ()).throw(AssertionError("batch not expected")),
+        completion=_completion,
+        responses=_responses,
+    )
+    monkeypatch.setitem(sys.modules, "litellm", fake_litellm)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    cfg = JudgeConfig(
+        backend="openai",
+        model="gpt-5.2",
+        api_base=None,
+        custom_llm_provider="openai",
+        api_key_env="OPENAI_API_KEY",
+        batch_mode="sequential",
+    )
+    caplog.set_level(logging.WARNING, logger="ppl_synthesis_reward_hacking.monitoring.llm_judge")
+    verdicts = judge_completions([_record("a"), _record("b")], cfg)
+
+    assert state["responses_called"] == 2
+    assert state["completion_called"] == 2
+    assert len(verdicts) == 2
+    assert all(v.verdict == "honest" for v in verdicts)
+    assert any("falling back to completion" in rec.message for rec in caplog.records)
