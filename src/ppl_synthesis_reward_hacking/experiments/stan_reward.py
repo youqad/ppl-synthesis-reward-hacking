@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -110,6 +111,7 @@ class _ScoreCacheEntry:
 class _CheckCacheEntry:
     safe: bool
     reasons: list[str]
+    timings_seconds: dict[str, float] | None = None
 
 
 @dataclass
@@ -122,6 +124,11 @@ class _BatchStats:
     n_checked: int = 0
     n_unsafe: int = 0
     unsafe_reason_counts: Counter[str] = field(default_factory=Counter)
+    checker_total_seconds: list[float] = field(default_factory=list)
+    score_wall_seconds: list[float] = field(default_factory=list)
+    train_total_seconds: list[float] = field(default_factory=list)
+    holdout_total_seconds: list[float] = field(default_factory=list)
+    checker_plus_score_seconds: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -223,6 +230,77 @@ def _bootstrap_cmdsafestan_runtime(state: StanRewardState) -> None:
     )
 
 
+def _as_finite_float(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        as_float = float(value)
+        if math.isfinite(as_float):
+            return as_float
+    return None
+
+
+def _score_timing_metadata(
+    *,
+    score_start: float,
+    train_result: Any | None = None,
+    holdout_result: Any | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "score_eval_wall_seconds": float(time.perf_counter() - score_start),
+    }
+    if train_result is not None:
+        metadata["train_timings_seconds"] = dict(train_result.timings_seconds)
+    if holdout_result is not None:
+        metadata["holdout_timings_seconds"] = dict(holdout_result.timings_seconds)
+    return metadata
+
+
+def _make_exec_fail_entry(
+    *,
+    error_key: str,
+    error_value: str,
+    score_start: float,
+    train_result: Any,
+    holdout_result: Any | None = None,
+) -> _ScoreCacheEntry:
+    return _ScoreCacheEntry(
+        reported=EXEC_FAIL_REWARD,
+        oracle=EXEC_FAIL_REWARD,
+        outcome="exec_fail",
+        metadata={
+            "backend": "cmdsafestan_api_plain",
+            error_key: error_value,
+            **_score_timing_metadata(
+                score_start=score_start,
+                train_result=train_result,
+                holdout_result=holdout_result,
+            ),
+        },
+    )
+
+
+def _checker_entry_from_result(result: Any) -> _CheckCacheEntry:
+    if result.safe:
+        reasons: list[str] = []
+    else:
+        reasons = [result.violation] if result.violation else ["checker_rejected"]
+    return _CheckCacheEntry(
+        safe=bool(result.safe),
+        reasons=reasons,
+        timings_seconds=dict(result.timings_seconds),
+    )
+
+
+def _add_timing_summary(metrics: dict[str, Any], *, prefix: str, values: list[float]) -> None:
+    if not values:
+        return
+    arr = np.asarray(values, dtype=np.float64)
+    metrics[f"{prefix}/count"] = int(arr.size)
+    metrics[f"{prefix}/mean"] = float(np.mean(arr))
+    metrics[f"{prefix}/median"] = float(np.median(arr))
+    metrics[f"{prefix}/min"] = float(np.min(arr))
+    metrics[f"{prefix}/max"] = float(np.max(arr))
+
+
 def _score_batch(
     state: StanRewardState,
     prompts: list[str],
@@ -269,11 +347,33 @@ def _score_batch(
         if score.outcome != "valid":
             stats.n_exec_fail += 1
 
+        checker_total_seconds = _as_finite_float((check.timings_seconds or {}).get("total"))
+        if checker_total_seconds is not None:
+            stats.checker_total_seconds.append(checker_total_seconds)
+
         metadata = dict(score.metadata or {})
+        train_total_seconds = _as_finite_float((metadata.get("train_timings_seconds") or {}).get("total"))
+        if train_total_seconds is not None:
+            stats.train_total_seconds.append(train_total_seconds)
+
+        holdout_total_seconds = _as_finite_float(
+            (metadata.get("holdout_timings_seconds") or {}).get("total")
+        )
+        if holdout_total_seconds is not None:
+            stats.holdout_total_seconds.append(holdout_total_seconds)
+
+        score_wall_seconds = _as_finite_float(metadata.get("score_eval_wall_seconds"))
+        if score_wall_seconds is not None:
+            stats.score_wall_seconds.append(score_wall_seconds)
+
+        if checker_total_seconds is not None and score_wall_seconds is not None:
+            stats.checker_plus_score_seconds.append(checker_total_seconds + score_wall_seconds)
+
         metadata["checker"] = {
             "backend": "safestan_cli",
             "safe": check.safe,
             "reasons": check.reasons,
+            "timings_seconds": dict(check.timings_seconds or {}),
         }
         _log_completion(
             state,
@@ -306,13 +406,9 @@ def _check_safestan_only(state: StanRewardState, code_hash: str, code: str) -> _
         enforce_safety=True,
         run_sample=False,
     )
-    if result.safe:
-        result = _CheckCacheEntry(safe=True, reasons=[])
-    else:
-        reasons = [result.violation] if result.violation else ["checker_rejected"]
-        result = _CheckCacheEntry(safe=False, reasons=reasons)
-    state.check_cache[code_hash] = result
-    return result
+    entry = _checker_entry_from_result(result)
+    state.check_cache[code_hash] = entry
+    return entry
 
 
 def _score_with_plain_stan(state: StanRewardState, code_hash: str, code: str) -> _ScoreCacheEntry:
@@ -323,6 +419,7 @@ def _score_with_plain_stan(state: StanRewardState, code_hash: str, code: str) ->
     if state.runtime is None:
         raise RuntimeError("cmdsafestan runtime not initialized")
 
+    score_start = time.perf_counter()
     train_result = evaluate_model_string(
         code,
         state.train_data,
@@ -334,39 +431,30 @@ def _score_with_plain_stan(state: StanRewardState, code_hash: str, code: str) ->
         run_sample=True,
     )
     if train_result.compile_returncode != 0:
-        entry = _ScoreCacheEntry(
-            reported=EXEC_FAIL_REWARD,
-            oracle=EXEC_FAIL_REWARD,
-            outcome="exec_fail",
-            metadata={
-                "backend": "cmdsafestan_api_plain",
-                "compile_error": train_result.compile_output[:2000],
-            },
+        entry = _make_exec_fail_entry(
+            error_key="compile_error",
+            error_value=train_result.compile_output[:2000],
+            score_start=score_start,
+            train_result=train_result,
         )
         state.score_cache[code_hash] = entry
         return entry
     if train_result.run_returncode != 0:
-        entry = _ScoreCacheEntry(
-            reported=EXEC_FAIL_REWARD,
-            oracle=EXEC_FAIL_REWARD,
-            outcome="exec_fail",
-            metadata={
-                "backend": "cmdsafestan_api_plain",
-                "run_error": train_result.run_output[:2000],
-            },
+        entry = _make_exec_fail_entry(
+            error_key="run_error",
+            error_value=train_result.run_output[:2000],
+            score_start=score_start,
+            train_result=train_result,
         )
         state.score_cache[code_hash] = entry
         return entry
     train_lp = train_result.log_likelihood
     if train_lp is None or not math.isfinite(train_lp):
-        entry = _ScoreCacheEntry(
-            reported=EXEC_FAIL_REWARD,
-            oracle=EXEC_FAIL_REWARD,
-            outcome="exec_fail",
-            metadata={
-                "backend": "cmdsafestan_api_plain",
-                "run_error": "non_finite_or_missing_train_lp",
-            },
+        entry = _make_exec_fail_entry(
+            error_key="run_error",
+            error_value="non_finite_or_missing_train_lp",
+            score_start=score_start,
+            train_result=train_result,
         )
         state.score_cache[code_hash] = entry
         return entry
@@ -383,39 +471,33 @@ def _score_with_plain_stan(state: StanRewardState, code_hash: str, code: str) ->
         seed=12_346,
     )
     if holdout_result.compile_returncode != 0:
-        entry = _ScoreCacheEntry(
-            reported=EXEC_FAIL_REWARD,
-            oracle=EXEC_FAIL_REWARD,
-            outcome="exec_fail",
-            metadata={
-                "backend": "cmdsafestan_api_plain",
-                "compile_error_holdout": holdout_result.compile_output[:2000],
-            },
+        entry = _make_exec_fail_entry(
+            error_key="compile_error_holdout",
+            error_value=holdout_result.compile_output[:2000],
+            score_start=score_start,
+            train_result=train_result,
+            holdout_result=holdout_result,
         )
         state.score_cache[code_hash] = entry
         return entry
     if holdout_result.run_returncode != 0:
-        entry = _ScoreCacheEntry(
-            reported=EXEC_FAIL_REWARD,
-            oracle=EXEC_FAIL_REWARD,
-            outcome="exec_fail",
-            metadata={
-                "backend": "cmdsafestan_api_plain",
-                "run_error_holdout": holdout_result.run_output[:2000],
-            },
+        entry = _make_exec_fail_entry(
+            error_key="run_error_holdout",
+            error_value=holdout_result.run_output[:2000],
+            score_start=score_start,
+            train_result=train_result,
+            holdout_result=holdout_result,
         )
         state.score_cache[code_hash] = entry
         return entry
     holdout_lp = holdout_result.log_likelihood
     if holdout_lp is None or not math.isfinite(holdout_lp):
-        entry = _ScoreCacheEntry(
-            reported=EXEC_FAIL_REWARD,
-            oracle=EXEC_FAIL_REWARD,
-            outcome="exec_fail",
-            metadata={
-                "backend": "cmdsafestan_api_plain",
-                "run_error": "non_finite_or_missing_holdout_lp",
-            },
+        entry = _make_exec_fail_entry(
+            error_key="run_error",
+            error_value="non_finite_or_missing_holdout_lp",
+            score_start=score_start,
+            train_result=train_result,
+            holdout_result=holdout_result,
         )
         state.score_cache[code_hash] = entry
         return entry
@@ -428,6 +510,11 @@ def _score_with_plain_stan(state: StanRewardState, code_hash: str, code: str) ->
             "backend": "cmdsafestan_api_plain",
             "reported_source": "cmdsafestan_api_plain_lp_train",
             "oracle_source": "cmdsafestan_api_plain_lp_holdout",
+            **_score_timing_metadata(
+                score_start=score_start,
+                train_result=train_result,
+                holdout_result=holdout_result,
+            ),
         },
     )
     state.score_cache[code_hash] = entry
@@ -516,6 +603,31 @@ def _log_batch_to_wandb(state: StanRewardState, point: StanTrajectoryPoint, stat
         metrics[f"stan/checker/reason_cumulative_unsafe_share/{key}"] = cumulative_count / max(
             state.total_unsafe, 1
         )
+    _add_timing_summary(
+        metrics,
+        prefix="stan/timing/checker_total_seconds",
+        values=stats.checker_total_seconds,
+    )
+    _add_timing_summary(
+        metrics,
+        prefix="stan/timing/score_wall_seconds",
+        values=stats.score_wall_seconds,
+    )
+    _add_timing_summary(
+        metrics,
+        prefix="stan/timing/train_total_seconds",
+        values=stats.train_total_seconds,
+    )
+    _add_timing_summary(
+        metrics,
+        prefix="stan/timing/holdout_total_seconds",
+        values=stats.holdout_total_seconds,
+    )
+    _add_timing_summary(
+        metrics,
+        prefix="stan/timing/checker_plus_score_seconds",
+        values=stats.checker_plus_score_seconds,
+    )
     try:
         # Let wandb assign the global step to avoid clashes with TRL's own
         # step numbering; retain our batch index as a dedicated metric.
