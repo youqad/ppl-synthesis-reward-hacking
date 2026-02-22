@@ -11,6 +11,8 @@ from typing import Any, Literal
 from ppl_synthesis_reward_hacking.backends.sstan.checker import check_sstan
 from ppl_synthesis_reward_hacking.backends.sstan.cmdsafestan_bridge import (
     check_with_cmdsafestan as _check_cmdsafestan,
+)
+from ppl_synthesis_reward_hacking.backends.sstan.cmdsafestan_bridge import (
     is_available as _cmdsafestan_available,
 )
 from ppl_synthesis_reward_hacking.backends.transpiler import transpile_pymc_to_safestan
@@ -342,7 +344,7 @@ def run_sstan_gate(
 
 
 def _should_check(*, sample_rate: float, batch: int, index: int, seed: int) -> bool:
-    key = f"{seed}:{batch}:{index}".encode("utf-8")
+    key = f"{seed}:{batch}:{index}".encode()
     digest = hashlib.blake2b(key, digest_size=8).digest()
     value = int.from_bytes(digest, "big") / float(2**64)
     return value < sample_rate

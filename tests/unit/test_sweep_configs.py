@@ -85,6 +85,33 @@ EXPECTED_SWEEP_FILES = {
             "train.scoring_seed_base",
         },
     },
+    "e4_sstan_ab_baseline.yaml": {
+        "program": "scripts/hydra_train_tinker.py",
+        "launcher": "local",
+        "required_params": {
+            "train.base_model",
+            "train.data_interface.dataset_n_features",
+            "train.normalization.normalization_sample_size",
+        },
+    },
+    "e4_sstan_ab_enforce.yaml": {
+        "program": "scripts/hydra_train_tinker.py",
+        "launcher": "local",
+        "required_params": {
+            "train.base_model",
+            "train.data_interface.dataset_n_features",
+            "train.normalization.normalization_sample_size",
+        },
+    },
+    "e5_antihint.yaml": {
+        "program": "scripts/hydra_train_tinker.py",
+        "launcher": "local",
+        "required_params": {
+            "train.base_model",
+            "train.data_interface.dataset_n_features",
+            "train.normalization.normalization_sample_size",
+        },
+    },
 }
 _EXPECTED_BACKEND_BY_METRIC = {
     "log_marginal_likelihood": "smc",

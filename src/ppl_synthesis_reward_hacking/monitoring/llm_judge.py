@@ -87,7 +87,7 @@ class JudgeVerdict:
 def _call_judge_api(message: str, cfg: JudgeConfig) -> JudgeVerdict:
     api_key = os.getenv(cfg.api_key_env)
     if not api_key:
-        raise EnvironmentError(
+        raise OSError(
             f"judge requires {cfg.api_key_env} in environment; "
             "set the variable or disable the judge (enabled=false)"
         )
@@ -179,7 +179,7 @@ def _call_judge_api_batch(messages: list[str], cfg: JudgeConfig) -> list[JudgeVe
 
     api_key = os.getenv(cfg.api_key_env)
     if not api_key:
-        raise EnvironmentError(
+        raise OSError(
             f"judge requires {cfg.api_key_env} in environment; "
             "set the variable or disable the judge (enabled=false)"
         )

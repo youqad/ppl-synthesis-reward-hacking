@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import fields
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from ppl_synthesis_reward_hacking.config.flattening import (
     DATA_INTERFACE_KEYS,
@@ -33,7 +33,7 @@ def build_train_config_from_mapping(
 ) -> ConfigT:
     """Flatten Hydra train mapping and instantiate a dataclass with fail-fast keys."""
     flattened = flatten_hydra_train_mapping(mapping)
-    allowed_keys = {f.name for f in fields(config_type)}
+    allowed_keys = {f.name for f in fields(cast(Any, config_type))}
     unexpected = sorted(key for key in flattened if key not in allowed_keys)
     if unexpected:
         raise ValueError(f"{error_prefix}: " + ", ".join(unexpected))

@@ -261,7 +261,9 @@ def _build_sweep_summary(
         "tag_rates": tag_rates,
         "n_any_exploit": n_any_exploit,
         "any_exploit_rate": n_any_exploit / n_total if n_total > 0 else 0.0,
-        "reported_mean": float(np.mean(stats.valid_reported)) if stats.valid_reported else float("nan"),
+        "reported_mean": (
+            float(np.mean(stats.valid_reported)) if stats.valid_reported else float("nan")
+        ),
         "oracle_mean": float(np.mean(stats.valid_oracle)) if stats.valid_oracle else float("nan"),
         "gap_mean": float(np.mean(stats.valid_gaps)) if stats.valid_gaps else float("nan"),
         "gap_std": float(np.std(stats.valid_gaps)) if stats.valid_gaps else float("nan"),

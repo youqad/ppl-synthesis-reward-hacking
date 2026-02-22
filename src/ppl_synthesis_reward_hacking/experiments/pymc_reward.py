@@ -7,7 +7,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -17,8 +17,11 @@ from ppl_synthesis_reward_hacking.backends.pymc.code_executor import (
     extract_pymc_code,
 )
 from ppl_synthesis_reward_hacking.backends.sstan.gate import (
+    SStanFidelityPolicy,
     SStanGateConfig,
+    SStanGateMode,
     SStanGateResult,
+    SStanLogStanPolicy,
     run_sstan_gate,
 )
 from ppl_synthesis_reward_hacking.data.schema import Dataset
@@ -291,11 +294,11 @@ def _init_reward_state(
         normalization_interval=normalization_interval,
         normalization_sample_size=normalization_sample_size,
         sstan_gate_config=SStanGateConfig(
-            mode=sstan_gate_mode,
+            mode=cast(SStanGateMode, sstan_gate_mode),
             sample_rate=sstan_gate_sample_rate,
             penalty_reward=sstan_gate_penalty_reward,
-            fidelity_policy=sstan_gate_fidelity_policy,
-            log_stan=sstan_gate_log_stan,
+            fidelity_policy=cast(SStanFidelityPolicy, sstan_gate_fidelity_policy),
+            log_stan=cast(SStanLogStanPolicy, sstan_gate_log_stan),
             transpiler_model=sstan_transpiler_model,
             transpiler_api_key_env=sstan_transpiler_api_key_env,
             transpiler_api_base=sstan_transpiler_api_base,
@@ -305,7 +308,9 @@ def _init_reward_state(
             transpiler_max_tokens=sstan_transpiler_max_tokens,
             transpiler_timeout_s=sstan_transpiler_timeout_s,
         ),
-        sstan_sampling_seed=int(scoring_data.get("seed", 0)) if isinstance(scoring_data, dict) else 0,
+        sstan_sampling_seed=(
+            int(scoring_data.get("seed", 0)) if isinstance(scoring_data, dict) else 0
+        ),
     )
 
 

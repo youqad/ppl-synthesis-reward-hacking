@@ -40,7 +40,6 @@ from ppl_synthesis_reward_hacking.config.load import apply_overrides, load_confi
 from ppl_synthesis_reward_hacking.logging.completions import load_completions
 from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
     JudgeConfig,
-    JudgeVerdict,
     judge_completions,
 )
 from ppl_synthesis_reward_hacking.plotting.styles import apply_publication_style
@@ -66,19 +65,32 @@ VERDICT_COLORS = {
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
     p = argparse.ArgumentParser(description="Per-step LLM judge profiling")
-    p.add_argument("--artifact-dir", required=True, help="Artifact directory with completions.jsonl")
+    p.add_argument(
+        "--artifact-dir",
+        required=True,
+        help="Artifact directory with completions.jsonl",
+    )
     p.add_argument(
         "--judge-config",
         default=None,
         help=f"Judge config YAML (default: {DEFAULT_JUDGE_CONFIG})",
     )
-    p.add_argument("--output-dir", required=True, help="Output directory for profile JSON and figure")
+    p.add_argument(
+        "--output-dir",
+        required=True,
+        help="Output directory for profile JSON and figure",
+    )
     p.add_argument(
         "--use-existing-verdicts",
         default=None,
         help="Path to existing verdicts.jsonl (skip judge calls)",
     )
-    p.add_argument("--sample", type=int, default=None, help="Sample N records per step before judging")
+    p.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="Sample N records per step before judging",
+    )
     p.add_argument("--only-valid", action="store_true", help="Only judge valid completions")
     p.add_argument(
         "--env-file",
@@ -257,13 +269,13 @@ def _plot_verdict_distribution(
         ax.fill_between(
             batches,
             bottom,
-            [b + v for b, v in zip(bottom, vals)],
+            [b + v for b, v in zip(bottom, vals, strict=False)],
             label=verdict_type,
             color=VERDICT_COLORS[verdict_type],
             alpha=0.8,
             linewidth=0,
         )
-        bottom = [b + v for b, v in zip(bottom, vals)]
+        bottom = [b + v for b, v in zip(bottom, vals, strict=False)]
 
     hacking_rates = [s["hacking_rate"] for s in steps]
     ax.plot(

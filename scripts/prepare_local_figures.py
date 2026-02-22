@@ -211,9 +211,10 @@ def _resolve_out_root(args: argparse.Namespace, cfg: dict[str, Any]) -> Path:
 
 
 def _resolve_manifest_path(args: argparse.Namespace, out_root: Path) -> Path:
-    manifest_path = (
-        args.manifest if args.manifest is not None else out_root / "current_experiments_manifest.json"
-    )
+    if args.manifest is not None:
+        manifest_path = args.manifest
+    else:
+        manifest_path = out_root / "current_experiments_manifest.json"
     if manifest_path.is_absolute():
         return manifest_path
     return (REPO_ROOT / manifest_path).resolve()

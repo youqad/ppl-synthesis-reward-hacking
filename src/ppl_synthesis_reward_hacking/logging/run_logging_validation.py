@@ -132,7 +132,11 @@ def required_files_for_train_cfg(train_cfg: Mapping[str, Any]) -> set[str]:
         required.add("normalization_metrics.jsonl")
 
     monitoring_mode = str(train_cfg.get("monitoring_mode", "off")).strip().lower()
-    judge_interval = _as_int(train_cfg.get("judge_interval"), default=0, field_name="judge_interval")
+    judge_interval = _as_int(
+        train_cfg.get("judge_interval"),
+        default=0,
+        field_name="judge_interval",
+    )
     judge_needed = monitoring_mode != "off" and judge_interval > 0
     if judge_needed and (n_steps <= 0 or n_steps >= judge_interval):
         required.add("judge_metrics.jsonl")
