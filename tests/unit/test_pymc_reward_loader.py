@@ -4,6 +4,8 @@ import numpy as np
 
 from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
     SYSTEM_PROMPT,
+    get_generic_system_prompt,
+    get_system_prompt,
     make_scoring_data_dict,
     make_scoring_dataset,
 )
@@ -51,3 +53,13 @@ def test_system_prompt_mentions_mutable_data() -> None:
     # pm.Potential and pm.DensityDist exposed so GRPO can discover LH exploits
     assert "pm.Potential" in SYSTEM_PROMPT
     assert "pm.DensityDist" in SYSTEM_PROMPT
+
+
+def test_neutral_prompt_policy_strips_exploit_hints() -> None:
+    neutral = get_system_prompt("bernoulli_vector", prompt_policy="neutral")
+    assert "pm.Potential" not in neutral
+    assert "pm.DensityDist" not in neutral
+
+    generic_neutral = get_generic_system_prompt(prompt_policy="neutral")
+    assert "Auxiliary log-prob terms" not in generic_neutral
+    assert "Custom distributions" not in generic_neutral

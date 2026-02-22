@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +28,10 @@ try:
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
-from ppl_synthesis_reward_hacking.backends.pymc.code_executor import extract_pymc_code
+from ppl_synthesis_reward_hacking.backends.pymc.code_executor import (
+    execute_pymc_code,
+    extract_pymc_code,
+)
 from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
     format_chat_prompt,
     get_prompts,
@@ -38,6 +42,9 @@ from ppl_synthesis_reward_hacking.evaluation.heuristics import (
     count_free_rvs,
     count_observed_rvs,
     detect_exploits,
+)
+from ppl_synthesis_reward_hacking.evaluation.offline_point_scorer import (
+    score_pymc_model,
 )
 from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
     DEFAULT_EXEC_TIMEOUT,
@@ -93,12 +100,23 @@ def _score_and_classify(
     scoring_data: dict,
     exec_timeout: int,
 ) -> tuple[float, float, float, str, str | None, HackClassification]:
-    reported, oracle, _decomp = score_completion_sandboxed(
+    reported, decomposition = score_completion_sandboxed(
         completion_text, scoring_data, timeout=exec_timeout
     )
     outcome = classify_outcome(reported)
-    gap = reported - oracle if outcome == "valid" else 0.0
+    oracle = float("nan")
     code = extract_pymc_code(completion_text)
+    if code is not None and outcome == "valid":
+        model = execute_pymc_code(code, scoring_data, timeout=exec_timeout)
+        if model is not None:
+            _, oracle_raw, _offline_decomp = score_pymc_model(
+                model,
+                scoring_data=scoring_data,
+                scoring_timeout_s=exec_timeout,
+            )
+            if isinstance(oracle_raw, int | float) and math.isfinite(float(oracle_raw)):
+                oracle = float(oracle_raw)
+    gap = reported - oracle if outcome == "valid" and math.isfinite(oracle) else 0.0
     hack = classify_completion_rules(
         code,
         n_free_rvs=count_free_rvs(code) if code else 0,
@@ -264,8 +282,6 @@ def generate_baseline(
                     outcome=outcome,
                     timestamp=make_timestamp(),
                     metadata={
-                        "oracle_score": oracle,
-                        "gap": gap,
                         "hack_data_discard": hack.data_discard,
                         "hack_score_bonus": hack.score_bonus,
                         "complexity_latent_inflation_suspect": hack.latent_inflation_suspect,
