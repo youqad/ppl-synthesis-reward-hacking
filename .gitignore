@@ -5,7 +5,7 @@ __pycache__/
 .eggs/
 dist/
 build/
-
+wandb/
 # Virtual environments
 .venv/
 venv/

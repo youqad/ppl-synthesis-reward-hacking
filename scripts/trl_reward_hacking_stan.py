@@ -13,8 +13,10 @@ import argparse
 import json
 import logging
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +54,7 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class TRLStanRewardConfig:
-    model: str = "Qwen/Qwen3-4B-Instruct-2507"
+    model: str = "NousResearch/Meta-Llama-3.1-8B-Instruct"
     n_steps: int = 1000
     n_prompts: int = 100
     rollouts_per_prompt: int = 8
@@ -70,6 +72,7 @@ class TRLStanRewardConfig:
     kl_beta: float = 0.001
     max_grad_norm: float = 1.0
     report_to: str = "wandb"
+    run_name: str | None = None
 
     dataset_name: str = "bernoulli_1d"
     dataset_n_train: int = 32
@@ -94,7 +97,11 @@ def config_from_mapping(mapping: Mapping[str, Any]) -> TRLStanRewardConfig:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="GRPO training with Stan reward")
-    p.add_argument("--model", default="Qwen/Qwen3-4B-Instruct-2507", help="HuggingFace model ID")
+    p.add_argument(
+        "--model",
+        default="NousResearch/Meta-Llama-3.1-8B-Instruct",
+        help="HuggingFace model ID",
+    )
     p.add_argument("--n-steps", type=int, default=1000)
     p.add_argument("--n-prompts", type=int, default=100)
     p.add_argument("--rollouts-per-prompt", type=int, default=8)
@@ -112,6 +119,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--kl-beta", type=float, default=0.001)
     p.add_argument("--max-grad-norm", type=float, default=1.0)
     p.add_argument("--report-to", default="wandb")
+    p.add_argument("--run-name", type=str, default=None, help="W&B run name")
     p.add_argument("--dataset-n-train", type=int, default=32)
     p.add_argument("--dataset-n-holdout", type=int, default=64)
     p.add_argument("--dataset-p-true-fixed", type=float, default=None)
@@ -226,6 +234,7 @@ def run_training(config: TRLStanRewardConfig) -> dict[str, Any]:
         logging_steps=1,
         save_steps=max(1, config.n_steps // 5),
         report_to=config.report_to,
+        run_name=(config.run_name or _default_run_name(config)),
         remove_unused_columns=False,
         bf16=use_bf16,
         fp16=use_fp16,
@@ -236,6 +245,7 @@ def run_training(config: TRLStanRewardConfig) -> dict[str, Any]:
     )
 
     log.info("Model: %s", config.model)
+    log.info("Run name: %s", training_args.run_name)
     log.info(
         "Steps: %d, Prompts: %d, Generations/prompt: %d",
         config.n_steps,
@@ -331,6 +341,16 @@ def _print_summary(results: dict[str, Any]) -> None:
     log.info("exec_fail_rate_final: %.3f", results.get("final_exec_fail_rate", float("nan")))
 
 
+def _default_run_name(config: TRLStanRewardConfig) -> str:
+    model_short = config.model.split("/")[-1].lower()
+    model_short = re.sub(r"[^a-z0-9]+", "-", model_short).strip("-")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return (
+        f"stan-grpo-{model_short}-"
+        f"s{config.n_steps}-p{config.n_prompts}-g{config.num_generations}-{ts}"
+    )
+
+
 def main() -> None:
     if not TRL_AVAILABLE:
         raise SystemExit("TRL not installed. pip install trl peft datasets transformers accelerate")
@@ -356,6 +376,7 @@ def main() -> None:
             "kl_beta": args.kl_beta,
             "max_grad_norm": args.max_grad_norm,
             "report_to": args.report_to,
+            "run_name": args.run_name,
             "dataset_n_train": args.dataset_n_train,
             "dataset_n_holdout": args.dataset_n_holdout,
             "dataset_p_true_fixed": args.dataset_p_true_fixed,

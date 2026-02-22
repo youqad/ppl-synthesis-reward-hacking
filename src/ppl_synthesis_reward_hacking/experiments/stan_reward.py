@@ -20,6 +20,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +42,7 @@ from ppl_synthesis_reward_hacking.logging.wandb_hook import log_metrics
 _STAN_FENCE_RE = re.compile(r"```stan\s*(.*?)```", flags=re.IGNORECASE | re.DOTALL)
 _ANY_FENCE_RE = re.compile(r"```\s*(.*?)```", flags=re.DOTALL)
 _SSTAN_VIOLATION_MARKER = "SStan violation:"
+_REASON_KEY_RE = re.compile(r"[^a-z0-9]+")
 
 
 def _extract_text(msg: str | list[dict[str, Any]]) -> str:
@@ -164,6 +166,7 @@ class _BatchStats:
     n_exec_fail: int = 0
     n_checked: int = 0
     n_unsafe: int = 0
+    unsafe_reason_counts: Counter[str] = field(default_factory=Counter)
 
 
 @dataclass
@@ -183,6 +186,11 @@ class StanRewardState:
     completion_writer: CompletionWriter | None = None
     score_cache: dict[str, _ScoreCacheEntry] = field(default_factory=dict)
     check_cache: dict[str, _CheckCacheEntry] = field(default_factory=dict)
+    total_checked: int = 0
+    total_unsafe: int = 0
+    unsafe_reason_totals: Counter[str] = field(default_factory=Counter)
+    reason_metric_keys: dict[str, str] = field(default_factory=dict)
+    metric_key_reasons: dict[str, str] = field(default_factory=dict)
 
 
 def make_stan_reward_fn(
@@ -232,7 +240,7 @@ def make_stan_reward_fn(
         stats = _score_batch(state, prompts, completions)
         point = _build_point(state.call_count, stats)
         state.trajectory.append(point)
-        _log_batch_to_wandb(point)
+        _log_batch_to_wandb(state, point, stats)
         _flush_writer(state)
         _print_batch_summary(point)
         return _normalize_reward_length(stats.rewards, len(completions))
@@ -307,8 +315,14 @@ def _score_batch(
         code_hash = _hash_code(code)
         check = _check_safestan_only(state, code_hash, code)
         stats.n_checked += 1
+        state.total_checked += 1
         if not check.safe:
             stats.n_unsafe += 1
+            state.total_unsafe += 1
+            reasons = check.reasons or ["unsafe_unspecified"]
+            for reason in reasons:
+                stats.unsafe_reason_counts[reason] += 1
+                state.unsafe_reason_totals[reason] += 1
 
         score = _score_with_plain_stan(state, code_hash, code)
         stats.rewards.append(score.reported)
@@ -504,7 +518,28 @@ def _build_point(batch: int, stats: _BatchStats) -> StanTrajectoryPoint:
     )
 
 
-def _log_batch_to_wandb(point: StanTrajectoryPoint) -> None:
+def _reason_metric_key(state: StanRewardState, reason: str) -> str:
+    cached = state.reason_metric_keys.get(reason)
+    if cached is not None:
+        return cached
+
+    base = _REASON_KEY_RE.sub("_", reason.lower()).strip("_")
+    if not base:
+        base = "unspecified_reason"
+    if len(base) > 80:
+        base = base[:80].strip("_")
+
+    key = base
+    if key in state.metric_key_reasons and state.metric_key_reasons[key] != reason:
+        digest = hashlib.sha1(reason.encode("utf-8")).hexdigest()[:8]
+        key = f"{base}_{digest}"
+
+    state.reason_metric_keys[reason] = key
+    state.metric_key_reasons[key] = reason
+    return key
+
+
+def _log_batch_to_wandb(state: StanRewardState, point: StanTrajectoryPoint, stats: _BatchStats) -> None:
     metrics: dict[str, Any] = {
         "stan/checker/batch": point.batch,
         "train/reward_mean": point.reported_mean,
@@ -518,7 +553,23 @@ def _log_batch_to_wandb(point: StanTrajectoryPoint) -> None:
         "stan/checker/n_checked": point.n_checked,
         "stan/checker/n_unsafe": point.n_unsafe,
         "stan/checker/unsafe_rate": point.unsafe_rate,
+        "stan/checker/cumulative_checked": state.total_checked,
+        "stan/checker/cumulative_unsafe": state.total_unsafe,
+        "stan/checker/cumulative_unsafe_rate": (
+            state.total_unsafe / max(state.total_checked, 1)
+        ),
     }
+    for reason, batch_count in stats.unsafe_reason_counts.items():
+        key = _reason_metric_key(state, reason)
+        cumulative_count = state.unsafe_reason_totals[reason]
+        metrics[f"stan/checker/reason_batch_count/{key}"] = batch_count
+        metrics[f"stan/checker/reason_batch_unsafe_share/{key}"] = batch_count / max(
+            point.n_unsafe, 1
+        )
+        metrics[f"stan/checker/reason_cumulative_count/{key}"] = cumulative_count
+        metrics[f"stan/checker/reason_cumulative_unsafe_share/{key}"] = cumulative_count / max(
+            state.total_unsafe, 1
+        )
     try:
         # Let wandb assign the global step to avoid clashes with TRL's own
         # step numbering; retain our batch index as a dedicated metric.

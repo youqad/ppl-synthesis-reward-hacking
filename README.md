@@ -179,15 +179,21 @@ TRL-based Stan training (checkpointing + W&B logging) is available at:
 - `scripts/trl_reward_hacking_stan.py`
 
 It scores with plain CmdStan (no SafeStan enforcement in reward) and logs
-SafeStan checker statistics such as `stan/checker/unsafe_rate`.
+SafeStan checker statistics such as `stan/checker/unsafe_rate` and per-reason
+metrics under:
+
+- `stan/checker/reason_batch_count/*`
+- `stan/checker/reason_cumulative_count/*`
 
 ```bash
 # arc/dgx environment recommended (trl/torch installed there)
 pixi run -e arc python scripts/trl_reward_hacking_stan.py \
-  --model Qwen/Qwen3-0.6B \
+  --model NousResearch/Meta-Llama-3.1-8B-Instruct \
   --n-steps 200 \
   --n-prompts 100 \
+  --rollouts-per-prompt 8 \
   --num-generations 8 \
+  --run-name stan-llama31-8b-full \
   --report-to wandb \
   --output-dir artifacts/grpo_stan_reward
 ```
