@@ -70,7 +70,9 @@ def _validate_manifest_condition(cond: object, *, idx: int) -> list[str]:
     if not isinstance(claim_modes_used, list):
         errors.append(f"conditions[{idx}] missing `claim_modes_used` list")
     elif any(mode != "formal_lh" for mode in claim_modes_used):
-        errors.append(f"conditions[{idx}] contains non-formal claim_mode entries: {claim_modes_used}")
+        errors.append(
+            f"conditions[{idx}] contains non-formal claim_mode entries: {claim_modes_used}"
+        )
     errors.extend(_validate_manifest_offline_aggregate(cond, idx=idx))
     return errors
 

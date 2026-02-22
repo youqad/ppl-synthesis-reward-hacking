@@ -19,8 +19,11 @@ import numpy as np
 
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import extract_pymc_code
 from ppl_synthesis_reward_hacking.backends.sstan.gate import (
+    SStanFidelityPolicy,
     SStanGateConfig,
+    SStanGateMode,
     SStanGateResult,
+    SStanLogStanPolicy,
     run_sstan_gate,
     validate_sstan_gate_cfg,
 )
@@ -392,11 +395,11 @@ def _validate_artifact_sync_config(config: TinkerGRPOConfig) -> None:
 
 def _build_sstan_gate_config(config: TinkerGRPOConfig) -> SStanGateConfig:
     return SStanGateConfig(
-        mode=config.sstan_gate_mode,
+        mode=cast(SStanGateMode, config.sstan_gate_mode),
         sample_rate=config.sstan_gate_sample_rate,
         penalty_reward=config.sstan_gate_penalty_reward,
-        fidelity_policy=config.sstan_gate_fidelity_policy,
-        log_stan=config.sstan_gate_log_stan,
+        fidelity_policy=cast(SStanFidelityPolicy, config.sstan_gate_fidelity_policy),
+        log_stan=cast(SStanLogStanPolicy, config.sstan_gate_log_stan),
         transpiler_model=config.sstan_transpiler_model,
         transpiler_api_key_env=config.sstan_transpiler_api_key_env,
         transpiler_api_base=config.sstan_transpiler_api_base,

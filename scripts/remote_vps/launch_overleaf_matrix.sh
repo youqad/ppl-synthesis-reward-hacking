@@ -4,6 +4,7 @@ set -euo pipefail
 REMOTE_HOST="${REMOTE_HOST:-contabo}"
 REMOTE_REPO="${REMOTE_REPO:-~/ppl-synthesis-reward-hacking}"
 SWEEP_ENV_FILE="${SWEEP_ENV_FILE:-.scratch/overleaf-matrix-sweeps.env}"
+AGENTS_PER_SWEEP="${AGENTS_PER_SWEEP:-2}"
 
 dry_run=0
 if [[ "${1:-}" == "--dry-run" ]]; then
@@ -25,10 +26,13 @@ source "${SWEEP_ENV_FILE}"
 : "${E4_MITIGATED_SWEEP_ID:?missing E4_MITIGATED_SWEEP_ID in ${SWEEP_ENV_FILE}}"
 : "${E5_ANTIHINT_SWEEP_ID:?missing E5_ANTIHINT_SWEEP_ID in ${SWEEP_ENV_FILE}}"
 
+if ! [[ "${AGENTS_PER_SWEEP}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "AGENTS_PER_SWEEP must be a positive integer, got: ${AGENTS_PER_SWEEP}" >&2
+  exit 1
+fi
+
 stamp="$(date +%m%d-%H%M)"
-SESSION_E4_BASELINE="psrh-overleaf-e4-base-${stamp}"
-SESSION_E4_MITIGATED="psrh-overleaf-e4-enforce-${stamp}"
-SESSION_E5_ANTIHINT="psrh-overleaf-e5-antihint-${stamp}"
+declare -a launched_sessions=()
 
 launch_one() {
   local session="$1"
@@ -57,9 +61,20 @@ echo "launched ${session} -> ${sweep_path}"
 EOF
 }
 
-launch_one "${SESSION_E4_BASELINE}" "${E4_BASELINE_SWEEP_ID}"
-launch_one "${SESSION_E4_MITIGATED}" "${E4_MITIGATED_SWEEP_ID}"
-launch_one "${SESSION_E5_ANTIHINT}" "${E5_ANTIHINT_SWEEP_ID}"
+for idx in $(seq 1 "${AGENTS_PER_SWEEP}"); do
+  launch_one "psrh-overleaf-e4-base-${idx}-${stamp}" "${E4_BASELINE_SWEEP_ID}"
+  launched_sessions+=("psrh-overleaf-e4-base-${idx}-${stamp}")
+done
+
+for idx in $(seq 1 "${AGENTS_PER_SWEEP}"); do
+  launch_one "psrh-overleaf-e4-enforce-${idx}-${stamp}" "${E4_MITIGATED_SWEEP_ID}"
+  launched_sessions+=("psrh-overleaf-e4-enforce-${idx}-${stamp}")
+done
+
+for idx in $(seq 1 "${AGENTS_PER_SWEEP}"); do
+  launch_one "psrh-overleaf-e5-antihint-${idx}-${stamp}" "${E5_ANTIHINT_SWEEP_ID}"
+  launched_sessions+=("psrh-overleaf-e5-antihint-${idx}-${stamp}")
+done
 
 if [[ "${dry_run}" -eq 1 ]]; then
   echo "Dry run complete; no sessions started."
@@ -67,7 +82,7 @@ if [[ "${dry_run}" -eq 1 ]]; then
 fi
 
 echo "Launched sessions:"
-printf "  %s\n" "${SESSION_E4_BASELINE}" "${SESSION_E4_MITIGATED}" "${SESSION_E5_ANTIHINT}"
+printf "  %s\n" "${launched_sessions[@]}"
 echo
 echo "Quick health checks:"
 echo "  ssh ${REMOTE_HOST} 'tmux ls | grep psrh-overleaf'"

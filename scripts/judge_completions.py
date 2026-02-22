@@ -186,7 +186,12 @@ def _compute_phase_hacking_fractions(records, verdicts: list[JudgeVerdict]) -> d
     }
 
 
-def _hacking_fraction_for_batches(records, verdicts: list[JudgeVerdict], *, batch_set: set[int]) -> float:
+def _hacking_fraction_for_batches(
+    records,
+    verdicts: list[JudgeVerdict],
+    *,
+    batch_set: set[int],
+) -> float:
     matched = [
         (record, verdict)
         for record, verdict in zip(records, verdicts, strict=True)

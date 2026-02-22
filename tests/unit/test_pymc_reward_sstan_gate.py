@@ -178,7 +178,11 @@ def test_make_pymc_reward_fn_validates_split_before_writer(monkeypatch, tmp_path
             calls["writer"] += 1
 
     monkeypatch.setattr(module, "CompletionWriter", _Writer)
-    monkeypatch.setattr(module, "select_split_data", lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("bad split")))
+    monkeypatch.setattr(
+        module,
+        "select_split_data",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("bad split")),
+    )
 
     with pytest.raises(ValueError, match="bad split"):
         module.make_pymc_reward_fn(

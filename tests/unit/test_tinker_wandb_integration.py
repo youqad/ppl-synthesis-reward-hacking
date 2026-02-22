@@ -204,7 +204,9 @@ def test_select_judge_sample_size_adaptive_uses_heuristic_signal() -> None:
     assert signals["heuristic_lh_signal"] > 0.0
 
 
-def test_run_observational_judge_outcome_entropy_uses_full_outcome_mix(monkeypatch, tmp_path: Path) -> None:
+def test_run_observational_judge_outcome_entropy_uses_full_outcome_mix(
+    monkeypatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         tinker_training_module,
         "judge_completions",

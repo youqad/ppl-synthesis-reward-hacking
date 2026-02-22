@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Any, Protocol
 
 import numpy as np
@@ -21,7 +22,7 @@ class TrajectoryLike(Protocol):
     n_norm_checked: int
 
 
-def compute_traj_metrics(trajectory: list[TrajectoryLike]) -> dict[str, Any]:
+def compute_traj_metrics(trajectory: Sequence[TrajectoryLike]) -> dict[str, Any]:
     if len(trajectory) < 2:
         return {"error": "not enough trajectory points"}
 
@@ -51,7 +52,7 @@ def compute_traj_metrics(trajectory: list[TrajectoryLike]) -> dict[str, Any]:
 def attach_common_results_metadata(
     *,
     metrics: dict[str, Any],
-    trajectory: list[TrajectoryLike],
+    trajectory: Sequence[TrajectoryLike],
     count_key: str,
     config_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:

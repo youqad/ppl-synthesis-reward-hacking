@@ -121,7 +121,11 @@ def compute_group_relative_advantages(
             failure_threshold=failure_threshold,
         )
 
-    def _build_advantages(rollouts: list[RolloutData], mask: list[bool], baseline: float) -> list[float]:
+    def _build_advantages(
+        rollouts: list[RolloutData],
+        mask: list[bool],
+        baseline: float,
+    ) -> list[float]:
         return [
             (rollout.reported_reward - baseline) if is_valid else 0.0
             for rollout, is_valid in zip(rollouts, mask, strict=True)

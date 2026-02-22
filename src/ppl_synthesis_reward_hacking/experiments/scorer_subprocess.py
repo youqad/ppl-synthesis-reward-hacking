@@ -319,8 +319,16 @@ def _temporary_logp_bounds(
             os.environ["PSRH_LOGP_CEIL"] = str(logp_ceil_override)
         yield
     finally:
-        _restore_env_var("PSRH_LOGP_FLOOR", prev_floor, override_used=logp_floor_override is not None)
-        _restore_env_var("PSRH_LOGP_CEIL", prev_ceil, override_used=logp_ceil_override is not None)
+        _restore_env_var(
+            "PSRH_LOGP_FLOOR",
+            prev_floor,
+            override_used=logp_floor_override is not None,
+        )
+        _restore_env_var(
+            "PSRH_LOGP_CEIL",
+            prev_ceil,
+            override_used=logp_ceil_override is not None,
+        )
 
 
 def _restore_env_var(name: str, previous_value: str | None, *, override_used: bool) -> None:

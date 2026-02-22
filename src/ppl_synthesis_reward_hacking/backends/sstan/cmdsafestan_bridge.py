@@ -17,7 +17,8 @@ log = logging.getLogger(__name__)
 
 _CMDSAFESTAN_AVAILABLE = False
 try:
-    from cmdsafestan.api import evaluate_model_string, init as _cmdsafestan_init
+    from cmdsafestan.api import evaluate_model_string
+    from cmdsafestan.api import init as _cmdsafestan_init
 
     _CMDSAFESTAN_AVAILABLE = True
 except ImportError:

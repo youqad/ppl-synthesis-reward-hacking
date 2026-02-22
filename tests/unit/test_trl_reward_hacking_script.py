@@ -143,7 +143,10 @@ def test_config_from_mapping_rejects_nested_monitoring_mode_value_mapping() -> N
     module = _load_module()
     with pytest.raises(
         ValueError,
-        match=r"Unsupported keys in train\.monitoring_mode payload: monitoring_mode\.monitoring_mode",
+        match=(
+            r"Unsupported keys in train\.monitoring_mode payload: "
+            r"monitoring_mode\.monitoring_mode"
+        ),
     ):
         module.config_from_mapping(
             {
@@ -158,7 +161,10 @@ def test_config_from_mapping_rejects_monitoring_payload_missing_mode_key() -> No
     module = _load_module()
     with pytest.raises(
         ValueError,
-        match=r"Unsupported keys in train\.monitoring_mode payload: monitoring_mode\.judge_interval",
+        match=(
+            r"Unsupported keys in train\.monitoring_mode payload: "
+            r"monitoring_mode\.judge_interval"
+        ),
     ):
         module.config_from_mapping(
             {
@@ -347,7 +353,11 @@ def test_run_training_closes_completion_writer_on_train_failure(monkeypatch, tmp
     monkeypatch.setattr(module, "_resolve_resume_path", lambda _cfg: None)
     monkeypatch.setattr(module, "_load_train_dataset", lambda _cfg: ([], object()))
     monkeypatch.setattr(module, "_warn_monitoring_metadata_only", lambda _cfg: None)
-    monkeypatch.setattr(module, "_build_reward_function", lambda _cfg, _out: (lambda *a, **k: [], reward_state))
+    monkeypatch.setattr(
+        module,
+        "_build_reward_function",
+        lambda _cfg, _out: (lambda *a, **k: [], reward_state),
+    )
     monkeypatch.setattr(module, "LoraConfig", lambda **_kwargs: object(), raising=False)
     monkeypatch.setattr(module, "_build_model_init_kwargs", lambda _cfg: {})
     monkeypatch.setattr(module, "_build_training_args", lambda _cfg, **_kwargs: object())

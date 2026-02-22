@@ -85,7 +85,10 @@ def test_artifact_sync_interval_must_be_non_negative() -> None:
 
 
 def test_formal_lh_requires_positive_normalization_interval() -> None:
-    with pytest.raises(ValueError, match="formal_lh claim_mode requires normalization_interval > 0"):
+    with pytest.raises(
+        ValueError,
+        match="formal_lh claim_mode requires normalization_interval > 0",
+    ):
         config_from_mapping(
             {
                 **_base_mapping(),

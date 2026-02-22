@@ -7,7 +7,6 @@ import pytest
 
 from ppl_synthesis_reward_hacking.backends.sstan import cmdsafestan_bridge as bridge_mod
 
-
 # cmdsafestan is not installed in the test env, so evaluate_model_string
 # and _cmdsafestan_init are never imported. We must inject them with
 # raising=False so monkeypatch creates the attribute.

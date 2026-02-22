@@ -496,7 +496,11 @@ def _group_by_taxonomy_category(
 
 
 def _taxonomy_category_order(by_cat: dict[str, list[dict]]) -> list[str]:
-    ordered = sorted([cat for cat in by_cat if cat != "honest"], key=lambda cat: len(by_cat[cat]), reverse=True)
+    ordered = sorted(
+        [cat for cat in by_cat if cat != "honest"],
+        key=lambda cat: len(by_cat[cat]),
+        reverse=True,
+    )
     if "honest" in by_cat:
         ordered.append("honest")
     return ordered

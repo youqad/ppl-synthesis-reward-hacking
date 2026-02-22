@@ -13,8 +13,9 @@ command:
 - train/reward_metric=log_marginal_likelihood
 - train/reward_data_split=train
 - train/reward_estimator_backend=smc
-- train/data_interface=raw_bernoulli_d3
-- train.data_interface.dataset_n_train=1
+- train/data_interface=raw_bernoulli_d5_ablation
+- train.data_interface.dataset_n_features=5
+- train.data_interface.dataset_n_train=20
 - train/prompt_policy=neutral
 - train/normalization=exact_binary
 - train.normalization.normalization_interval=1
@@ -47,3 +48,4 @@ parameters:
   train.scoring_seed_base:
     values:
     - 0
+    - 10000
