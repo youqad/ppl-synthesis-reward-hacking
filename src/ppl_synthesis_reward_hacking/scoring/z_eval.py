@@ -44,9 +44,7 @@ def select_split_data(scoring_data: dict[str, Any], split: str) -> dict[str, Any
         y_selected = y_train if y_train is not None else y_raw
     else:
         if y_holdout is None:
-            raise ValueError(
-                "reward_data_split='holdout' but scoring_data has no 'y_holdout' key"
-            )
+            raise ValueError("reward_data_split='holdout' but scoring_data has no 'y_holdout' key")
         y_selected = y_holdout
 
     if y_selected is None:

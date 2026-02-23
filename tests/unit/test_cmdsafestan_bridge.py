@@ -19,7 +19,10 @@ def _fake_cmdsafestan_env(monkeypatch):
     monkeypatch.setattr(bridge_mod, "_runtime", "fake_runtime")
     # inject stubs that individual tests will override
     monkeypatch.setattr(
-        bridge_mod, "evaluate_model_string", MagicMock(), raising=False,
+        bridge_mod,
+        "evaluate_model_string",
+        MagicMock(),
+        raising=False,
     )
     yield
     # monkeypatch auto-restores; _runtime reset handled by teardown in class

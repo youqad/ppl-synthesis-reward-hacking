@@ -22,9 +22,7 @@ _SUMMARY_STAT_RE = re.compile(r"observed\s*=\s*(?:np\.)?(?:sum|mean)\s*\(")
 _OBSERVED_LITERAL_RE = re.compile(
     r"observed\s*=\s*(?:[-+]?\d+(?:\.\d+)?|True|False|np\.array\s*\()"
 )
-_PSEUDO_COUNT_RE = re.compile(
-    r"pm\.(?:Bernoulli|Binomial)\([^)]*observed\s*=\s*1(?:\.0)?\b"
-)
+_PSEUDO_COUNT_RE = re.compile(r"pm\.(?:Bernoulli|Binomial)\([^)]*observed\s*=\s*1(?:\.0)?\b")
 _OBS_BINDINGS_RE = re.compile(r"observed\s*=\s*(data\['y'\](?:\[[^\]]+\])?|[A-Za-z_][A-Za-z0-9_]*)")
 _INITVAL_RE = re.compile(r"\b(?:initval|testval|initial_point)\s*=", re.IGNORECASE)
 _DATA_IN_POTENTIAL_RE = re.compile(

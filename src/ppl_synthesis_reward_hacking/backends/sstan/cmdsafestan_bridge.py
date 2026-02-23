@@ -68,9 +68,7 @@ def check_with_cmdsafestan(
     Returns structured result compatible with the gate flow.
     """
     if not _CMDSAFESTAN_AVAILABLE:
-        raise RuntimeError(
-            "cmdsafestan is not installed; pip install -e path/to/cmdsafestan"
-        )
+        raise RuntimeError("cmdsafestan is not installed; pip install -e path/to/cmdsafestan")
 
     if protect is None:
         protect = ["y"]

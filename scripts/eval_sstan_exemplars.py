@@ -14,6 +14,7 @@ Usage:
         [--use-cmdsafestan] \
         [--dry-run]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -217,7 +218,9 @@ def write_markdown_table(results: list[dict[str, Any]], path: Path) -> None:
     lines.append(
         "| ID | Description | Heuristic tags | Transpile | Regex | CmdSafeStan | Expected |"
     )
-    lines.append("|-----|-------------|---------------|-----------|-------|-------------|----------|")
+    lines.append(
+        "|-----|-------------|---------------|-----------|-------|-------------|----------|"
+    )
     for r in results:
         tags = ", ".join(r["safepymc_tags"]) if r["safepymc_tags"] else "(none)"
         transpile = _check_symbol(r["transpile_ok"])
@@ -386,8 +389,12 @@ def main() -> None:
 
     lh_programs = parse_lh_examples(lh_path)
     all_programs = lh_programs + HONEST_PROGRAMS
-    log.info("parsed %d LH programs + %d honest baselines = %d total",
-             len(lh_programs), len(HONEST_PROGRAMS), len(all_programs))
+    log.info(
+        "parsed %d LH programs + %d honest baselines = %d total",
+        len(lh_programs),
+        len(HONEST_PROGRAMS),
+        len(all_programs),
+    )
 
     if args.dry_run:
         for prog in all_programs:
@@ -409,8 +416,13 @@ def main() -> None:
             use_cmdsafestan=args.use_cmdsafestan,
         )
         verdict = _derive_verdict(r)
-        log.info("  %s -> transpile=%s regex=%s tags=%s",
-                 prog["id"], r["transpile_ok"], verdict, r["safepymc_tags"])
+        log.info(
+            "  %s -> transpile=%s regex=%s tags=%s",
+            prog["id"],
+            r["transpile_ok"],
+            verdict,
+            r["safepymc_tags"],
+        )
         results.append(r)
 
     summary = compute_summary(results)
