@@ -1,0 +1,78 @@
+name: Codex PR review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      message: ${{ steps.codex.outputs.final-message }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+
+      - name: Fetch base and head refs
+        run: |
+          git fetch --no-tags origin \
+            ${{ github.event.pull_request.base.ref }} \
+            +refs/pull/${{ github.event.pull_request.number }}/head
+
+      - name: Run Codex
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+          prompt: |
+            You are reviewing a pull request in the ppl-synthesis-reward-hacking repository (UAI 2026 paper on Likelihood Hacking in PPLs).
+
+            Get the diff:
+              git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+
+            Review for the following, in priority order:
+
+            1. **Correctness** — bugs in PyMC model evaluation, SMC scoring, GRPO training logic, or normalization checks.
+            2. **Backward-compat additions** — alias fields, dual-read adapters, legacy shims in runtime training/scoring code are FORBIDDEN. If you see any, flag as blocking.
+            3. **Legacy oracle leakage** — `oracle_score`, `gap`, `oracle_like_diagnostic` must not appear in runtime training interfaces.
+            4. **Scoring pipeline parity** — changes to reward logic must be mirrored in both `scorer_subprocess.py` (Tinker path) and `experiments/pymc_reward.py` (TRL path).
+            5. **Normalization check integrity** — `check_normalization_small_d()` must not be weakened or bypassed.
+            6. **Reward bounds** — `LOGP_CEIL=20.0` and `LOGP_FLOOR=-1000.0` must be applied consistently.
+            7. **Hydra config correctness** — compositional groups only; invalid metric/backend combos must fail fast.
+            8. **Security** — unsafe exec of model code, command injection, or secrets in logs.
+
+            Format your review as:
+            ## Codex Review
+            ### Blocking issues
+            (file:line — description)
+            ### Warnings
+            (file:line — description)
+            ### Notes
+            (optional minor observations)
+
+            Skip style nits. Be concise and specific.
+
+  post:
+    runs-on: ubuntu-latest
+    needs: review
+    if: needs.review.outputs.message != ''
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          CODEX_MSG: ${{ needs.review.outputs.message }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: process.env.CODEX_MSG
+            });

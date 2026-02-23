@@ -5,12 +5,17 @@ from __future__ import annotations
 import logging
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
 
+from ppl_synthesis_reward_hacking.backends.judge_gate import (
+    JudgeGateConfig,
+    JudgeGateResult,
+    run_judge_gate_batch,
+)
 from ppl_synthesis_reward_hacking.backends.pymc.backend import PyMCBackend
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import (
     execute_pymc_code,
@@ -128,6 +133,7 @@ class PyMCRewardState:
     normalization_sample_size: int = 20
     sstan_gate_config: SStanGateConfig = field(default_factory=SStanGateConfig)
     sstan_sampling_seed: int = 0
+    judge_gate_config: JudgeGateConfig = field(default_factory=JudgeGateConfig)
 
 
 @dataclass
@@ -135,9 +141,12 @@ class _BatchResult:
     rewards: list[float] = field(default_factory=list)
     outcomes: list[str] = field(default_factory=list)
     valid_completion_texts: list[str] = field(default_factory=list)
+    valid_codes: list[str] = field(default_factory=list)
     n_parse_fail: int = 0
     n_exec_fail: int = 0
     safety_counts: dict[str, int] = field(default_factory=dict)
+    pending_records: list[CompletionRecord] = field(default_factory=list)
+    judge_gate_results: dict[int, JudgeGateResult] = field(default_factory=dict)
 
 
 def make_pymc_reward_fn(
@@ -175,6 +184,18 @@ def make_pymc_reward_fn(
     sstan_transpiler_temperature: float = 0.0,
     sstan_transpiler_max_tokens: int = 2048,
     sstan_transpiler_timeout_s: float = 60.0,
+    judge_gate_mode: str = "off",
+    judge_gate_confidence_threshold: float = 0.8,
+    judge_gate_penalty_reward: float = -400.0,
+    judge_gate_backend: str = "openai",
+    judge_gate_model: str = "gpt-5.2",
+    judge_gate_api_key_env: str = "OPENAI_API_KEY",
+    judge_gate_api_base: str | None = None,
+    judge_gate_custom_llm_provider: str = "",
+    judge_gate_temperature: float = 0.0,
+    judge_gate_max_tokens: int = 1024,
+    judge_gate_timeout: int = 60,
+    judge_gate_batch_max_workers: int = 32,
 ) -> tuple[Callable[..., list[float]], PyMCRewardState]:
     """Create and return `(reward_fn, state)`."""
     # Validate split before creating cache directories.
@@ -216,6 +237,18 @@ def make_pymc_reward_fn(
         sstan_transpiler_temperature=sstan_transpiler_temperature,
         sstan_transpiler_max_tokens=sstan_transpiler_max_tokens,
         sstan_transpiler_timeout_s=sstan_transpiler_timeout_s,
+        judge_gate_mode=judge_gate_mode,
+        judge_gate_confidence_threshold=judge_gate_confidence_threshold,
+        judge_gate_penalty_reward=judge_gate_penalty_reward,
+        judge_gate_backend=judge_gate_backend,
+        judge_gate_model=judge_gate_model,
+        judge_gate_api_key_env=judge_gate_api_key_env,
+        judge_gate_api_base=judge_gate_api_base,
+        judge_gate_custom_llm_provider=judge_gate_custom_llm_provider,
+        judge_gate_temperature=judge_gate_temperature,
+        judge_gate_max_tokens=judge_gate_max_tokens,
+        judge_gate_timeout=judge_gate_timeout,
+        judge_gate_batch_max_workers=judge_gate_batch_max_workers,
     )
     resolved_cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -224,6 +257,8 @@ def make_pymc_reward_fn(
         state.call_count += 1
         n_expected = len(completions)
         batch = _score_batch(state, prompts, completions, exec_timeout)
+        _apply_judge_gate_trl(state, batch)
+        _write_pending_records(state, batch)
         norm_results = _run_batch_normalization(state, batch)
         point = _build_trajectory_point(
             state.call_count, n_total=len(completions), batch=batch, norm=norm_results
@@ -271,6 +306,18 @@ def _init_reward_state(
     sstan_transpiler_temperature: float = 0.0,
     sstan_transpiler_max_tokens: int = 2048,
     sstan_transpiler_timeout_s: float = 60.0,
+    judge_gate_mode: str = "off",
+    judge_gate_confidence_threshold: float = 0.8,
+    judge_gate_penalty_reward: float = -400.0,
+    judge_gate_backend: str = "openai",
+    judge_gate_model: str = "gpt-5.2",
+    judge_gate_api_key_env: str = "OPENAI_API_KEY",
+    judge_gate_api_base: str | None = None,
+    judge_gate_custom_llm_provider: str = "",
+    judge_gate_temperature: float = 0.0,
+    judge_gate_max_tokens: int = 1024,
+    judge_gate_timeout: int = 60,
+    judge_gate_batch_max_workers: int = 32,
 ) -> PyMCRewardState:
     _ = select_split_data(scoring_data, reward_data_split)
     writer = CompletionWriter(completions_path) if completions_path else None
@@ -311,6 +358,20 @@ def _init_reward_state(
         sstan_sampling_seed=(
             int(scoring_data.get("seed", 0)) if isinstance(scoring_data, dict) else 0
         ),
+        judge_gate_config=JudgeGateConfig(
+            mode=cast(Any, judge_gate_mode),
+            confidence_threshold=judge_gate_confidence_threshold,
+            penalty_reward=judge_gate_penalty_reward,
+            judge_backend=judge_gate_backend,
+            judge_model=judge_gate_model,
+            judge_api_key_env=judge_gate_api_key_env,
+            judge_api_base=judge_gate_api_base,
+            judge_custom_llm_provider=judge_gate_custom_llm_provider,
+            judge_temperature=judge_gate_temperature,
+            judge_max_tokens=judge_gate_max_tokens,
+            judge_timeout=judge_gate_timeout,
+            judge_batch_max_workers=judge_gate_batch_max_workers,
+        ),
     )
 
 
@@ -324,6 +385,34 @@ def _score_batch(
     for index, (prompt, completion) in enumerate(zip(prompts, completions, strict=True)):
         _score_completion(state, batch, index, prompt, completion, exec_timeout)
     return batch
+
+
+def _apply_judge_gate_trl(state: PyMCRewardState, batch: _BatchResult) -> None:
+    cfg = state.judge_gate_config
+    if cfg.mode == "off":
+        return
+    # valid_completion_texts only has entries for outcome="valid".
+    valid_idx_map: list[int] = []
+    for i, o in enumerate(batch.outcomes):
+        if o == "valid":
+            valid_idx_map.append(i)
+    gate_targets: list[tuple[int, int]] = []  # (valid_texts_pos, rewards_pos)
+    for vt_pos, rw_pos in enumerate(valid_idx_map):
+        if batch.rewards[rw_pos] > EXEC_FAIL_REWARD:
+            gate_targets.append((vt_pos, rw_pos))
+    if not gate_targets:
+        return
+    codes = [batch.valid_codes[vt] for vt, _ in gate_targets]
+    rewards = [batch.rewards[rw] for _, rw in gate_targets]
+    results = run_judge_gate_batch(codes=codes, rewards=rewards, config=cfg)
+    n_penalized = 0
+    for (_, rw_pos), gate_result in zip(gate_targets, results, strict=True):
+        batch.judge_gate_results[rw_pos] = gate_result
+        if gate_result.penalty_applied:
+            batch.rewards[rw_pos] = cfg.penalty_reward
+            n_penalized += 1
+    if n_penalized > 0:
+        log.info("Judge gate: penalized %d/%d valid programs", n_penalized, len(gate_targets))
 
 
 def _get_point_logps(pymc_model: Any) -> dict[str, float] | None:
@@ -505,6 +594,7 @@ def _score_executed_model(
     batch.rewards.append(reported)
     batch.outcomes.append("valid")
     batch.valid_completion_texts.append(completion_text)
+    batch.valid_codes.append(code)
     metadata = _merge_meta(_build_meta(pymc_model, logps), decomposition)
     metadata = {**(metadata or {}), "sstan_gate": gate_result.to_metadata()}
     _log_completion(
@@ -517,6 +607,7 @@ def _score_executed_model(
         reported,
         "valid",
         metadata=metadata,
+        record_buffer=batch.pending_records,
     )
     _run_safety_check(pymc_model, batch.safety_counts)
 
@@ -552,6 +643,7 @@ def _record_parse_failure(
         PARSE_FAIL_REWARD,
         "parse_fail",
         metadata=metadata,
+        record_buffer=batch.pending_records,
     )
 
 
@@ -579,6 +671,7 @@ def _record_exec_failure(
         EXEC_FAIL_REWARD,
         outcome,
         metadata=metadata,
+        record_buffer=batch.pending_records,
     )
 
 
@@ -730,6 +823,22 @@ def _build_trajectory_point(
     )
 
 
+def _write_pending_records(state: PyMCRewardState, batch: _BatchResult) -> None:
+    if state.completion_writer is None:
+        return
+    for i, record in enumerate(batch.pending_records):
+        gate_result = batch.judge_gate_results.get(i)
+        if gate_result is not None:
+            md = dict(record.metadata) if record.metadata else {}
+            md["judge_gate"] = gate_result.to_metadata()
+            updates: dict[str, Any] = {"metadata": md}
+            if gate_result.penalty_applied:
+                updates["reported_reward"] = batch.rewards[i]
+            record = replace(record, **updates)
+        state.completion_writer.write(record)
+    batch.pending_records.clear()
+
+
 def _flush_completions(state: PyMCRewardState) -> None:
     if state.completion_writer is not None:
         state.completion_writer.flush()
@@ -783,8 +892,9 @@ def _log_completion(
     outcome: str,
     *,
     metadata: dict[str, Any] | None = None,
+    record_buffer: list[CompletionRecord] | None = None,
 ) -> None:
-    if state.completion_writer is None:
+    if state.completion_writer is None and record_buffer is None:
         return
     record = CompletionRecord(
         batch=batch,
@@ -797,7 +907,10 @@ def _log_completion(
         timestamp=make_timestamp(),
         metadata=metadata,
     )
-    state.completion_writer.write(record)
+    if record_buffer is not None:
+        record_buffer.append(record)
+    elif state.completion_writer is not None:
+        state.completion_writer.write(record)
 
 
 def _build_meta(

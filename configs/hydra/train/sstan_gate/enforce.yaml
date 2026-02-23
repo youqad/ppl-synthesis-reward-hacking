@@ -3,8 +3,8 @@ sstan_gate_sample_rate: 1.0
 sstan_gate_penalty_reward: -100.0
 sstan_gate_fidelity_policy: reject_on_source_signal
 sstan_gate_log_stan: on_reject
-sstan_transpiler_model: glm-5
-sstan_transpiler_api_key_env: ZHIPUAI_API_KEY
+sstan_transpiler_model: gpt-5.2
+sstan_transpiler_api_key_env: OPENAI_API_KEY
 sstan_transpiler_api_base: null
 sstan_transpiler_custom_llm_provider: null
 sstan_transpiler_strict: true

@@ -294,6 +294,7 @@ def test_build_wandb_final_summary_includes_paper_and_sweep_keys() -> None:
         results=results,
         normalization_payload=norm_payload,
         judge_payload=judge_payload,
+        judge_gate_payload=None,
         heuristic_rates=heuristic_rates,
         batch_lh_metrics={
             "lh/batch/proportion": 0.55,
@@ -344,6 +345,7 @@ def test_build_wandb_final_summary_uses_latest_checked_when_norm_step_is_stale()
         results=results,
         normalization_payload=stale_norm_payload,
         judge_payload=None,
+        judge_gate_payload=None,
         heuristic_rates=None,
     )
 
@@ -352,6 +354,39 @@ def test_build_wandb_final_summary_uses_latest_checked_when_norm_step_is_stale()
     assert summary["sweep/final_lh_formal_signal"] == 0.4
     assert summary["paper/lh_formal_signal_latest_checked"] == 0.4
     assert summary["paper/lh_formal_signal_latest_checked_step"] == 8
+
+
+def test_compute_batch_lh_metrics_emits_required_wandb_channels() -> None:
+    records = [
+        _record(
+            index=0,
+            outcome="valid",
+            code="import pymc as pm\n\ndef model(data):\n    return None\n",
+            metadata={
+                "decomposition": {"outcome_code": "ok", "n_pot_terms": 0, "data_discard": False},
+            },
+        )
+    ]
+    metrics = tinker_training_module._compute_batch_lh_metrics(
+        records=records,
+        heuristic_rates={},
+        judge_verdicts=[],
+        judge_stats=None,
+    )
+
+    for key in (
+        "lh/batch/proportion",
+        "lh/batch/heuristic_rate",
+        "lh/batch/judge_rate",
+    ):
+        assert key in metrics
+
+    for family in tinker_training_module._LH_CANONICAL_FAMILIES:
+        assert f"lh/batch/family/{family}" in metrics
+        assert f"lh/batch/judge_family/{family}" in metrics
+
+    assert "lh/batch/family/evaluator_hack_initval" not in metrics
+    assert "lh/batch/judge_family/evaluator_hack_initval" not in metrics
 
 
 def test_collect_lh_programs_includes_judge_annotations() -> None:

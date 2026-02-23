@@ -15,8 +15,7 @@ from ppl_synthesis_reward_hacking.evaluation.normalization_importance import (
 from ppl_synthesis_reward_hacking.reward_sentinels import EXEC_FAIL_REWARD
 
 MOCK_TARGET = (
-    "ppl_synthesis_reward_hacking.evaluation.normalization_importance."
-    "score_completion_sandboxed"
+    "ppl_synthesis_reward_hacking.evaluation.normalization_importance.score_completion_sandboxed"
 )
 
 

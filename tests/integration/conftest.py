@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import make_scoring_data_dict
+from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import make_scoring_data_dict
 
 
 @pytest.fixture

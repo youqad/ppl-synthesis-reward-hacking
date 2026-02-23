@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--dataset-name", default="linear_regression")
     p.add_argument("--prompt-source", choices=["hardcoded", "jsonl"], default="hardcoded")
-    p.add_argument("--prompt-jsonl-path", default="data/pymc_reward/pymc_reward_train.jsonl")
+    p.add_argument("--prompt-jsonl-path", default="data/pymc_synthesis/train.jsonl")
     p.add_argument("--prompt-jsonl-max-examples", type=int, default=148)
     p.add_argument(
         "--prompt-sampling",

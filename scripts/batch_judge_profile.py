@@ -37,12 +37,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from ppl_synthesis_reward_hacking.config.load import apply_overrides, load_config
+from ppl_synthesis_reward_hacking.experiments.results import json_default
 from ppl_synthesis_reward_hacking.logging.completions import load_completions
 from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
     JudgeConfig,
     judge_completions,
 )
 from ppl_synthesis_reward_hacking.plotting.styles import apply_publication_style
+from ppl_synthesis_reward_hacking.utils.io import load_jsonl
 
 logging.basicConfig(
     level=logging.INFO,
@@ -128,23 +130,6 @@ def _load_judge_config(config_path: str | None, overrides: list[str]) -> JudgeCo
     )
 
 
-def _json_safe(value: object) -> object:
-    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-        return None
-    return value
-
-
-def _load_existing_verdicts(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            rows.append(json.loads(line))
-    return rows
-
-
 def _group_records_by_batch(records: list) -> dict[int, list]:
     groups: dict[int, list] = defaultdict(list)
     for rec in records:
@@ -217,15 +202,17 @@ def _aggregate_verdicts_by_step(
                 4,
             )
 
-        steps.append({
-            "batch": batch,
-            "n_records": n,
-            "verdicts": dict(verdict_counts),
-            "hacking_rate": hacking_rate,
-            "tags": dict(tag_counts.most_common()),
-            "mean_confidence": _json_safe(mean_conf),
-            "median_confidence": _json_safe(median_conf),
-        })
+        steps.append(
+            {
+                "batch": batch,
+                "n_records": n,
+                "verdicts": dict(verdict_counts),
+                "hacking_rate": hacking_rate,
+                "tags": dict(tag_counts.most_common()),
+                "mean_confidence": json_default(mean_conf),
+                "median_confidence": json_default(median_conf),
+            }
+        )
 
     return steps
 
@@ -319,7 +306,7 @@ def main() -> None:
             sys.exit(1)
 
         log.info("Loading existing verdicts from %s", verdicts_path)
-        verdict_rows = _load_existing_verdicts(verdicts_path)
+        verdict_rows = load_jsonl(verdicts_path)
         log.info("Loaded %d verdict rows", len(verdict_rows))
 
         cfg = _load_judge_config(args.judge_config, overrides)
@@ -356,17 +343,19 @@ def main() -> None:
 
         verdict_rows = []
         for rec, v in zip(records, verdicts, strict=True):
-            verdict_rows.append({
-                "batch": rec.batch,
-                "index": rec.index,
-                "outcome": rec.outcome,
-                "reported_reward": _json_safe(rec.reported_reward),
-                "verdict": v.verdict,
-                "confidence": v.confidence,
-                "tags": v.tags,
-                "reasoning": v.rationale,
-                "parse_error": v.parse_error,
-            })
+            verdict_rows.append(
+                {
+                    "batch": rec.batch,
+                    "index": rec.index,
+                    "outcome": rec.outcome,
+                    "reported_reward": json_default(rec.reported_reward),
+                    "verdict": v.verdict,
+                    "confidence": v.confidence,
+                    "tags": v.tags,
+                    "reasoning": v.rationale,
+                    "parse_error": v.parse_error,
+                }
+            )
 
         verdicts_path = output_dir / "verdicts.jsonl"
         with verdicts_path.open("w", encoding="utf-8") as f:

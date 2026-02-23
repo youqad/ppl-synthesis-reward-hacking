@@ -150,12 +150,10 @@ class TestCheckNormalizationDispatcher:
     """Unit tests for check_normalization routing without PyMC."""
 
     _EXACT_TARGET = (
-        "ppl_synthesis_reward_hacking.evaluation.normalization_check"
-        ".check_exact_binary_norm"
+        "ppl_synthesis_reward_hacking.evaluation.normalization_check.check_exact_binary_norm"
     )
     _IMPORTANCE_TARGET = (
-        "ppl_synthesis_reward_hacking.evaluation.normalization_check"
-        ".check_importance_norm"
+        "ppl_synthesis_reward_hacking.evaluation.normalization_check.check_importance_norm"
     )
 
     def test_off_method_returns_disabled(self):

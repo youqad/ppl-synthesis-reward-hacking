@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from ppl_synthesis_reward_hacking.experiments.tinker_training import config_from_mapping
+from ppl_synthesis_reward_hacking.experiments.tinker_training import (
+    TinkerGRPOConfig,
+    config_from_mapping,
+    run_training,
+)
 
 
 def _base_mapping() -> dict:
@@ -190,15 +194,84 @@ def test_rejects_unknown_nested_sstan_gate_key() -> None:
         )
 
 
-def test_part_b_requires_sstan_gate_not_off() -> None:
-    with pytest.raises(ValueError, match="part_b_mitigation requires sstan_gate_mode"):
+def test_part_b_requires_strict_xor_rejects_both_off() -> None:
+    with pytest.raises(ValueError, match="strict XOR mitigation gates with enforce mode"):
         config_from_mapping(
             {
                 **_base_mapping(),
                 "paper_track": "part_b_mitigation",
                 "sstan_gate_mode": "off",
+                "judge_gate_mode": "off",
             }
         )
+
+
+def test_part_b_accepts_judge_gate_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    cfg = config_from_mapping(
+        {
+            **_base_mapping(),
+            "paper_track": "part_b_mitigation",
+            "sstan_gate_mode": "off",
+            "judge_gate_mode": "enforce",
+        }
+    )
+    assert cfg.judge_gate_mode == "enforce"
+    assert cfg.sstan_gate_mode == "off"
+
+
+def test_part_b_accepts_sstan_gate_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    cfg = config_from_mapping(
+        {
+            **_base_mapping(),
+            "paper_track": "part_b_mitigation",
+            "sstan_gate_mode": "enforce",
+            "judge_gate_mode": "off",
+            "sstan_transpiler_api_key_env": "OPENAI_API_KEY",
+        }
+    )
+    assert cfg.judge_gate_mode == "off"
+    assert cfg.sstan_gate_mode == "enforce"
+
+
+def test_part_b_rejects_both_gates_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    with pytest.raises(ValueError, match="strict XOR mitigation gates with enforce mode"):
+        config_from_mapping(
+            {
+                **_base_mapping(),
+                "paper_track": "part_b_mitigation",
+                "sstan_gate_mode": "enforce",
+                "judge_gate_mode": "enforce",
+                "sstan_transpiler_api_key_env": "OPENAI_API_KEY",
+            }
+        )
+
+
+def test_part_b_rejects_shadow_mode_instead_of_enforce(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    with pytest.raises(ValueError, match="strict XOR mitigation gates with enforce mode"):
+        config_from_mapping(
+            {
+                **_base_mapping(),
+                "paper_track": "part_b_mitigation",
+                "sstan_gate_mode": "shadow",
+                "judge_gate_mode": "off",
+                "sstan_transpiler_api_key_env": "OPENAI_API_KEY",
+            }
+        )
+
+
+def test_run_training_revalidates_direct_config_objects() -> None:
+    cfg = TinkerGRPOConfig(
+        paper_track="part_b_mitigation",
+        sstan_gate_mode="off",
+        judge_gate_mode="off",
+        n_steps=0,
+    )
+    with pytest.raises(ValueError, match="strict XOR mitigation gates with enforce mode"):
+        run_training(cfg)
 
 
 def test_enforce_requires_full_gate_check_rate() -> None:

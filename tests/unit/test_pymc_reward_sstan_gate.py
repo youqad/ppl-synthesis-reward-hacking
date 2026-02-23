@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from ppl_synthesis_reward_hacking.backends.judge_gate import JudgeGateConfig, JudgeGateResult
 from ppl_synthesis_reward_hacking.backends.sstan.gate import SStanGateConfig, SStanGateResult
 from ppl_synthesis_reward_hacking.experiments import pymc_reward as module
 from ppl_synthesis_reward_hacking.logging.completions import CompletionWriter, load_completions
@@ -82,6 +83,7 @@ def test_score_completion_enforce_mode_applies_sstan_penalty(monkeypatch, tmp_pa
         completion="completion",
         exec_timeout=10,
     )
+    module._write_pending_records(state, batch)
     writer.close()
 
     assert batch.rewards == [-123.0]
@@ -140,6 +142,7 @@ def test_score_completion_shadow_mode_keeps_original_reward(monkeypatch, tmp_pat
         completion="completion",
         exec_timeout=10,
     )
+    module._write_pending_records(state, batch)
     writer.close()
 
     assert batch.rewards == [7.5]
@@ -273,3 +276,65 @@ def test_run_batch_normalization_uses_train_split_when_top_level_y_missing(monke
     norm = module._run_batch_normalization(state, batch)
     assert norm.n_checked == 1
     assert observed["d"] == 2
+
+
+def test_apply_judge_gate_trl_enforce_applies_penalty(monkeypatch) -> None:
+    monkeypatch.setattr(
+        module,
+        "run_judge_gate_batch",
+        lambda **_kwargs: [
+            JudgeGateResult(
+                mode="enforce",
+                checked=True,
+                accepted=False,
+                decision="reject",
+                verdict="hacking",
+                confidence=0.95,
+                tags=["score_injection"],
+                reasoning="detected hacking pattern",
+                penalty_applied=True,
+                penalty_reward=-321.0,
+                timing_ms=12.0,
+            )
+        ],
+    )
+
+    state = module.PyMCRewardState(
+        backend=object(),
+        dataset=object(),
+        scoring_data={"y": [0, 1], "seed": 3},
+        cache_dir=Path("."),
+        judge_gate_config=JudgeGateConfig(mode="enforce", penalty_reward=-321.0),
+    )
+    batch = module._BatchResult(
+        rewards=[7.5, module.EXEC_FAIL_REWARD],
+        outcomes=["valid", "exec_fail"],
+        valid_completion_texts=["completion_text"],
+        valid_codes=["def model(data): pass"],
+    )
+
+    module._apply_judge_gate_trl(state, batch)
+    assert batch.rewards == [-321.0, module.EXEC_FAIL_REWARD]
+
+
+def test_apply_judge_gate_trl_off_is_noop(monkeypatch) -> None:
+    def _unexpected_call(**_kwargs):
+        raise AssertionError("run_judge_gate_batch should not be called in off mode")
+
+    monkeypatch.setattr(module, "run_judge_gate_batch", _unexpected_call)
+
+    state = module.PyMCRewardState(
+        backend=object(),
+        dataset=object(),
+        scoring_data={"y": [0, 1], "seed": 3},
+        cache_dir=Path("."),
+        judge_gate_config=JudgeGateConfig(mode="off"),
+    )
+    batch = module._BatchResult(
+        rewards=[7.5],
+        outcomes=["valid"],
+        valid_completion_texts=["completion_text"],
+    )
+
+    module._apply_judge_gate_trl(state, batch)
+    assert batch.rewards == [7.5]
