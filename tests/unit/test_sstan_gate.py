@@ -34,10 +34,9 @@ def test_validate_sstan_gate_cfg_enforce_requires_full_check_rate(monkeypatch) -
         gate_mod.validate_sstan_gate_cfg(cfg, paper_track="part_a_emergence")
 
 
-def test_validate_sstan_gate_cfg_part_b_rejects_gate_off() -> None:
+def test_validate_sstan_gate_cfg_part_b_allows_gate_off() -> None:
     cfg = _base_gate_cfg(mode="off")
-    with pytest.raises(ValueError, match="part_b_mitigation requires sstan_gate_mode"):
-        gate_mod.validate_sstan_gate_cfg(cfg, paper_track="part_b_mitigation")
+    gate_mod.validate_sstan_gate_cfg(cfg, paper_track="part_b_mitigation")
 
 
 def test_run_sstan_gate_rejects_on_transpile_failure(monkeypatch, tmp_path) -> None:
@@ -56,7 +55,7 @@ def test_run_sstan_gate_rejects_on_transpile_failure(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(gate_mod, "check_sstan", lambda _source: (True, []))
 
     result = gate_mod.run_sstan_gate(
-        code='import pymc as pm\n\ndef model(data):\n    return None\n',
+        code="import pymc as pm\n\ndef model(data):\n    return None\n",
         config=cfg,
         batch=0,
         index=0,
@@ -186,7 +185,8 @@ def test_run_sstan_gate_cmdsafestan_overrides_regex_accept(monkeypatch, tmp_path
         gate_mod,
         "_check_cmdsafestan",
         lambda *args, **kwargs: _make_cmdsafestan_result(
-            safe=False, violations=["target_update"],
+            safe=False,
+            violations=["target_update"],
         ),
     )
 

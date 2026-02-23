@@ -10,6 +10,7 @@ defaults:
   - prompt_policy: legacy
   - monitoring_mode: "off"
   - sstan_gate: "off"
+  - judge_gate: "off"
   - _self_
 
 name: tinker

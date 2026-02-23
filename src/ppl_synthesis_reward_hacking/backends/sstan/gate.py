@@ -135,8 +135,9 @@ def _validate_enforce_mode_constraints(config: SStanGateConfig) -> None:
 
 
 def _validate_paper_track_constraints(config: SStanGateConfig, *, paper_track: str) -> None:
-    if paper_track == "part_b_mitigation" and config.mode == "off":
-        raise ValueError("paper_track=part_b_mitigation requires sstan_gate_mode != off")
+    _ = config, paper_track
+    # Track-level mitigation invariants are enforced at the training config layer
+    # where both SStan and judge gates are visible for strict XOR checks.
 
 
 def _validate_transpiler_requirements(config: SStanGateConfig) -> None:

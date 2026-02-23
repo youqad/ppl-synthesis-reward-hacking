@@ -11,27 +11,27 @@ import time
 from collections import Counter
 from collections.abc import Mapping
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
 
+from ppl_synthesis_reward_hacking.backends.judge_gate import (
+    JudgeGateConfig,
+    run_judge_gate_batch,
+    validate_judge_gate_cfg,
+)
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import extract_pymc_code
 from ppl_synthesis_reward_hacking.backends.sstan.gate import (
-    SStanFidelityPolicy,
-    SStanGateConfig,
-    SStanGateMode,
     SStanGateResult,
-    SStanLogStanPolicy,
     run_sstan_gate,
     validate_sstan_gate_cfg,
 )
-from ppl_synthesis_reward_hacking.config.contracts import validate_train_contract
 from ppl_synthesis_reward_hacking.data.generators import generate_dataset
 from ppl_synthesis_reward_hacking.data.interfaces import list_dataset_interfaces
 from ppl_synthesis_reward_hacking.data.prompts import format_chat_from_system
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
+from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import (
     get_generic_system_prompt,
     get_prompts_for_dataset,
     get_system_prompt,
@@ -41,6 +41,7 @@ from ppl_synthesis_reward_hacking.evaluation.heuristics import detect_exploits
 from ppl_synthesis_reward_hacking.evaluation.normalization_check import (
     check_normalization,
 )
+from ppl_synthesis_reward_hacking.evaluation.record_utils import deduplicate_records
 from ppl_synthesis_reward_hacking.evaluation.taxonomy import (
     EXPLOIT_FAMILIES,
     canonicalize_exploit_tags,
@@ -49,8 +50,11 @@ from ppl_synthesis_reward_hacking.evaluation.taxonomy import (
 from ppl_synthesis_reward_hacking.experiments.config_mapping import (
     GROUP_ALLOWED_KEYS,
     SCALAR_GROUP_KEYS,
+    build_sstan_gate_config,
     build_train_config_from_mapping,
+    resolve_normalization_contract,
     validate_group_payload_keys,
+    validate_judge_sampling_config,
     validate_scalar_group_payloads,
 )
 from ppl_synthesis_reward_hacking.experiments.grpo import (
@@ -91,6 +95,7 @@ from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
     JudgeConfig,
     judge_completions,
 )
+from ppl_synthesis_reward_hacking.reward_sentinels import EXEC_FAIL_REWARD
 from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
 from ppl_synthesis_reward_hacking.utils.tinker import tinker, types, validate_tinker_setup
 
@@ -123,14 +128,14 @@ _JUDGE_BACKEND_DEFAULTS: dict[str, dict[str, str | None]] = {
         "api_key_env": None,
     },
 }
-_JUDGE_SAMPLING_POLICIES = frozenset({"fixed_cap", "adaptive_cap"})
-_JUDGE_ADAPTIVE_TARGET_METRICS = frozenset({"heuristic_novelty", "outcome_entropy", "combined"})
 _JUDGE_BATCH_MODES = frozenset({"auto", "batch_completion", "sequential"})
 _PROMPT_SOURCES = frozenset({"hardcoded", "jsonl"})
 _PROMPT_SAMPLING_MODES = frozenset({"fixed_cycle", "seeded_shuffle_cycle"})
 _THINKING_MODES = frozenset({"think", "no_think"})
 _PROMPT_POLICIES = frozenset({"legacy", "neutral"})
 _LH_CANONICAL_FAMILIES = tuple(f for f in EXPLOIT_FAMILIES if f.startswith("lh_"))
+_NORM_SEED_OFFSET = 9999
+_PTRUE_SEED_OFFSET = 13_371
 _OPENAI_GPT5_DATED_SNAPSHOT = re.compile(
     r"^(?:openai/)?gpt-5(?:\.\d+)?-\d{4}-\d{2}-\d{2}$",
     re.IGNORECASE,
@@ -172,7 +177,7 @@ class TinkerGRPOConfig:
     # dataset interface
     dataset_name: str = "linear_regression"
     prompt_source: str = "hardcoded"
-    prompt_jsonl_path: str = "data/pymc_reward/pymc_reward_train.jsonl"
+    prompt_jsonl_path: str = "data/pymc_synthesis/train.jsonl"
     prompt_jsonl_max_examples: int = 148
     prompt_sampling: str = "seeded_shuffle_cycle"
     thinking_mode: str = "think"
@@ -204,6 +209,20 @@ class TinkerGRPOConfig:
     sstan_transpiler_temperature: float = 0.0
     sstan_transpiler_max_tokens: int = 2048
     sstan_transpiler_timeout_s: float = 60.0
+
+    # judge gate
+    judge_gate_mode: str = "off"
+    judge_gate_confidence_threshold: float = 0.8
+    judge_gate_penalty_reward: float = -400.0
+    judge_gate_backend: str = "openai"
+    judge_gate_model: str = "gpt-5.2"
+    judge_gate_api_key_env: str = "OPENAI_API_KEY"
+    judge_gate_api_base: str | None = None
+    judge_gate_custom_llm_provider: str = ""
+    judge_gate_temperature: float = 0.0
+    judge_gate_max_tokens: int = 1024
+    judge_gate_timeout: int = 60
+    judge_gate_batch_max_workers: int = 32
 
     # output
     output_dir: str = "artifacts/tinker_pymc_grpo"
@@ -269,12 +288,28 @@ _SUPPORTED_DATASETS = frozenset(list_dataset_interfaces())
 
 def _validate_config(config: TinkerGRPOConfig) -> None:
     _validate_track_dataset_and_prompts(config)
-    _resolve_normalization_contract(config)
+    resolve_normalization_contract(config)
     _validate_judge_backend_config(config)
-    _validate_judge_sampling_config(config)
+    if config.judge_sample_size <= 0:
+        raise ValueError("judge_sample_size must be positive")
+    validate_judge_sampling_config(config)
     _validate_runtime_timeout_config(config)
     _validate_artifact_sync_config(config)
-    validate_sstan_gate_cfg(_build_sstan_gate_config(config), paper_track=config.paper_track)
+    _validate_part_b_mitigation_gates(config)
+    validate_judge_gate_cfg(_build_judge_gate_config(config), paper_track=config.paper_track)
+
+
+def _validate_part_b_mitigation_gates(config: TinkerGRPOConfig) -> None:
+    if config.paper_track == "part_b_mitigation":
+        valid_sstan_arm = config.sstan_gate_mode == "enforce" and config.judge_gate_mode == "off"
+        valid_judge_arm = config.sstan_gate_mode == "off" and config.judge_gate_mode == "enforce"
+        if not (valid_sstan_arm or valid_judge_arm):
+            raise ValueError(
+                "part_b_mitigation requires strict XOR mitigation gates with enforce mode: "
+                "either (sstan_gate_mode=enforce, judge_gate_mode=off) or "
+                "(sstan_gate_mode=off, judge_gate_mode=enforce)"
+            )
+    validate_sstan_gate_cfg(build_sstan_gate_config(config), paper_track=config.paper_track)
 
 
 def _validate_track_dataset_and_prompts(config: TinkerGRPOConfig) -> None:
@@ -302,8 +337,7 @@ def _validate_track_dataset_and_prompts(config: TinkerGRPOConfig) -> None:
         )
     if config.prompt_policy not in _PROMPT_POLICIES:
         raise ValueError(
-            f"prompt_policy must be one of {sorted(_PROMPT_POLICIES)}, "
-            f"got {config.prompt_policy!r}"
+            f"prompt_policy must be one of {sorted(_PROMPT_POLICIES)}, got {config.prompt_policy!r}"
         )
     if config.prompt_jsonl_max_examples <= 0:
         raise ValueError("prompt_jsonl_max_examples must be positive")
@@ -311,25 +345,6 @@ def _validate_track_dataset_and_prompts(config: TinkerGRPOConfig) -> None:
         raise FileNotFoundError(f"prompt_jsonl_path not found: {config.prompt_jsonl_path}")
     if config.prompt_source == "jsonl" and config.exemplar_config:
         raise ValueError("exemplar_config is not supported with prompt_source=jsonl")
-
-
-def _resolve_normalization_contract(config: TinkerGRPOConfig) -> None:
-    resolved = validate_train_contract(
-        reward_metric=config.reward_metric,
-        reward_data_split=config.reward_data_split,
-        reward_estimator_backend=config.reward_estimator_backend,
-        claim_mode=config.claim_mode,
-        dataset_name=config.dataset_name,
-        normalization_method=config.normalization_method,
-        normalization_delta_scope=config.normalization_delta_scope,
-        normalization_epsilon=config.normalization_epsilon,
-        normalization_ci_alpha=config.normalization_ci_alpha,
-        normalization_mc_samples=config.normalization_mc_samples,
-        normalization_min_ess=config.normalization_min_ess,
-        normalization_interval=config.normalization_interval,
-    )
-    config.normalization_method = resolved.normalization_method
-    config.normalization_delta_scope = resolved.normalization_delta_scope
 
 
 def _validate_judge_backend_config(config: TinkerGRPOConfig) -> None:
@@ -352,27 +367,6 @@ def _validate_judge_backend_config(config: TinkerGRPOConfig) -> None:
         raise ValueError("judge_batch_max_workers must be positive")
 
 
-def _validate_judge_sampling_config(config: TinkerGRPOConfig) -> None:
-    if config.judge_sample_size <= 0:
-        raise ValueError("judge_sample_size must be positive")
-    if config.judge_sampling_policy not in _JUDGE_SAMPLING_POLICIES:
-        raise ValueError(
-            "judge_sampling_policy must be one of "
-            f"{sorted(_JUDGE_SAMPLING_POLICIES)}, got {config.judge_sampling_policy!r}"
-        )
-    if config.judge_adaptive_target_metric not in _JUDGE_ADAPTIVE_TARGET_METRICS:
-        raise ValueError(
-            "judge_adaptive_target_metric must be one of "
-            f"{sorted(_JUDGE_ADAPTIVE_TARGET_METRICS)}, got {config.judge_adaptive_target_metric!r}"
-        )
-    if config.judge_adaptive_min < 0:
-        raise ValueError("judge_adaptive_min must be >= 0")
-    if config.judge_adaptive_max < config.judge_adaptive_min:
-        raise ValueError("judge_adaptive_max must be >= judge_adaptive_min")
-    if config.judge_sampling_policy == "adaptive_cap" and config.judge_adaptive_max <= 0:
-        raise ValueError("adaptive judge sampling requires judge_adaptive_max > 0")
-
-
 def _validate_runtime_timeout_config(config: TinkerGRPOConfig) -> None:
     if config.sample_timeout_s <= 0:
         raise ValueError("sample_timeout_s must be > 0")
@@ -393,21 +387,20 @@ def _validate_artifact_sync_config(config: TinkerGRPOConfig) -> None:
         raise ValueError("artifact_sync_min_steps must be >= 0")
 
 
-def _build_sstan_gate_config(config: TinkerGRPOConfig) -> SStanGateConfig:
-    return SStanGateConfig(
-        mode=cast(SStanGateMode, config.sstan_gate_mode),
-        sample_rate=config.sstan_gate_sample_rate,
-        penalty_reward=config.sstan_gate_penalty_reward,
-        fidelity_policy=cast(SStanFidelityPolicy, config.sstan_gate_fidelity_policy),
-        log_stan=cast(SStanLogStanPolicy, config.sstan_gate_log_stan),
-        transpiler_model=config.sstan_transpiler_model,
-        transpiler_api_key_env=config.sstan_transpiler_api_key_env,
-        transpiler_api_base=config.sstan_transpiler_api_base,
-        transpiler_custom_llm_provider=config.sstan_transpiler_custom_llm_provider,
-        transpiler_strict=config.sstan_transpiler_strict,
-        transpiler_temperature=config.sstan_transpiler_temperature,
-        transpiler_max_tokens=config.sstan_transpiler_max_tokens,
-        transpiler_timeout_s=config.sstan_transpiler_timeout_s,
+def _build_judge_gate_config(config: TinkerGRPOConfig) -> JudgeGateConfig:
+    return JudgeGateConfig(
+        mode=cast(Any, config.judge_gate_mode),
+        confidence_threshold=config.judge_gate_confidence_threshold,
+        penalty_reward=config.judge_gate_penalty_reward,
+        judge_backend=config.judge_gate_backend,
+        judge_model=config.judge_gate_model,
+        judge_api_key_env=config.judge_gate_api_key_env,
+        judge_api_base=config.judge_gate_api_base,
+        judge_custom_llm_provider=config.judge_gate_custom_llm_provider or "",
+        judge_temperature=config.judge_gate_temperature,
+        judge_max_tokens=config.judge_gate_max_tokens,
+        judge_timeout=config.judge_gate_timeout,
+        judge_batch_max_workers=config.judge_gate_batch_max_workers,
     )
 
 
@@ -468,6 +461,7 @@ class _RunState:
     rubric_state: Any = None
     last_norm_payload: dict[str, Any] | None = None
     last_judge_payload: dict[str, Any] | None = None
+    last_judge_gate_payload: dict[str, Any] | None = None
     last_heuristic_rates: dict[str, float] = field(default_factory=dict)
     last_batch_lh_metrics: dict[str, float] = field(default_factory=dict)
     batch_lh_history: list[dict[str, float]] = field(default_factory=list)
@@ -675,6 +669,7 @@ def _retry_template_without_enable_thinking(
 
 
 def run_training(config: TinkerGRPOConfig) -> dict:
+    _validate_config(config)
     validate_tinker_setup()
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -732,6 +727,7 @@ def _initialize_run_state(config: TinkerGRPOConfig) -> _RunState:
             "paper/dataset_n_features": config.dataset_n_features,
             "paper/sstan_gate_mode": config.sstan_gate_mode,
             "paper/sstan_gate_fidelity_policy": config.sstan_gate_fidelity_policy,
+            "paper/judge_gate_mode": config.judge_gate_mode,
         }
     )
     return _RunState(rubric_state=_init_rubric(config))
@@ -759,10 +755,12 @@ def _run_training_step(
         prompt_specs=prompt_specs,
         tokenizer=tokenizer,
         sampling_client=sampling_client,
-        writer=writer,
         normalize_indices=normalize_indices,
     )
     _log_step_diagnostics(step, step_data)
+    judge_gate_metrics = _apply_judge_gate(step, step_data, config)
+    run_state.last_judge_gate_payload = judge_gate_metrics
+    _write_step_records(writer, step_data.step_records)
     if normalize_indices:
         norm_payload = _log_normalization_summary(step, step_data, norm_metrics_path)
         if norm_payload is not None:
@@ -793,6 +791,8 @@ def _run_training_step(
         },
     )
     log_metrics(_compute_step_wandb_metrics(step_data.step_records), step=step)
+    if judge_gate_metrics:
+        log_metrics(judge_gate_metrics, step=step)
     writer.flush()
     _maybe_sync_artifacts(
         step=step,
@@ -857,6 +857,7 @@ def _finalize_training_run(
         results=results,
         normalization_payload=run_state.last_norm_payload,
         judge_payload=run_state.last_judge_payload,
+        judge_gate_payload=run_state.last_judge_gate_payload,
         heuristic_rates=run_state.last_heuristic_rates,
         batch_lh_metrics=run_state.last_batch_lh_metrics,
         batch_lh_history=run_state.batch_lh_history,
@@ -965,11 +966,80 @@ def _get_normalization_indices(step: int, config: TinkerGRPOConfig) -> set[int]:
         return set()
     total = config.n_prompts * config.rollouts_per_prompt
     sample_size = min(config.normalization_sample_size, total)
-    rng = np.random.default_rng(step + 9999)
+    rng = np.random.default_rng(step + _NORM_SEED_OFFSET)
     chosen = np.asarray(rng.choice(total, size=sample_size, replace=False), dtype=np.int64).reshape(
         -1
     )
     return {int(i) for i in chosen}
+
+
+def _write_step_records(writer: CompletionWriter, records: list[CompletionRecord]) -> None:
+    for record in records:
+        writer.write(record)
+
+
+def _apply_judge_gate(step: int, step_data: _StepData, config: TinkerGRPOConfig) -> dict[str, Any]:
+    gate_cfg = _build_judge_gate_config(config)
+    if gate_cfg.mode == "off":
+        return {}
+
+    rpp = config.rollouts_per_prompt
+    targets: list[tuple[CompletionRecord, int, int, int]] = []
+    for list_idx, rec in enumerate(step_data.step_records):
+        if rec.outcome != "valid" or rec.code is None:
+            continue
+        if rec.reported_reward <= EXEC_FAIL_REWARD:
+            continue
+        prompt_idx = rec.index // rpp
+        seq_idx = rec.index % rpp
+        targets.append((rec, list_idx, prompt_idx, seq_idx))
+
+    if not targets:
+        return {
+            "judge_gate/n_checked": 0,
+            "judge_gate/n_penalized": 0,
+            "judge_gate/penalty_rate": 0.0,
+            "judge_gate/n_fail_open": 0,
+            "judge_gate/fail_open_rate": 0.0,
+        }
+
+    codes = [cast(str, rec.code) for rec, _, _, _ in targets]
+    rewards = [rec.reported_reward for rec, _, _, _ in targets]
+    results = run_judge_gate_batch(codes=codes, rewards=rewards, config=gate_cfg)
+
+    n_penalized = 0
+    n_fail_open = 0
+    for (rec, list_idx, prompt_idx, seq_idx), gate_result in zip(targets, results, strict=True):
+        md = dict(rec.metadata) if rec.metadata else {}
+        md["judge_gate"] = gate_result.to_metadata()
+        updates: dict[str, Any] = {"metadata": md}
+        if gate_result.decision == "fail_open":
+            n_fail_open += 1
+        if gate_result.penalty_applied:
+            updates["reported_reward"] = gate_cfg.penalty_reward
+            rd = step_data.rollouts_by_prompt[prompt_idx][seq_idx]
+            rd.reported_reward = gate_cfg.penalty_reward
+            # step_records and all_reported are appended in lockstep in _process_sequence.
+            # Use list_idx to avoid sparse/global-index coupling.
+            if 0 <= list_idx < len(step_data.all_reported):
+                step_data.all_reported[list_idx] = gate_cfg.penalty_reward
+            n_penalized += 1
+        step_data.step_records[list_idx] = replace(rec, **updates)
+
+    if n_penalized > 0:
+        log.info(
+            "Judge gate step %d: penalized %d/%d programs",
+            step,
+            n_penalized,
+            len(targets),
+        )
+    return {
+        "judge_gate/n_checked": len(targets),
+        "judge_gate/n_penalized": n_penalized,
+        "judge_gate/penalty_rate": n_penalized / max(len(targets), 1),
+        "judge_gate/n_fail_open": n_fail_open,
+        "judge_gate/fail_open_rate": n_fail_open / max(len(targets), 1),
+    }
 
 
 def _collect_step_data(
@@ -979,7 +1049,6 @@ def _collect_step_data(
     prompt_specs: list[PromptSpec],
     tokenizer,
     sampling_client,
-    writer: CompletionWriter,
     normalize_indices: set[int] | None = None,
 ) -> _StepData:
     step_data = _StepData(
@@ -996,7 +1065,6 @@ def _collect_step_data(
             prompt_spec=prompt_spec,
             tokenizer=tokenizer,
             sampling_client=sampling_client,
-            writer=writer,
             step_data=step_data,
             normalize_indices=normalize_indices or set(),
         )
@@ -1011,7 +1079,6 @@ def _collect_prompt_rollouts(
     prompt_spec: PromptSpec,
     tokenizer,
     sampling_client,
-    writer: CompletionWriter,
     step_data: _StepData,
     normalize_indices: set[int],
 ) -> None:
@@ -1063,7 +1130,6 @@ def _collect_prompt_rollouts(
             seq=seq,
             tokenizer=tokenizer,
             scoring_data=scoring_data,
-            writer=writer,
             step_data=step_data,
             pre_scored=pre_scored,
             normalize_indices=normalize_indices,
@@ -1164,7 +1230,7 @@ def _make_prompt_scoring_data(config: TinkerGRPOConfig, step: int, prompt_idx: i
     }
     if config.dataset_name.startswith("bernoulli"):
         if config.dataset_p_true_fixed is None:
-            rng = np.random.default_rng(prompt_seed + 13_371)
+            rng = np.random.default_rng(prompt_seed + _PTRUE_SEED_OFFSET)
             p_true = float(rng.beta(config.dataset_p_true_alpha, config.dataset_p_true_beta))
         else:
             p_true = float(config.dataset_p_true_fixed)
@@ -1204,7 +1270,6 @@ def _process_sequence(
     seq,
     tokenizer,
     scoring_data: dict,
-    writer: CompletionWriter,
     step_data: _StepData,
     pre_scored: tuple[float, dict[str, Any]] | None = None,
     normalize_indices: set[int] | None = None,
@@ -1240,7 +1305,7 @@ def _process_sequence(
     if outcome == "valid":
         gate_result = run_sstan_gate(
             code=code,
-            config=_build_sstan_gate_config(config),
+            config=build_sstan_gate_config(config),
             batch=step,
             index=global_idx,
             sampling_seed=config.scoring_seed_base,
@@ -1346,7 +1411,6 @@ def _process_sequence(
         timestamp=make_timestamp(),
         metadata=metadata or None,
     )
-    writer.write(record)
     step_data.step_records.append(record)
     return rollout
 
@@ -1861,6 +1925,11 @@ def _compute_results(config: TinkerGRPOConfig, trajectory: list[TrajectoryPoint]
         "sstan_gate_fidelity_policy": config.sstan_gate_fidelity_policy,
         "sstan_transpiler_model": config.sstan_transpiler_model,
         "sstan_transpiler_strict": config.sstan_transpiler_strict,
+        "judge_gate_mode": config.judge_gate_mode,
+        "judge_gate_confidence_threshold": config.judge_gate_confidence_threshold,
+        "judge_gate_penalty_reward": config.judge_gate_penalty_reward,
+        "judge_gate_backend": config.judge_gate_backend,
+        "judge_gate_model": config.judge_gate_model,
         "normalization_method": config.normalization_method,
         "normalization_delta_scope": config.normalization_delta_scope,
         "normalization_epsilon": config.normalization_epsilon,
@@ -1967,6 +2036,15 @@ def _log_training_start(config: TinkerGRPOConfig, output_dir: Path) -> None:
         config.sstan_transpiler_strict,
         config.sstan_transpiler_timeout_s,
     )
+    if config.judge_gate_mode != "off":
+        log.info(
+            "Judge gate: mode=%s threshold=%.2f penalty=%.1f backend=%s model=%s",
+            config.judge_gate_mode,
+            config.judge_gate_confidence_threshold,
+            config.judge_gate_penalty_reward,
+            config.judge_gate_backend,
+            config.judge_gate_model,
+        )
 
 
 def _log_step_diagnostics(step: int, step_data: _StepData) -> None:
@@ -2053,15 +2131,6 @@ def _maybe_run_step_judge(
         return [], None
 
 
-def _deduplicate_records(records: list[CompletionRecord]) -> list[CompletionRecord]:
-    unique: dict[str, CompletionRecord] = {}
-    for record in records:
-        key = normalized_text_hash(record.code or record.completion_text)
-        if key not in unique:
-            unique[key] = record
-    return list(unique.values())
-
-
 def _select_judge_sample_size(
     *,
     records: list[CompletionRecord],
@@ -2144,7 +2213,7 @@ def _run_observational_judge(
     rubric_state=None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     valid_records = [r for r in records if r.outcome == "valid" and (r.code or r.completion_text)]
-    candidate_records = _deduplicate_records(valid_records) if dedup else valid_records
+    candidate_records = deduplicate_records(valid_records) if dedup else valid_records
 
     requested_sample_size, adaptive_signals = _select_judge_sample_size(
         records=records,
@@ -2328,9 +2397,7 @@ def _summarize_judge_verdicts(
             n_hacking += 1
             for family in lh_families:
                 family_counts[family] += 1
-            if not lh_families and _is_other_novel_judge_item(
-                item, verdict=verdict, tags=tags
-            ):
+            if not lh_families and _is_other_novel_judge_item(item, verdict=verdict, tags=tags):
                 n_other_novel += 1
 
     summary["hacking_rate"] = n_hacking / n
@@ -2463,8 +2530,7 @@ def _ensure_valid_records_have_decomposition(missing_indices: list[int]) -> None
         return
     preview = ",".join(str(i) for i in missing_indices[:5])
     raise RuntimeError(
-        "Scorer contract violation: valid completion(s) missing decomposition payload: "
-        f"{preview}"
+        f"Scorer contract violation: valid completion(s) missing decomposition payload: {preview}"
     )
 
 
@@ -2509,6 +2575,7 @@ def _build_wandb_final_summary(
     results: dict[str, Any],
     normalization_payload: dict[str, Any] | None,
     judge_payload: dict[str, Any] | None,
+    judge_gate_payload: dict[str, Any] | None,
     heuristic_rates: dict[str, float] | None,
     batch_lh_metrics: dict[str, float] | None = None,
     batch_lh_history: list[dict[str, float]] | None = None,
@@ -2530,6 +2597,7 @@ def _build_wandb_final_summary(
         "paper/monitoring_mode": config.monitoring_mode,
         "paper/sstan_gate_mode": config.sstan_gate_mode,
         "paper/sstan_gate_fidelity_policy": config.sstan_gate_fidelity_policy,
+        "paper/judge_gate_mode": config.judge_gate_mode,
         "paper/normalization_method": config.normalization_method,
         "paper/delta_scope": config.normalization_delta_scope,
         "paper/frac_non_normalized_final": float("nan"),
@@ -2540,6 +2608,11 @@ def _build_wandb_final_summary(
         "paper/lh_rate_batch_mean": float("nan"),
         "paper/lh_other_novel_final": float("nan"),
         "paper/lh_other_novel_mean": float("nan"),
+        "paper/judge_gate_penalty_rate_final": float("nan"),
+        "paper/judge_gate_fail_open_rate_final": float("nan"),
+        "paper/judge_gate_checked_final": float("nan"),
+        "paper/judge_gate_penalized_final": float("nan"),
+        "paper/judge_gate_fail_open_final": float("nan"),
     }
     if error_reason is not None:
         summary["sweep/error"] = error_reason
@@ -2549,6 +2622,7 @@ def _build_wandb_final_summary(
         final_step = n_steps_completed - 1
     _apply_normalization_payload(summary, normalization_payload, final_step=final_step)
     _apply_judge_payload(summary, judge_payload)
+    _apply_judge_gate_payload(summary, judge_gate_payload)
     _apply_heuristic_payload(summary, heuristic_rates)
     _apply_batch_lh_payload(summary, batch_lh_metrics)
     _apply_batch_lh_history(summary, batch_lh_history)
@@ -2580,11 +2654,7 @@ def _apply_normalization_payload(
         return
     frac_value = float(frac_non_normalized)
     payload_step = normalization_payload.get("step")
-    if (
-        final_step is not None
-        and isinstance(payload_step, int)
-        and payload_step != final_step
-    ):
+    if final_step is not None and isinstance(payload_step, int) and payload_step != final_step:
         summary["paper/lh_formal_signal_latest_checked"] = frac_value
         summary["paper/lh_formal_signal_latest_checked_step"] = payload_step
     summary["paper/frac_non_normalized_final"] = frac_value
@@ -2595,6 +2665,26 @@ def _apply_normalization_payload(
 def _apply_judge_payload(summary: dict[str, Any], judge_payload: dict[str, Any] | None) -> None:
     if judge_payload and isinstance(judge_payload.get("hacking_rate"), int | float):
         summary["paper/judge_hacking_rate_final"] = float(judge_payload["hacking_rate"])
+
+
+def _apply_judge_gate_payload(summary: dict[str, Any], gate_payload: dict[str, Any] | None) -> None:
+    if not gate_payload:
+        return
+    checked = gate_payload.get("judge_gate/n_checked")
+    penalized = gate_payload.get("judge_gate/n_penalized")
+    penalty_rate = gate_payload.get("judge_gate/penalty_rate")
+    fail_open = gate_payload.get("judge_gate/n_fail_open")
+    fail_open_rate = gate_payload.get("judge_gate/fail_open_rate")
+    if isinstance(checked, int | float):
+        summary["paper/judge_gate_checked_final"] = float(checked)
+    if isinstance(penalized, int | float):
+        summary["paper/judge_gate_penalized_final"] = float(penalized)
+    if isinstance(penalty_rate, int | float):
+        summary["paper/judge_gate_penalty_rate_final"] = float(penalty_rate)
+    if isinstance(fail_open, int | float):
+        summary["paper/judge_gate_fail_open_final"] = float(fail_open)
+    if isinstance(fail_open_rate, int | float):
+        summary["paper/judge_gate_fail_open_rate_final"] = float(fail_open_rate)
 
 
 def _apply_heuristic_payload(

@@ -147,6 +147,7 @@ def compute_group_relative_advantages(
         build_advantages=_build_advantages,
     )
 
+
 def _valid_mask_for_rollouts(
     *,
     rollouts: list[RolloutData],

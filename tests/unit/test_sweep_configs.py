@@ -103,6 +103,40 @@ EXPECTED_SWEEP_FILES = {
             "train.normalization.normalization_sample_size",
         },
     },
+    "e6_judge_gate.yaml": {
+        "program": "scripts/hydra_train_tinker.py",
+        "launcher": "local",
+        "required_params": {
+            "train.scoring_seed_base",
+        },
+    },
+    "paper_a_base.yaml": {
+        "program": "scripts/hydra_train_tinker.py",
+        "launcher": "local",
+        "required_params": {
+            "train.base_model",
+            "train.scoring_seed_base",
+            "train.data_interface.dataset_n_features",
+        },
+    },
+    "paper_b_sstan.yaml": {
+        "program": "scripts/hydra_train_tinker.py",
+        "launcher": "local",
+        "required_params": {
+            "train.base_model",
+            "train.scoring_seed_base",
+            "train.data_interface.dataset_n_features",
+        },
+    },
+    "paper_b_judge.yaml": {
+        "program": "scripts/hydra_train_tinker.py",
+        "launcher": "local",
+        "required_params": {
+            "train.base_model",
+            "train.scoring_seed_base",
+            "train.data_interface.dataset_n_features",
+        },
+    },
     "e5_antihint.yaml": {
         "program": "scripts/hydra_train_tinker.py",
         "launcher": "local",
@@ -232,6 +266,88 @@ def test_metric_ablation_sweeps_disable_judge_monitoring() -> None:
         assert "train/monitoring_mode=off" in command
         assert "train.monitoring_mode.judge_interval=0" in command
         assert "train.monitoring_mode.rubric_evolution_interval=0" in command
+
+
+def test_paper_matrix_sweeps_use_d5_non_degenerate_train_split() -> None:
+    files = [
+        "paper_a_base.yaml",
+        "paper_b_sstan.yaml",
+        "paper_b_judge.yaml",
+        "e6_judge_gate.yaml",
+    ]
+    for name in files:
+        cfg = _load_yaml(CONFIG_DIR / name)
+        command = cfg.get("command", [])
+        assert "train/data_interface=raw_bernoulli_d5_ablation" in command
+        assert "train.data_interface.dataset_n_train=20" in command
+        assert "train/claim_mode=formal_lh" in command
+
+
+def test_paper_matrix_mitigation_sweeps_enforce_strict_xor() -> None:
+    checks = {
+        "paper_b_sstan.yaml": ("train/sstan_gate=enforce", "train/judge_gate=off"),
+        "paper_b_judge.yaml": ("train/sstan_gate=off", "train/judge_gate=enforce"),
+        "e6_judge_gate.yaml": ("train/sstan_gate=off", "train/judge_gate=enforce"),
+    }
+    for name, (expected_sstan, expected_judge) in checks.items():
+        cfg = _load_yaml(CONFIG_DIR / name)
+        command = cfg.get("command", [])
+        assert expected_sstan in command
+        assert expected_judge in command
+        sstan_overrides = [
+            entry
+            for entry in command
+            if isinstance(entry, str) and entry.startswith("train/sstan_gate=")
+        ]
+        judge_overrides = [
+            entry
+            for entry in command
+            if isinstance(entry, str) and entry.startswith("train/judge_gate=")
+        ]
+        assert sstan_overrides == [expected_sstan]
+        assert judge_overrides == [expected_judge]
+
+
+def test_paper_matrix_and_e6_pin_reward_split_to_train() -> None:
+    files = [
+        "paper_a_base.yaml",
+        "paper_b_sstan.yaml",
+        "paper_b_judge.yaml",
+        "e6_judge_gate.yaml",
+    ]
+    for name in files:
+        cfg = _load_yaml(CONFIG_DIR / name)
+        command = cfg.get("command", [])
+        assert "train/reward_data_split=train" in command
+
+
+def test_paper_matrix_and_e6_seed_sets_are_expected() -> None:
+    expected = {
+        "paper_a_base.yaml": [0, 10000],
+        "paper_b_sstan.yaml": [0, 10000],
+        "paper_b_judge.yaml": [0, 10000],
+        "e6_judge_gate.yaml": [42, 10042],
+    }
+    for name, seeds in expected.items():
+        cfg = _load_yaml(CONFIG_DIR / name)
+        params = cfg.get("parameters", {})
+        seed_param = params.get("train.scoring_seed_base")
+        assert isinstance(seed_param, dict), f"{name}: missing train.scoring_seed_base parameter"
+        assert seed_param.get("values") == seeds
+
+
+def test_mitigation_penalties_are_explicit_and_matched() -> None:
+    sstan_cfg = _load_yaml(CONFIG_DIR / "paper_b_sstan.yaml")
+    judge_cfg = _load_yaml(CONFIG_DIR / "paper_b_judge.yaml")
+    e6_cfg = _load_yaml(CONFIG_DIR / "e6_judge_gate.yaml")
+
+    sstan_cmd = sstan_cfg.get("command", [])
+    judge_cmd = judge_cfg.get("command", [])
+    e6_cmd = e6_cfg.get("command", [])
+
+    assert "train.sstan_gate.sstan_gate_penalty_reward=-100" in sstan_cmd
+    assert "train.judge_gate.judge_gate_penalty_reward=-100" in judge_cmd
+    assert "train.judge_gate.judge_gate_penalty_reward=-100" in e6_cmd
 
 
 def test_all_sweeps_use_compatible_metric_backend_pairs() -> None:

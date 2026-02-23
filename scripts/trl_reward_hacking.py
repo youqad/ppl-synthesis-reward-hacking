@@ -34,17 +34,18 @@ except ImportError:
 
 from ppl_synthesis_reward_hacking.backends.pymc.backend import PyMCBackend
 from ppl_synthesis_reward_hacking.backends.sstan.gate import (
-    SStanGateConfig,
     validate_sstan_gate_cfg,
 )
-from ppl_synthesis_reward_hacking.config.contracts import validate_train_contract
 from ppl_synthesis_reward_hacking.data.generators import generate_dataset
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import load_pymc_reward_prompts
+from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import load_synthesis_prompts
 from ppl_synthesis_reward_hacking.experiments.config_mapping import (
     GROUP_ALLOWED_KEYS,
     SCALAR_GROUP_KEYS,
+    build_sstan_gate_config,
     build_train_config_from_mapping,
+    resolve_normalization_contract,
     validate_group_payload_keys,
+    validate_judge_sampling_config,
     validate_scalar_group_payloads,
 )
 from ppl_synthesis_reward_hacking.experiments.pymc_reward import (
@@ -65,8 +66,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 _PROMPT_SAMPLING_MODES = frozenset({"fixed_cycle", "seeded_shuffle_cycle"})
 _PROMPT_POLICIES = frozenset({"legacy", "neutral"})
-_JUDGE_SAMPLING_POLICIES = frozenset({"fixed_cap", "adaptive_cap"})
-_ADAPTIVE_TARGET_METRICS = frozenset({"heuristic_novelty", "outcome_entropy", "combined"})
 
 
 @dataclass
@@ -113,7 +112,7 @@ class TRLRewardHackingConfig:
     max_grad_norm: float = 1.0
     dataset_name: str = "linear_regression"
     prompt_source: str = "hardcoded"
-    prompt_jsonl_path: str = "data/pymc_reward/pymc_reward_train.jsonl"
+    prompt_jsonl_path: str = "data/pymc_synthesis/train.jsonl"
     prompt_jsonl_max_examples: int = 148
     prompt_sampling: str = "seeded_shuffle_cycle"
     thinking_mode: str = "think"
@@ -151,9 +150,9 @@ def config_from_mapping(mapping: Mapping[str, Any]) -> TRLRewardHackingConfig:
         error_prefix="Unsupported train config keys",
     )
     _validate_mode_and_prompt_config(cfg)
-    _validate_judge_sampling_config(cfg)
-    _resolve_normalization_contract(cfg)
-    validate_sstan_gate_cfg(_build_sstan_gate_config(cfg), paper_track=cfg.paper_track)
+    validate_judge_sampling_config(cfg)
+    resolve_normalization_contract(cfg)
+    validate_sstan_gate_cfg(build_sstan_gate_config(cfg), paper_track=cfg.paper_track)
     return cfg
 
 
@@ -167,9 +166,7 @@ def _validate_mode_and_prompt_config(cfg: TRLRewardHackingConfig) -> None:
     if cfg.monitoring_mode == "judge_evolving" and cfg.judge_interval <= 0:
         raise ValueError("monitoring_mode=judge_evolving requires judge_interval > 0")
     if cfg.monitoring_mode == "judge_evolving" and cfg.rubric_evolution_interval <= 0:
-        raise ValueError(
-            "monitoring_mode=judge_evolving requires rubric_evolution_interval > 0"
-        )
+        raise ValueError("monitoring_mode=judge_evolving requires rubric_evolution_interval > 0")
     if cfg.prompt_source not in {"hardcoded", "jsonl"}:
         raise ValueError("prompt_source must be hardcoded|jsonl")
     if cfg.prompt_sampling not in _PROMPT_SAMPLING_MODES:
@@ -180,62 +177,6 @@ def _validate_mode_and_prompt_config(cfg: TRLRewardHackingConfig) -> None:
         raise ValueError(f"prompt_policy must be one of {sorted(_PROMPT_POLICIES)}")
     if cfg.prompt_jsonl_max_examples <= 0:
         raise ValueError("prompt_jsonl_max_examples must be positive")
-
-
-def _validate_judge_sampling_config(cfg: TRLRewardHackingConfig) -> None:
-    if cfg.judge_sampling_policy not in _JUDGE_SAMPLING_POLICIES:
-        raise ValueError(
-            "judge_sampling_policy must be one of "
-            f"{sorted(_JUDGE_SAMPLING_POLICIES)}, got {cfg.judge_sampling_policy!r}"
-        )
-    if cfg.judge_adaptive_target_metric not in _ADAPTIVE_TARGET_METRICS:
-        raise ValueError(
-            "judge_adaptive_target_metric must be one of "
-            f"{sorted(_ADAPTIVE_TARGET_METRICS)}, got {cfg.judge_adaptive_target_metric!r}"
-        )
-    if cfg.judge_adaptive_min < 0:
-        raise ValueError("judge_adaptive_min must be >= 0")
-    if cfg.judge_adaptive_max < cfg.judge_adaptive_min:
-        raise ValueError("judge_adaptive_max must be >= judge_adaptive_min")
-    if cfg.judge_sampling_policy == "adaptive_cap" and cfg.judge_adaptive_max <= 0:
-        raise ValueError("adaptive judge sampling requires judge_adaptive_max > 0")
-
-
-def _resolve_normalization_contract(cfg: TRLRewardHackingConfig) -> None:
-    resolved = validate_train_contract(
-        reward_metric=cfg.reward_metric,
-        reward_data_split=cfg.reward_data_split,
-        reward_estimator_backend=cfg.reward_estimator_backend,
-        claim_mode=cfg.claim_mode,
-        dataset_name=cfg.dataset_name,
-        normalization_method=cfg.normalization_method,
-        normalization_delta_scope=cfg.normalization_delta_scope,
-        normalization_epsilon=cfg.normalization_epsilon,
-        normalization_ci_alpha=cfg.normalization_ci_alpha,
-        normalization_mc_samples=cfg.normalization_mc_samples,
-        normalization_min_ess=cfg.normalization_min_ess,
-        normalization_interval=cfg.normalization_interval,
-    )
-    cfg.normalization_method = resolved.normalization_method
-    cfg.normalization_delta_scope = resolved.normalization_delta_scope
-
-
-def _build_sstan_gate_config(config: TRLRewardHackingConfig) -> SStanGateConfig:
-    return SStanGateConfig(
-        mode=config.sstan_gate_mode,
-        sample_rate=config.sstan_gate_sample_rate,
-        penalty_reward=config.sstan_gate_penalty_reward,
-        fidelity_policy=config.sstan_gate_fidelity_policy,
-        log_stan=config.sstan_gate_log_stan,
-        transpiler_model=config.sstan_transpiler_model,
-        transpiler_api_key_env=config.sstan_transpiler_api_key_env,
-        transpiler_api_base=config.sstan_transpiler_api_base,
-        transpiler_custom_llm_provider=config.sstan_transpiler_custom_llm_provider,
-        transpiler_strict=config.sstan_transpiler_strict,
-        transpiler_temperature=config.sstan_transpiler_temperature,
-        transpiler_max_tokens=config.sstan_transpiler_max_tokens,
-        transpiler_timeout_s=config.sstan_transpiler_timeout_s,
-    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -285,7 +226,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--prompt-source", default="hardcoded", choices=["hardcoded", "jsonl"])
     p.add_argument(
         "--prompt-jsonl-path",
-        default="data/pymc_reward/pymc_reward_train.jsonl",
+        default="data/pymc_synthesis/train.jsonl",
     )
     p.add_argument("--prompt-jsonl-max-examples", type=int, default=148)
     p.add_argument(
@@ -331,7 +272,7 @@ def _load_train_dataset(config: TRLRewardHackingConfig) -> tuple[list[dict[str, 
     max_examples = config.n_prompts
     if config.prompt_source == "jsonl":
         max_examples = min(config.n_prompts, config.prompt_jsonl_max_examples)
-    prompt_dicts = load_pymc_reward_prompts(
+    prompt_dicts = load_synthesis_prompts(
         max_examples=max_examples,
         dataset_name=config.dataset_name,
         prompt_source=config.prompt_source,
@@ -402,6 +343,7 @@ def _build_reward_function(config: TRLRewardHackingConfig, output_dir: Path):
         sstan_transpiler_max_tokens=config.sstan_transpiler_max_tokens,
         sstan_transpiler_timeout_s=config.sstan_transpiler_timeout_s,
     )
+
 
 def _build_model_init_kwargs(config: TRLRewardHackingConfig) -> dict[str, Any] | None:
     if not config.use_4bit:

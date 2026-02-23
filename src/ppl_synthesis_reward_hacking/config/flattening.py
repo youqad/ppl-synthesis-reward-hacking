@@ -72,12 +72,28 @@ SSTAN_GATE_KEYS = (
     "sstan_transpiler_timeout_s",
 )
 
+JUDGE_GATE_KEYS = (
+    "judge_gate_mode",
+    "judge_gate_confidence_threshold",
+    "judge_gate_penalty_reward",
+    "judge_gate_backend",
+    "judge_gate_model",
+    "judge_gate_api_key_env",
+    "judge_gate_api_base",
+    "judge_gate_custom_llm_provider",
+    "judge_gate_temperature",
+    "judge_gate_max_tokens",
+    "judge_gate_timeout",
+    "judge_gate_batch_max_workers",
+)
+
 GROUP_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
     "data_interface": DATA_INTERFACE_KEYS,
     "normalization": NORMALIZATION_KEYS,
     "sampling": SAMPLING_KEYS,
     "monitoring_mode": MONITORING_MODE_KEYS,
     "sstan_gate": SSTAN_GATE_KEYS,
+    "judge_gate": JUDGE_GATE_KEYS,
 }
 
 
@@ -97,8 +113,7 @@ def _coalesce_nested_value(raw: Any, key: str) -> Any:
                 raise TypeError(f"{key} must be a scalar value, got nested mapping")
     if key == "monitoring_mode" and isinstance(value, bool):
         raise TypeError(
-            "monitoring_mode must be a string ('off' or 'judge_evolving'), "
-            f"got bool: {value}"
+            f"monitoring_mode must be a string ('off' or 'judge_evolving'), got bool: {value}"
         )
     return value
 
@@ -126,7 +141,7 @@ def flatten_hydra_train_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         if scalar_key in flattened:
             flattened[scalar_key] = _coalesce_nested_value(flattened[scalar_key], scalar_key)
 
-    for group in ("data_interface", "normalization", "sampling", "sstan_gate"):
+    for group in ("data_interface", "normalization", "sampling", "sstan_gate", "judge_gate"):
         _merge_payload_values(
             flattened,
             flattened.pop(group, None),
@@ -149,6 +164,7 @@ __all__ = [
     "SAMPLING_KEYS",
     "MONITORING_MODE_KEYS",
     "SSTAN_GATE_KEYS",
+    "JUDGE_GATE_KEYS",
     "GROUP_PAYLOAD_KEYS",
     "flatten_hydra_train_mapping",
 ]
