@@ -42,21 +42,3 @@ def bernoulli_raw_interface(*, d: int) -> InterfaceSpec:
             "custom unnormalized density observations",
         ),
     )
-
-
-def linear_reg_interface(*, n_features: int, n_train: int) -> InterfaceSpec:
-    """Canonical raw-data interface for linear regression."""
-    return InterfaceSpec(
-        name=f"linear_regression_n{n_train}_p{n_features}",
-        y_domain=f"R^{n_train}",
-        raw_data_required=True,
-        allowed_observation_forms=(
-            "observe(data['y'])",
-            "observe(y_data) where y_data = pm.MutableData('y_data', data['y'])",
-        ),
-        forbidden_obs_forms=(
-            "observe(constant literal)",
-            "observe data['y'] more than once",
-            "data-dependent score injection via Potential",
-        ),
-    )

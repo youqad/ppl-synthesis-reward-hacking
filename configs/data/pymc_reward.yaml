@@ -1,6 +1,0 @@
-name: pymc_reward_jsonl
-format: jsonl
-paths:
-  train: data/pymc_reward/pymc_reward_train.jsonl
-  val: data/pymc_reward/pymc_reward_val.jsonl
-  test: data/pymc_reward/pymc_reward_test.jsonl

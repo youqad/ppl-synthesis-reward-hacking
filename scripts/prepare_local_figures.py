@@ -19,6 +19,8 @@ from typing import Any
 
 import yaml
 
+from ppl_synthesis_reward_hacking.utils.io import load_jsonl
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "paper" / "current_experiments.yaml"
 
@@ -162,29 +164,24 @@ def _summarize_completions(path: Path) -> dict[str, Any]:
     n_non_normalized = 0
     n_norm_checked = 0
 
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
+    for rec in load_jsonl(path):
+        records += 1
+        batch = rec.get("batch")
+        if isinstance(batch, int) and batch > max_batch:
+            max_batch = batch
+        if rec.get("outcome") == "valid":
+            valid += 1
+            meta = rec.get("metadata")
+            if not isinstance(meta, dict):
                 continue
-            rec = json.loads(line)
-            records += 1
-            batch = rec.get("batch")
-            if isinstance(batch, int) and batch > max_batch:
-                max_batch = batch
-            if rec.get("outcome") == "valid":
-                valid += 1
-                meta = rec.get("metadata")
-                if not isinstance(meta, dict):
-                    continue
-                norm = meta.get("normalization")
-                if isinstance(norm, dict):
-                    n_norm_checked += 1
-                    lm_f = _safe_float(norm.get("log_mass"))
-                    if lm_f is not None:
-                        abs_log_masses.append(abs(lm_f))
-                    if not norm.get("is_normalized", True):
-                        n_non_normalized += 1
+            norm = meta.get("normalization")
+            if isinstance(norm, dict):
+                n_norm_checked += 1
+                lm_f = _safe_float(norm.get("log_mass"))
+                if lm_f is not None:
+                    abs_log_masses.append(abs(lm_f))
+                if not norm.get("is_normalized", True):
+                    n_non_normalized += 1
 
     valid_rate = (float(valid) / float(records)) if records > 0 else None
     frac_nn = (n_non_normalized / n_norm_checked) if n_norm_checked > 0 else None

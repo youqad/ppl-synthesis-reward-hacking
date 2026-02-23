@@ -75,11 +75,3 @@ def expected_norm_method(dataset_name: str) -> str:
     if supports_importance_mc(dataset_name):
         return "importance_mc"
     return "off"
-
-
-def validate_dataset_payload(dataset_name: str, payload: dict[str, object]) -> None:
-    spec = get_interface_spec(dataset_name)
-    if "y" not in payload:
-        raise ValueError(f"{dataset_name} scoring payload missing 'y'")
-    if spec.requires_x and "X" not in payload:
-        raise ValueError(f"{dataset_name} scoring payload missing required 'X'")

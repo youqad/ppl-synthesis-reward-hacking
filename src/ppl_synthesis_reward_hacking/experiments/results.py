@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Sequence
 from typing import Any, Protocol
 
@@ -84,10 +85,12 @@ def print_training_summary(results: dict[str, Any]) -> None:
 
 
 def json_default(obj: Any) -> Any:
-    if isinstance(obj, np.integer):
-        return int(obj)
-    if isinstance(obj, np.floating):
-        return float(obj)
+    if isinstance(obj, np.generic):
+        obj = obj.item()
     if isinstance(obj, np.ndarray):
         return obj.tolist()
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, str | int | float | bool | list | dict | type(None)):
+        return obj
     return str(obj)

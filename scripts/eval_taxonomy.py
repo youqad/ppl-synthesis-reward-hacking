@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import random
 import re
 from collections import Counter
@@ -17,7 +16,9 @@ from ppl_synthesis_reward_hacking.evaluation.record_utils import (
     record_code_hash,
 )
 from ppl_synthesis_reward_hacking.evaluation.taxonomy import canonicalize_exploit_tags
+from ppl_synthesis_reward_hacking.experiments.results import json_default
 from ppl_synthesis_reward_hacking.logging.completions import CompletionRecord, load_completions
+from ppl_synthesis_reward_hacking.utils.io import load_jsonl
 
 _INITVAL_ASSIGNMENT_RE = re.compile(r"\b(?:initval|testval|initial_point)\s*=", re.IGNORECASE)
 _CODE_BLOCK_RE = re.compile(r"```python\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
@@ -50,15 +51,10 @@ def parse_args() -> argparse.Namespace:
 
 def _load_judge_verdicts(path: Path) -> dict[tuple[int, int], dict[str, Any]]:
     by_key: dict[tuple[int, int], dict[str, Any]] = {}
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            batch = int(row.get("batch", -1))
-            index = int(row.get("index", -1))
-            by_key[(batch, index)] = row
+    for row in load_jsonl(path):
+        batch = int(row.get("batch", -1))
+        index = int(row.get("index", -1))
+        by_key[(batch, index)] = row
     return by_key
 
 
@@ -159,12 +155,6 @@ def _batch_metrics(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def _json_float(value: Any) -> Any:
-    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-        return None
-    return value
-
-
 def _judge_fields_for_record(
     record: CompletionRecord,
     judge_by_key: dict[tuple[int, int], dict[str, Any]],
@@ -189,7 +179,7 @@ def _row_for_parse_fail_without_code(
         "index": record.index,
         "code_hash": record_code_hash(record),
         "outcome": record.outcome,
-        "reported_reward": _json_float(record.reported_reward),
+        "reported_reward": json_default(record.reported_reward),
         "exploit_tags": [],
         "taxonomy_status": "no_code_parse_fail",
         "judge_verdict": judge_verdict,
@@ -211,7 +201,7 @@ def _row_for_analyzed_record(
         "index": record.index,
         "code_hash": record_code_hash(record),
         "outcome": record.outcome,
-        "reported_reward": _json_float(record.reported_reward),
+        "reported_reward": json_default(record.reported_reward),
         "exploit_tags": exploit_tags,
         "taxonomy_status": "analyzed",
         "judge_verdict": judge_verdict,

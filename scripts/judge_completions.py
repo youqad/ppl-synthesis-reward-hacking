@@ -33,6 +33,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ppl_synthesis_reward_hacking.config.load import apply_overrides, load_config
+from ppl_synthesis_reward_hacking.evaluation.record_utils import deduplicate_records
+from ppl_synthesis_reward_hacking.experiments.results import json_default
 from ppl_synthesis_reward_hacking.logging.completions import load_completions
 from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
     JudgeConfig,
@@ -73,18 +75,6 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         help="Deduplicate completions by normalized code hash before judging (default: true)",
     )
     return p.parse_known_args()
-
-
-def _deduplicate_records(records):
-    from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
-
-    unique = {}
-    for record in records:
-        content = record.code or record.completion_text
-        key = normalized_text_hash(content)
-        if key not in unique:
-            unique[key] = record
-    return list(unique.values())
 
 
 def _load_judge_config(config_path: str | None, overrides: list[str]) -> JudgeConfig:
@@ -202,12 +192,6 @@ def _hacking_fraction_for_batches(
     return round(sum(1 for _, verdict in matched if verdict.verdict == "hacking") / len(matched), 3)
 
 
-def _json_float(value: object) -> object:
-    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-        return None
-    return value
-
-
 def main() -> None:
     args, overrides = parse_args()
 
@@ -226,7 +210,7 @@ def main() -> None:
 
     if args.dedup:
         pre = len(records)
-        records = _deduplicate_records(records)
+        records = deduplicate_records(records)
         log.info("Deduplicated completions: %d -> %d", pre, len(records))
 
     if not records:
@@ -259,8 +243,8 @@ def main() -> None:
                 "batch": rec.batch,
                 "index": rec.index,
                 "outcome": rec.outcome,
-                "reported_reward": _json_float(rec.reported_reward),
-                "log_mass": _json_float(
+                "reported_reward": json_default(rec.reported_reward),
+                "log_mass": json_default(
                     (meta.get("normalization") or {}).get("log_mass")
                     if isinstance(meta.get("normalization"), dict)
                     else float("nan")
