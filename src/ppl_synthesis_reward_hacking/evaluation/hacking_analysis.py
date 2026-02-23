@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import math
 import re
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean, stdev
-from types import ModuleType
 
 from ppl_synthesis_reward_hacking.evaluation.exploit_classification import (
     classify_beta_concentration,
@@ -16,55 +14,17 @@ from ppl_synthesis_reward_hacking.evaluation.exploit_classification import (
     detect_misspecifications,
     extract_beta_params,
 )
-
-try:
-    from ppl_synthesis_reward_hacking.logging.completions import load_completions_raw
-
-    def load_completions(path: Path) -> list[dict]:
-        return load_completions_raw(path)
-
-except ImportError:  # Fallback for environments without project imports.
-
-    def load_completions(path: Path) -> list[dict]:
-        records = []
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                d = json.loads(line)
-                for k in ("reported_reward",):
-                    if d.get(k) is None:
-                        d[k] = float("nan")
-                records.append(d)
-        return records
+from ppl_synthesis_reward_hacking.logging.completions import load_completions_raw
+from ppl_synthesis_reward_hacking.reward_sentinels import OUTCOME_EXEC_FAIL as _OUTCOME_EXEC_FAIL
+from ppl_synthesis_reward_hacking.reward_sentinels import OUTCOME_PARSE_FAIL as _OUTCOME_PARSE_FAIL
+from ppl_synthesis_reward_hacking.reward_sentinels import OUTCOME_VALID as _OUTCOME_VALID
+from ppl_synthesis_reward_hacking.reward_sentinels import (
+    classify_outcome_from_reward as _classify_outcome_from_reward,
+)
 
 
-_reward_sentinels: ModuleType | None
-try:
-    from ppl_synthesis_reward_hacking import reward_sentinels as _reward_sentinels
-except ImportError:  # Fallback for environments without project imports.
-    _reward_sentinels = None
-
-if _reward_sentinels is None:
-    _EXEC_FAIL_REWARD = -400.0
-    _PARSE_FAIL_REWARD = -500.0
-    _OUTCOME_EXEC_FAIL = "exec_fail"
-    _OUTCOME_PARSE_FAIL = "parse_fail"
-    _OUTCOME_VALID = "valid"
-
-    def _classify_outcome_from_reward(reported: float) -> str:
-        if reported == _PARSE_FAIL_REWARD:
-            return _OUTCOME_PARSE_FAIL
-        if reported == _EXEC_FAIL_REWARD:
-            return _OUTCOME_EXEC_FAIL
-        return _OUTCOME_VALID
-
-else:
-    _OUTCOME_EXEC_FAIL = _reward_sentinels.OUTCOME_EXEC_FAIL
-    _OUTCOME_PARSE_FAIL = _reward_sentinels.OUTCOME_PARSE_FAIL
-    _OUTCOME_VALID = _reward_sentinels.OUTCOME_VALID
-    _classify_outcome_from_reward = _reward_sentinels.classify_outcome_from_reward
+def load_completions(path: Path) -> list[dict]:
+    return load_completions_raw(path)
 
 
 def _is_valid(record: dict) -> bool:

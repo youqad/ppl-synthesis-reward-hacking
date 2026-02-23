@@ -1,0 +1,13 @@
+sstan_gate_mode: "off"
+sstan_gate_sample_rate: 1.0
+sstan_gate_penalty_reward: -100.0
+sstan_gate_fidelity_policy: reject_on_source_signal
+sstan_gate_log_stan: none
+sstan_transpiler_model: glm-5
+sstan_transpiler_api_key_env: null
+sstan_transpiler_api_base: null
+sstan_transpiler_custom_llm_provider: null
+sstan_transpiler_strict: true
+sstan_transpiler_temperature: 0.0
+sstan_transpiler_max_tokens: 2048
+sstan_transpiler_timeout_s: 60.0

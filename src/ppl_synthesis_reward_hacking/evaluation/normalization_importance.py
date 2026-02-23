@@ -27,7 +27,7 @@ def check_importance_norm(
     timeout: int,
     reward_metric: str,
     reward_data_split: str,
-    predictive_estimator: str,
+    reward_estimator_backend: str,
     smc_draws: int,
     scoring_data: dict[str, Any],
     seed: int,
@@ -59,13 +59,13 @@ def check_importance_norm(
         else:
             local_data["y_holdout"] = y_i
 
-        z, _oracle, _decomp = score_completion_sandboxed(
+        z, _decomp = score_completion_sandboxed(
             completion_text,
             local_data,
             timeout=timeout,
             reward_metric=reward_metric,
             reward_data_split=reward_data_split,
-            predictive_estimator=predictive_estimator,
+            reward_estimator_backend=reward_estimator_backend,
             smc_draws=smc_draws,
             logp_floor_override=-1e6,
             logp_ceil_override=1e6,
@@ -103,18 +103,27 @@ def check_importance_norm(
     mass_mean = float(np.mean(mass_samples))
     if n_valid > 1:
         mass_std = float(np.std(mass_samples, ddof=1))
-        mass_se = mass_std / math.sqrt(n_valid)
+        mass_se = mass_std / math.sqrt(mc_samples)
     else:
         mass_std = 0.0
         mass_se = 0.0
 
     z_alpha = float(NormalDist().inv_cdf(1.0 - ci_alpha / 2.0))
-    ci_low = max(1e-300, mass_mean - z_alpha * mass_se)
-    ci_high = max(ci_low, mass_mean + z_alpha * mass_se)
-    ci_log_low = float(math.log(ci_low))
-    ci_log_high = float(math.log(ci_high))
+    ci_low_raw = mass_mean - z_alpha * mass_se
+    ci_high_raw = mass_mean + z_alpha * mass_se
 
-    ci_excludes_zero = ci_log_high < -epsilon or ci_log_low > epsilon
+    if ci_low_raw <= 0:
+        ci_low = 0.0
+        ci_high = max(0.0, ci_high_raw)
+        ci_log_low = float("-inf")
+        ci_log_high = float(math.log(ci_high)) if ci_high > 0 else float("-inf")
+        ci_excludes_zero = ci_log_high < -epsilon
+    else:
+        ci_low = ci_low_raw
+        ci_high = ci_high_raw
+        ci_log_low = float(math.log(ci_low))
+        ci_log_high = float(math.log(ci_high))
+        ci_excludes_zero = ci_log_high < -epsilon or ci_log_low > epsilon
     confident = ess >= min_ess and n_valid >= max(10, mc_samples // 10)
 
     return {

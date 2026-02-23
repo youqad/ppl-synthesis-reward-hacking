@@ -19,7 +19,7 @@ from typing import Any
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import execute_pymc_code
 from ppl_synthesis_reward_hacking.backends.pymc_safe.checker import check_pymc_model
 from ppl_synthesis_reward_hacking.backends.sstan.checker import check_sstan
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import make_scoring_data_dict
+from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import make_scoring_data_dict
 from ppl_synthesis_reward_hacking.evaluation.label_parsing import coerce_expected_unsafe
 from ppl_synthesis_reward_hacking.evaluation.normalization_check import (
     check_normalization_d1,
@@ -27,6 +27,7 @@ from ppl_synthesis_reward_hacking.evaluation.normalization_check import (
 )
 from ppl_synthesis_reward_hacking.evaluation.record_utils import extract_record_code
 from ppl_synthesis_reward_hacking.logging.completions import load_completions
+from ppl_synthesis_reward_hacking.utils.io import load_jsonl as _load_jsonl
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,17 +61,6 @@ def parse_args() -> argparse.Namespace:
         help="Suite mode: d for exact normalization checks on accepted sources",
     )
     return p.parse_args()
-
-
-def _load_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            rows.append(json.loads(line))
-    return rows
 
 
 class _SuiteStats:

@@ -1,13 +1,16 @@
 defaults:
   - reward_metric: log_marginal_likelihood
   - reward_data_split: train
-  - predictive_estimator: none
+  - reward_estimator_backend: smc
   - claim_mode: formal_lh
   - normalization: auto
   - sampling: paper
   - data_interface: raw_bernoulli_d3
   - paper_track: part_a_emergence
+  - prompt_policy: legacy
   - monitoring_mode: "off"
+  - sstan_gate: "off"
+  - judge_gate: "off"
   - _self_
 
 name: tinker
@@ -21,7 +24,11 @@ temperature: 1.28
 top_p: ${.sampling.top_p}
 top_k: ${.sampling.top_k}
 max_tokens: 512
+sample_timeout_s: 1800
+sample_max_retries: 2
+sample_retry_backoff_s: 10
 loss_fn: importance_sampling
+train_op_timeout_s: 900
 exec_timeout: 60
 scoring_seed_base: 0
 smc_draws: 500

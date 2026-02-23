@@ -1,5 +1,6 @@
 normalization_method: auto
-normalization_delta_scope: raw_y_binary
+# resolved at runtime from data_interface spec; "auto" bypasses static delta_scope validation
+normalization_delta_scope: auto
 normalization_epsilon: 0.05
 normalization_ci_alpha: 0.05
 normalization_mc_samples: 256

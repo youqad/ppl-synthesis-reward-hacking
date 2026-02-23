@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+from ppl_synthesis_reward_hacking.evaluation.record_utils import deduplicate_records
 from ppl_synthesis_reward_hacking.logging.completions import CompletionRecord
 from ppl_synthesis_reward_hacking.monitoring.llm_judge import JudgeConfig, JudgeVerdict
 
@@ -14,7 +15,6 @@ assert _SPEC.loader is not None
 _SPEC.loader.exec_module(_MODULE)
 
 _compute_summary = _MODULE._compute_summary
-_deduplicate_records = _MODULE._deduplicate_records
 
 
 def _record(*, code: str, reported: float = 0.0, batch: int = 0) -> CompletionRecord:
@@ -37,7 +37,7 @@ def test_deduplicate_records_by_normalized_code() -> None:
         _record(code="```python\n   x=1   \n```", reported=2.0),
         _record(code="```python\ny=2\n```", reported=3.0),
     ]
-    deduped = _deduplicate_records(records)
+    deduped = deduplicate_records(records)
     assert len(deduped) == 2
 
 

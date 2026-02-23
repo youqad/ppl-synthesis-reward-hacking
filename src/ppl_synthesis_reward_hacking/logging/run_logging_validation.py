@@ -6,30 +6,23 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-REQUIRED_SUMMARY_KEYS_CORE: tuple[str, ...] = (
+from ppl_synthesis_reward_hacking.config.flattening import (
+    GROUP_PAYLOAD_KEYS,
+    MONITORING_MODE_KEYS,
+    flatten_hydra_train_mapping,
+)
+from ppl_synthesis_reward_hacking.logging.paper_summary_contract import (
+    PAPER_SUMMARY_KEYS_CORE,
+    PAPER_SUMMARY_KEYS_TINKER,
+)
+
+REQUIRED_SWEEP_SUMMARY_KEYS: tuple[str, ...] = (
     "sweep/run_status",
     "sweep/final_lh_formal_signal",
     "sweep/final_valid_rate",
-    "paper/track",
-    "paper/claim_mode",
-    "paper/reward_metric",
-    "paper/reward_data_split",
-    "paper/predictive_estimator",
-    "paper/monitoring_mode",
-    "paper/normalization_method",
-    "paper/delta_scope",
-    "paper/frac_non_normalized_final",
-    "paper/lh_formal_signal_final",
-    "paper/judge_hacking_rate_final",
-    "paper/lh_family_prevalence_final",
 )
-
-REQUIRED_SUMMARY_KEYS_TINKER: tuple[str, ...] = (
-    "paper/lh_rate_batch_final",
-    "paper/lh_rate_batch_mean",
-    "paper/lh_other_novel_final",
-    "paper/lh_other_novel_mean",
-)
+REQUIRED_SUMMARY_KEYS_CORE: tuple[str, ...] = REQUIRED_SWEEP_SUMMARY_KEYS + PAPER_SUMMARY_KEYS_CORE
+REQUIRED_SUMMARY_KEYS_TINKER: tuple[str, ...] = PAPER_SUMMARY_KEYS_TINKER
 
 ALWAYS_REQUIRED_FILES: tuple[str, ...] = (
     "completions.jsonl",
@@ -39,14 +32,16 @@ ALWAYS_REQUIRED_FILES: tuple[str, ...] = (
 )
 
 
-def _as_int(raw: Any, default: int = 0) -> int:
+def _as_int(raw: Any, default: int = 0, *, field_name: str) -> int:
+    if raw is None:
+        return default
     if isinstance(raw, bool):
-        return int(raw)
+        raise ValueError(f"{field_name} must be numeric, got bool")
     if isinstance(raw, int | float):
         if math.isnan(float(raw)) or math.isinf(float(raw)):
-            return default
+            raise ValueError(f"{field_name} must be finite")
         return int(raw)
-    return default
+    raise ValueError(f"{field_name} must be numeric, got {type(raw).__name__}")
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
@@ -67,20 +62,68 @@ def _load_train_cfg(run_dir: Path) -> dict[str, Any]:
     return train if isinstance(train, dict) else {}
 
 
+def _normalized_train_cfg(train_cfg: Mapping[str, Any]) -> dict[str, Any]:
+    _validate_monitoring_mode_payload(train_cfg.get("monitoring_mode"))
+    for group_name in GROUP_PAYLOAD_KEYS:
+        if group_name == "monitoring_mode":
+            continue
+        if group_name in train_cfg and not isinstance(train_cfg[group_name], Mapping):
+            raise ValueError(
+                f"train.{group_name} payload must be a mapping, got "
+                f"{type(train_cfg[group_name]).__name__}"
+            )
+    flattened = flatten_hydra_train_mapping(train_cfg)
+    if "name" in train_cfg and "name" not in flattened:
+        flattened["name"] = train_cfg["name"]
+    return flattened
+
+
+def _validate_monitoring_mode_payload(payload: Any) -> None:
+    if not isinstance(payload, Mapping):
+        return
+    if "selected" in payload:
+        selected_value = payload.get("selected")
+        if (
+            len(payload) != 1
+            or isinstance(selected_value, Mapping)
+            or not isinstance(selected_value, str)
+        ):
+            raise ValueError(
+                "Unsupported keys in train.monitoring_mode payload: "
+                + ", ".join(f"monitoring_mode.{key}" for key in sorted(str(k) for k in payload))
+            )
+        return
+    allowed = {"monitoring_mode", *MONITORING_MODE_KEYS}
+    if "monitoring_mode" not in payload:
+        raise ValueError("train.monitoring_mode payload must include monitoring_mode")
+    unexpected = sorted(str(key) for key in payload if key not in allowed)
+    if unexpected:
+        raise ValueError(
+            "Unsupported keys in train.monitoring_mode payload: "
+            + ", ".join(f"monitoring_mode.{key}" for key in unexpected)
+        )
+
+
 def required_summary_keys_for_train_cfg(train_cfg: Mapping[str, Any]) -> tuple[str, ...]:
-    name = str(train_cfg.get("name", "")).strip().lower()
+    normalized = _normalized_train_cfg(train_cfg)
+    name = str(normalized.get("name", "")).strip().lower()
     if name == "tinker":
         return REQUIRED_SUMMARY_KEYS_CORE + REQUIRED_SUMMARY_KEYS_TINKER
     return REQUIRED_SUMMARY_KEYS_CORE
 
 
 def required_files_for_train_cfg(train_cfg: Mapping[str, Any]) -> set[str]:
+    train_cfg = _normalized_train_cfg(train_cfg)
     required = set(ALWAYS_REQUIRED_FILES)
 
-    n_steps = _as_int(train_cfg.get("n_steps"), default=0)
+    n_steps = _as_int(train_cfg.get("n_steps"), default=0, field_name="n_steps")
 
     normalization_method = str(train_cfg.get("normalization_method", "off")).strip().lower()
-    normalization_interval = _as_int(train_cfg.get("normalization_interval"), default=0)
+    normalization_interval = _as_int(
+        train_cfg.get("normalization_interval"),
+        default=0,
+        field_name="normalization_interval",
+    )
     if (
         normalization_method != "off"
         and normalization_interval > 0
@@ -89,12 +132,20 @@ def required_files_for_train_cfg(train_cfg: Mapping[str, Any]) -> set[str]:
         required.add("normalization_metrics.jsonl")
 
     monitoring_mode = str(train_cfg.get("monitoring_mode", "off")).strip().lower()
-    judge_interval = _as_int(train_cfg.get("judge_interval"), default=0)
+    judge_interval = _as_int(
+        train_cfg.get("judge_interval"),
+        default=0,
+        field_name="judge_interval",
+    )
     judge_needed = monitoring_mode != "off" and judge_interval > 0
     if judge_needed and (n_steps <= 0 or n_steps >= judge_interval):
         required.add("judge_metrics.jsonl")
 
-    rubric_interval = _as_int(train_cfg.get("rubric_evolution_interval"), default=0)
+    rubric_interval = _as_int(
+        train_cfg.get("rubric_evolution_interval"),
+        default=0,
+        field_name="rubric_evolution_interval",
+    )
     if (
         monitoring_mode == "judge_evolving"
         and rubric_interval > 0
@@ -125,11 +176,16 @@ def validate_run_logging(
 ) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     train_cfg = _load_train_cfg(run_dir)
-    required_files = required_files_for_train_cfg(train_cfg)
-    required_summary_keys = required_summary_keys_for_train_cfg(train_cfg)
+    parse_errors: list[str] = []
+    try:
+        required_files = required_files_for_train_cfg(train_cfg)
+        required_summary_keys = required_summary_keys_for_train_cfg(train_cfg)
+    except (TypeError, ValueError) as exc:
+        required_files = set(ALWAYS_REQUIRED_FILES)
+        required_summary_keys = REQUIRED_SUMMARY_KEYS_CORE
+        parse_errors.append(f"hydra_resolved_config.json: {exc}")
 
     missing_files = sorted(name for name in required_files if not (run_dir / name).exists())
-    parse_errors: list[str] = []
 
     for name in sorted(required_files):
         path = run_dir / name

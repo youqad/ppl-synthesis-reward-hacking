@@ -58,7 +58,7 @@ def _score_and_record(
     batch: int,
     prompt_idx: int = 0,
 ) -> dict:
-    reported, _oracle, decomp = score_completion_sandboxed(completion, scoring_data, timeout=60)
+    reported, decomp = score_completion_sandboxed(completion, scoring_data, timeout=60)
     outcome = "valid"
     if reported == PARSE_FAIL_REWARD:
         outcome = "parse_fail"

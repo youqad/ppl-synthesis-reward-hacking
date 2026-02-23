@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from ppl_synthesis_reward_hacking.experiments.results import json_default
 from ppl_synthesis_reward_hacking.logging.completions import CompletionRecord
 
 
@@ -77,13 +78,12 @@ def test_evaluate_normalization_rejects_large_d_in_auto_mode() -> None:
         )
 
 
-def test_json_float_handles_numpy_scalars() -> None:
-    module = _load_module()
-    assert module._json_float(np.float32(1.25)) == pytest.approx(1.25)
-    assert module._json_float(np.int64(7)) == 7
-    assert module._json_float(np.float64(float("nan"))) is None
-    assert module._json_float(float("inf")) is None
-    assert module._json_float(float("-inf")) is None
+def test_json_default_handles_numpy_scalars() -> None:
+    assert json_default(np.float32(1.25)) == pytest.approx(1.25)
+    assert json_default(np.int64(7)) == 7
+    assert json_default(np.float64(float("nan"))) is None
+    assert json_default(float("inf")) is None
+    assert json_default(float("-inf")) is None
 
 
 def test_record_hash_dedups_on_extracted_code_not_completion_prose() -> None:

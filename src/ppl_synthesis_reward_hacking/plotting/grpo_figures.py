@@ -410,42 +410,18 @@ def plot_lh_taxonomy_bar(
         r for r in records if r.get("outcome") == "valid" and r.get("batch", 0) >= late_batch_cutoff
     ]
 
-    by_cat: dict[str, list[dict]] = defaultdict(list)
-    for rec in late_valid:
-        by_cat[classify_fn(rec)].append(rec)
-
-    cat_order = sorted(
-        [c for c in by_cat if c != "honest"],
-        key=lambda c: len(by_cat[c]),
-        reverse=True,
-    )
-    if "honest" in by_cat:
-        cat_order.append("honest")
+    by_cat = _group_by_taxonomy_category(late_valid, classify_fn=classify_fn)
+    cat_order = _taxonomy_category_order(by_cat)
 
     if not cat_order:
         print(f"  WARN: no late-training records, skipping {out.name}")
         return
 
     counts = [len(by_cat[c]) for c in cat_order]
-
-    has_log_mass = any(
-        (r.get("metadata") or {}).get("normalization", {}).get("log_mass") is not None
-        for recs in by_cat.values()
-        for r in recs
-    )
-
-    if not has_log_mass:
+    log_masses_per_cat = _log_masses_per_category(by_cat, cat_order)
+    if not any(np.isfinite(values).any() for values in log_masses_per_cat):
         print(f"  WARN: no normalization log_mass values, skipping {out.name}")
         return
-
-    log_masses_per_cat = []
-    for c in cat_order:
-        lms = []
-        for r in by_cat[c]:
-            lm = (r.get("metadata") or {}).get("normalization", {}).get("log_mass")
-            if lm is not None:
-                lms.append(float(lm))
-        log_masses_per_cat.append(np.array(lms) if lms else np.array([float("nan")]))
 
     fig, (ax_bar, ax_box) = plt.subplots(
         1,
@@ -506,3 +482,40 @@ def plot_lh_taxonomy_bar(
     fig.savefig(out.with_suffix(".png"), dpi=DPI_PNG, bbox_inches="tight")
     plt.close(fig)
     print(f"  wrote {out.name}")
+
+
+def _group_by_taxonomy_category(
+    records: list[dict],
+    *,
+    classify_fn: Callable[[dict], str],
+) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for record in records:
+        grouped[classify_fn(record)].append(record)
+    return grouped
+
+
+def _taxonomy_category_order(by_cat: dict[str, list[dict]]) -> list[str]:
+    ordered = sorted(
+        [cat for cat in by_cat if cat != "honest"],
+        key=lambda cat: len(by_cat[cat]),
+        reverse=True,
+    )
+    if "honest" in by_cat:
+        ordered.append("honest")
+    return ordered
+
+
+def _log_masses_per_category(
+    by_cat: dict[str, list[dict]],
+    cat_order: list[str],
+) -> list[np.ndarray]:
+    log_masses_per_cat: list[np.ndarray] = []
+    for category in cat_order:
+        log_masses: list[float] = []
+        for record in by_cat[category]:
+            log_mass = (record.get("metadata") or {}).get("normalization", {}).get("log_mass")
+            if log_mass is not None:
+                log_masses.append(float(log_mass))
+        log_masses_per_cat.append(np.array(log_masses) if log_masses else np.array([float("nan")]))
+    return log_masses_per_cat

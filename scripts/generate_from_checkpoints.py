@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import re
 import sys
 from pathlib import Path
@@ -96,10 +97,16 @@ def _generate_from_checkpoint(
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    from ppl_synthesis_reward_hacking.backends.pymc.code_executor import extract_pymc_code
-    from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
-        load_pymc_reward_prompts,
+    from ppl_synthesis_reward_hacking.backends.pymc.code_executor import (
+        execute_pymc_code,
+        extract_pymc_code,
+    )
+    from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import (
+        load_synthesis_prompts,
         make_scoring_data_dict,
+    )
+    from ppl_synthesis_reward_hacking.evaluation.offline_point_scorer import (
+        score_pymc_model,
     )
     from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
         DEFAULT_EXEC_TIMEOUT,
@@ -116,21 +123,21 @@ def _generate_from_checkpoint(
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     log.info("Loading base model: %s", base_model)
-    model = AutoModelForCausalLM.from_pretrained(
+    lm_model = AutoModelForCausalLM.from_pretrained(
         base_model,
         torch_dtype=torch.bfloat16,
         device_map=device,
     )
     log.info("Loading adapter from: %s", checkpoint_path)
-    model = PeftModel.from_pretrained(model, str(checkpoint_path))
-    model.eval()
+    lm_model = PeftModel.from_pretrained(lm_model, str(checkpoint_path))
+    lm_model.eval()
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     scoring_data = make_scoring_data_dict(d=scoring_d)
-    prompts = load_pymc_reward_prompts(max_examples=20)
+    prompts = load_synthesis_prompts(max_examples=20)
 
     completions_path = checkpoint_path / "completions.jsonl"
     writer = CompletionWriter(completions_path)
@@ -152,7 +159,7 @@ def _generate_from_checkpoint(
 
         for _sample_idx in range(n_samples):
             with torch.no_grad():
-                outputs = model.generate(
+                outputs = lm_model.generate(
                     input_ids,
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,
@@ -162,12 +169,23 @@ def _generate_from_checkpoint(
             completion_ids = outputs[0][input_ids.shape[1] :]
             completion_text = tokenizer.decode(completion_ids, skip_special_tokens=True)
 
-            reported, oracle, _decomp = score_completion_sandboxed(
+            reported, decomposition = score_completion_sandboxed(
                 completion_text, scoring_data, timeout=DEFAULT_EXEC_TIMEOUT
             )
             outcome = classify_outcome(reported)
-            gap = reported - oracle if outcome == "valid" else 0.0
+            oracle = float("nan")
             code = extract_pymc_code(completion_text)
+            if code is not None and outcome == "valid":
+                pymc_model = execute_pymc_code(code, scoring_data, timeout=DEFAULT_EXEC_TIMEOUT)
+                if pymc_model is not None:
+                    _, oracle_raw, _offline_decomp = score_pymc_model(
+                        pymc_model,
+                        scoring_data=scoring_data,
+                        scoring_timeout_s=DEFAULT_EXEC_TIMEOUT,
+                    )
+                    if isinstance(oracle_raw, int | float) and math.isfinite(float(oracle_raw)):
+                        oracle = float(oracle_raw)
+            gap = reported - oracle if outcome == "valid" and math.isfinite(oracle) else 0.0
 
             writer.write(
                 CompletionRecord(

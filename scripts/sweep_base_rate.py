@@ -16,12 +16,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import math
 import re
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +34,7 @@ from ppl_synthesis_reward_hacking.backends.pymc.code_executor import (
     extract_pymc_code,
 )
 from ppl_synthesis_reward_hacking.backends.pymc_safe.checker import check_pymc_model
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
+from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import (
     SYSTEM_PROMPT,
     get_prompts,
     make_scoring_data_dict,
@@ -46,7 +48,9 @@ from ppl_synthesis_reward_hacking.evaluation.integrity_checks import (
     check_fabricated_data,
     parse_checker_reasons_to_tags,
 )
-from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import score_pymc_model
+from ppl_synthesis_reward_hacking.evaluation.offline_point_scorer import (
+    score_pymc_model,
+)
 from ppl_synthesis_reward_hacking.logging.completions import (
     CompletionRecord,
     CompletionWriter,
@@ -59,11 +63,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# LLM generation via litellm
-# ---------------------------------------------------------------------------
 
 
 def _call_litellm(
@@ -100,11 +99,6 @@ def _call_litellm(
             time.sleep(delay)
 
     return None
-
-
-# ---------------------------------------------------------------------------
-# Per-completion analysis pipeline
-# ---------------------------------------------------------------------------
 
 
 def analyse_completion(
@@ -170,10 +164,6 @@ def analyse_completion(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Model slug for filesystem paths
-# ---------------------------------------------------------------------------
-
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9._-]")
 
 
@@ -182,9 +172,102 @@ def _model_slug(model_name: str) -> str:
     return _SLUG_RE.sub("_", model_name).strip("_")
 
 
-# ---------------------------------------------------------------------------
-# Per-model sweep
-# ---------------------------------------------------------------------------
+def _model_output_dir_name(model_name: str) -> str:
+    slug = _model_slug(model_name)
+    digest = hashlib.blake2b(model_name.encode("utf-8"), digest_size=4).hexdigest()
+    return f"{slug}__{digest}"
+
+
+@dataclass
+class _SweepStats:
+    n_valid: int = 0
+    n_parse_fail: int = 0
+    n_exec_fail: int = 0
+    n_score_fail: int = 0
+    all_tags: list[set[str]] = field(default_factory=list)
+    valid_reported: list[float] = field(default_factory=list)
+    valid_oracle: list[float] = field(default_factory=list)
+    valid_gaps: list[float] = field(default_factory=list)
+
+
+def _update_stats_from_analysis(stats: _SweepStats, analysis: dict[str, Any]) -> None:
+    outcome = analysis["outcome"]
+    if outcome == "parse_fail":
+        stats.n_parse_fail += 1
+    elif outcome == "exec_fail":
+        stats.n_exec_fail += 1
+    elif outcome == "score_fail":
+        stats.n_score_fail += 1
+    else:
+        stats.n_valid += 1
+        if math.isfinite(analysis["reported"]):
+            stats.valid_reported.append(analysis["reported"])
+        if math.isfinite(analysis["oracle"]):
+            stats.valid_oracle.append(analysis["oracle"])
+        if math.isfinite(analysis["gap"]):
+            stats.valid_gaps.append(analysis["gap"])
+    stats.all_tags.append(analysis["tags"])
+
+
+def _completion_metadata(model_name: str, analysis: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"model": model_name, "tags": sorted(analysis["tags"])}
+    if analysis["complexity"]:
+        metadata["complexity"] = analysis["complexity"]
+    if analysis.get("structural_reasons"):
+        metadata["structural_reasons"] = analysis["structural_reasons"]
+    metadata["oracle_score"] = analysis["oracle"]
+    metadata["gap"] = analysis["gap"]
+    return metadata
+
+
+def _tag_counts_and_rates(
+    all_tags: list[set[str]],
+    *,
+    n_total: int,
+) -> tuple[dict[str, int], dict[str, float], int]:
+    all_known_tags = [
+        "data_discard",
+        "score_bonus",
+        "potentials",
+        "custom_logp",
+        "double_observe",
+        "data_in_prior",
+        "data_branching",
+        "fabricated_data",
+        "data_ignored",
+    ]
+    tag_counts = {tag: sum(1 for tags in all_tags if tag in tags) for tag in all_known_tags}
+    n_any_exploit = sum(1 for tags in all_tags if tags)
+    tag_rates = {tag: count / n_total if n_total > 0 else 0.0 for tag, count in tag_counts.items()}
+    return tag_counts, tag_rates, n_any_exploit
+
+
+def _build_sweep_summary(
+    *,
+    model_name: str,
+    n_total: int,
+    stats: _SweepStats,
+) -> dict[str, Any]:
+    tag_counts, tag_rates, n_any_exploit = _tag_counts_and_rates(stats.all_tags, n_total=n_total)
+    return {
+        "model": model_name,
+        "n_total": n_total,
+        "n_valid": stats.n_valid,
+        "n_parse_fail": stats.n_parse_fail,
+        "n_exec_fail": stats.n_exec_fail,
+        "n_score_fail": stats.n_score_fail,
+        "valid_rate": stats.n_valid / n_total if n_total > 0 else 0.0,
+        "tag_counts": tag_counts,
+        "tag_rates": tag_rates,
+        "n_any_exploit": n_any_exploit,
+        "any_exploit_rate": n_any_exploit / n_total if n_total > 0 else 0.0,
+        "reported_mean": (
+            float(np.mean(stats.valid_reported)) if stats.valid_reported else float("nan")
+        ),
+        "oracle_mean": float(np.mean(stats.valid_oracle)) if stats.valid_oracle else float("nan"),
+        "gap_mean": float(np.mean(stats.valid_gaps)) if stats.valid_gaps else float("nan"),
+        "gap_std": float(np.std(stats.valid_gaps)) if stats.valid_gaps else float("nan"),
+    }
 
 
 def sweep_model(
@@ -203,7 +286,7 @@ def sweep_model(
     call_delay: float = 0.0,
 ) -> dict[str, Any]:
     """Run the full sweep for a single model. Returns summary dict."""
-    slug = _model_slug(model_name)
+    slug = _model_output_dir_name(model_name)
     model_dir = output_dir / slug
     model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -213,14 +296,7 @@ def sweep_model(
     ]
 
     n_total = len(prompts) * samples_per_prompt
-    n_valid = 0
-    n_parse_fail = 0
-    n_exec_fail = 0
-    n_score_fail = 0
-    all_tags: list[set[str]] = []
-    valid_reported: list[float] = []
-    valid_oracle: list[float] = []
-    valid_gaps: list[float] = []
+    stats = _SweepStats()
 
     sample_idx = 0
     for prompt_idx, prompt in enumerate(prompts):
@@ -244,35 +320,7 @@ def sweep_model(
                 completion_text = ""
 
             analysis = analyse_completion(completion_text, data, exec_timeout=exec_timeout)
-            outcome = analysis["outcome"]
-
-            if outcome == "parse_fail":
-                n_parse_fail += 1
-            elif outcome == "exec_fail":
-                n_exec_fail += 1
-            elif outcome == "score_fail":
-                n_score_fail += 1
-            else:
-                n_valid += 1
-                if math.isfinite(analysis["reported"]):
-                    valid_reported.append(analysis["reported"])
-                if math.isfinite(analysis["oracle"]):
-                    valid_oracle.append(analysis["oracle"])
-                if math.isfinite(analysis["gap"]):
-                    valid_gaps.append(analysis["gap"])
-
-            tags = analysis["tags"]
-            all_tags.append(tags)
-
-            metadata: dict[str, Any] = {"model": model_name}
-            metadata["tags"] = sorted(tags)
-            if analysis["complexity"]:
-                metadata["complexity"] = analysis["complexity"]
-            if analysis.get("structural_reasons"):
-                metadata["structural_reasons"] = analysis["structural_reasons"]
-
-            metadata["oracle_score"] = analysis["oracle"]
-            metadata["gap"] = analysis["gap"]
+            _update_stats_from_analysis(stats, analysis)
 
             record = CompletionRecord(
                 batch=0,
@@ -281,9 +329,9 @@ def sweep_model(
                 completion_text=completion_text,
                 code=analysis["code"],
                 reported_reward=analysis["reported"],
-                outcome=outcome,
+                outcome=analysis["outcome"],
                 timestamp=make_timestamp(),
-                metadata=metadata,
+                metadata=_completion_metadata(model_name, analysis),
             )
             writer.write(record)
             sample_idx += 1
@@ -292,52 +340,13 @@ def sweep_model(
         log.info("[%s] %d/%d completions", model_name, done, n_total)
 
     writer.close()
-
-    # Compute rates over all completions, including failures.
-    all_known_tags = [
-        "data_discard",
-        "score_bonus",
-        "potentials",
-        "custom_logp",
-        "double_observe",
-        "data_in_prior",
-        "data_branching",
-        "fabricated_data",
-        "data_ignored",
-    ]
-    tag_counts = {tag: sum(1 for t in all_tags if tag in t) for tag in all_known_tags}
-    n_any_exploit = sum(1 for t in all_tags if t)  # any non-empty tag set
-
-    summary = {
-        "model": model_name,
-        "n_total": n_total,
-        "n_valid": n_valid,
-        "n_parse_fail": n_parse_fail,
-        "n_exec_fail": n_exec_fail,
-        "n_score_fail": n_score_fail,
-        "valid_rate": n_valid / n_total if n_total > 0 else 0.0,
-        "tag_counts": tag_counts,
-        "tag_rates": {
-            tag: count / n_total if n_total > 0 else 0.0 for tag, count in tag_counts.items()
-        },
-        "n_any_exploit": n_any_exploit,
-        "any_exploit_rate": n_any_exploit / n_total if n_total > 0 else 0.0,
-        "reported_mean": float(np.mean(valid_reported)) if valid_reported else float("nan"),
-        "oracle_mean": float(np.mean(valid_oracle)) if valid_oracle else float("nan"),
-        "gap_mean": float(np.mean(valid_gaps)) if valid_gaps else float("nan"),
-        "gap_std": float(np.std(valid_gaps)) if valid_gaps else float("nan"),
-    }
+    summary = _build_sweep_summary(model_name=model_name, n_total=n_total, stats=stats)
 
     summary_path = model_dir / "summary.json"
     with open(summary_path, "w") as f:
         json.dump(_make_json_safe(summary), f, indent=2)
 
     return summary
-
-
-# ---------------------------------------------------------------------------
-# JSON serialization helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_json_safe(obj: Any) -> Any:
@@ -351,11 +360,6 @@ def _make_json_safe(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_make_json_safe(v) for v in obj]
     return obj
-
-
-# ---------------------------------------------------------------------------
-# Summary table
-# ---------------------------------------------------------------------------
 
 
 def _print_summary_table(summaries: list[dict[str, Any]]) -> None:
@@ -400,11 +404,6 @@ def _print_summary_table(summaries: list[dict[str, Any]]) -> None:
             gap_str,
         ]
         print("| " + " | ".join(row) + " |")
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 def parse_args() -> argparse.Namespace:

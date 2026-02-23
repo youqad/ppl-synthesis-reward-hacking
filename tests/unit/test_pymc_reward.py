@@ -11,10 +11,12 @@ pytest.importorskip("pymc")
 pytestmark = pytest.mark.pymc
 
 from ppl_synthesis_reward_hacking.backends.pymc.code_executor import execute_pymc_code  # noqa: E402, I001
+from ppl_synthesis_reward_hacking.evaluation.offline_point_scorer import (  # noqa: E402
+    score_pymc_model,
+)
 from ppl_synthesis_reward_hacking.experiments import pymc_reward as pymc_reward_mod  # noqa: E402
 from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (  # noqa: E402
     EXEC_FAIL_REWARD,
-    score_pymc_model,
 )
 
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import math
+from collections.abc import Sequence
 from typing import Any, Protocol
 
 import numpy as np
@@ -21,7 +23,7 @@ class TrajectoryLike(Protocol):
     n_norm_checked: int
 
 
-def compute_traj_metrics(trajectory: list[TrajectoryLike]) -> dict[str, Any]:
+def compute_traj_metrics(trajectory: Sequence[TrajectoryLike]) -> dict[str, Any]:
     if len(trajectory) < 2:
         return {"error": "not enough trajectory points"}
 
@@ -48,6 +50,23 @@ def compute_traj_metrics(trajectory: list[TrajectoryLike]) -> dict[str, Any]:
     }
 
 
+def attach_common_results_metadata(
+    *,
+    metrics: dict[str, Any],
+    trajectory: Sequence[TrajectoryLike],
+    count_key: str,
+    config_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Attach standard metadata to trajectory metrics for script/runtime parity."""
+    metrics[count_key] = len(trajectory)
+    if "error" in metrics:
+        return metrics
+    metrics["final_reward_mean"] = metrics.get("final_reward")
+    if config_payload is not None:
+        metrics["config"] = config_payload
+    return metrics
+
+
 def print_training_summary(results: dict[str, Any]) -> None:
     if "error" in results:
         log.info("Error: %s", results["error"])
@@ -66,10 +85,12 @@ def print_training_summary(results: dict[str, Any]) -> None:
 
 
 def json_default(obj: Any) -> Any:
-    if isinstance(obj, np.integer):
-        return int(obj)
-    if isinstance(obj, np.floating):
-        return float(obj)
+    if isinstance(obj, np.generic):
+        obj = obj.item()
     if isinstance(obj, np.ndarray):
         return obj.tolist()
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, str | int | float | bool | list | dict | type(None)):
+        return obj
     return str(obj)

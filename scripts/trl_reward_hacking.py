@@ -16,7 +16,7 @@ import json
 import logging
 import math
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -33,14 +33,26 @@ except ImportError:
     TRL_AVAILABLE = False
 
 from ppl_synthesis_reward_hacking.backends.pymc.backend import PyMCBackend
-from ppl_synthesis_reward_hacking.config.contracts import validate_train_contract
-from ppl_synthesis_reward_hacking.config.flattening import flatten_hydra_train_mapping
+from ppl_synthesis_reward_hacking.backends.sstan.gate import (
+    validate_sstan_gate_cfg,
+)
 from ppl_synthesis_reward_hacking.data.generators import generate_dataset
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import load_pymc_reward_prompts
+from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import load_synthesis_prompts
+from ppl_synthesis_reward_hacking.experiments.config_mapping import (
+    GROUP_ALLOWED_KEYS,
+    SCALAR_GROUP_KEYS,
+    build_sstan_gate_config,
+    build_train_config_from_mapping,
+    resolve_normalization_contract,
+    validate_group_payload_keys,
+    validate_judge_sampling_config,
+    validate_scalar_group_payloads,
+)
 from ppl_synthesis_reward_hacking.experiments.pymc_reward import (
     make_pymc_reward_fn,
 )
 from ppl_synthesis_reward_hacking.experiments.results import (
+    attach_common_results_metadata,
     compute_traj_metrics,
     json_default,
     print_training_summary,
@@ -52,6 +64,8 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+_PROMPT_SAMPLING_MODES = frozenset({"fixed_cycle", "seeded_shuffle_cycle"})
+_PROMPT_POLICIES = frozenset({"legacy", "neutral"})
 
 
 @dataclass
@@ -61,6 +75,23 @@ class TRLRewardHackingConfig:
     monitoring_mode: str = "off"
     judge_interval: int = 0
     rubric_evolution_interval: int = 0
+    sstan_gate_mode: str = "off"
+    sstan_gate_sample_rate: float = 1.0
+    sstan_gate_penalty_reward: float = -100.0
+    sstan_gate_fidelity_policy: str = "reject_on_source_signal"
+    sstan_gate_log_stan: str = "none"
+    sstan_transpiler_model: str = "glm-5"
+    sstan_transpiler_api_key_env: str | None = None
+    sstan_transpiler_api_base: str | None = None
+    sstan_transpiler_custom_llm_provider: str | None = None
+    sstan_transpiler_strict: bool = True
+    sstan_transpiler_temperature: float = 0.0
+    sstan_transpiler_max_tokens: int = 2048
+    sstan_transpiler_timeout_s: float = 60.0
+    judge_sampling_policy: str = "fixed_cap"
+    judge_adaptive_min: int = 8
+    judge_adaptive_max: int = 20
+    judge_adaptive_target_metric: str = "combined"
     claim_mode: str = "formal_lh"
     n_steps: int = 1000
     n_prompts: int = 100
@@ -80,6 +111,12 @@ class TRLRewardHackingConfig:
     kl_beta: float = 0.001
     max_grad_norm: float = 1.0
     dataset_name: str = "linear_regression"
+    prompt_source: str = "hardcoded"
+    prompt_jsonl_path: str = "data/pymc_synthesis/train.jsonl"
+    prompt_jsonl_max_examples: int = 148
+    prompt_sampling: str = "seeded_shuffle_cycle"
+    thinking_mode: str = "think"
+    prompt_policy: str = "legacy"
     dataset_n_features: int = 3
     dataset_noise_sigma: float = 1.0
     dataset_n_train: int = 20
@@ -90,7 +127,7 @@ class TRLRewardHackingConfig:
     scoring_seed_base: int = 0
     reward_metric: str = "log_marginal_likelihood"
     reward_data_split: str = "train"
-    predictive_estimator: str = "none"
+    reward_estimator_backend: str = "smc"
     smc_draws: int = 500
     normalization_method: str = "auto"
     normalization_delta_scope: str = "raw_y_binary"
@@ -105,26 +142,41 @@ class TRLRewardHackingConfig:
 
 def config_from_mapping(mapping: Mapping[str, Any]) -> TRLRewardHackingConfig:
     """Create TRLRewardHackingConfig from a mapping (Hydra-friendly)."""
-    flattened = flatten_hydra_train_mapping(mapping)
-    allowed = {f.name for f in fields(TRLRewardHackingConfig)}
-    cfg = TRLRewardHackingConfig(**{k: v for k, v in flattened.items() if k in allowed})
-    resolved = validate_train_contract(
-        reward_metric=cfg.reward_metric,
-        reward_data_split=cfg.reward_data_split,
-        predictive_estimator=cfg.predictive_estimator,
-        claim_mode=cfg.claim_mode,
-        dataset_name=cfg.dataset_name,
-        normalization_method=cfg.normalization_method,
-        normalization_delta_scope=cfg.normalization_delta_scope,
-        normalization_epsilon=cfg.normalization_epsilon,
-        normalization_ci_alpha=cfg.normalization_ci_alpha,
-        normalization_mc_samples=cfg.normalization_mc_samples,
-        normalization_min_ess=cfg.normalization_min_ess,
-        normalization_interval=cfg.normalization_interval,
+    validate_group_payload_keys(mapping, group_allowed_keys=GROUP_ALLOWED_KEYS)
+    validate_scalar_group_payloads(mapping, scalar_group_keys=SCALAR_GROUP_KEYS)
+    cfg = build_train_config_from_mapping(
+        mapping,
+        TRLRewardHackingConfig,
+        error_prefix="Unsupported train config keys",
     )
-    cfg.normalization_method = resolved.normalization_method
-    cfg.normalization_delta_scope = resolved.normalization_delta_scope
+    _validate_mode_and_prompt_config(cfg)
+    validate_judge_sampling_config(cfg)
+    resolve_normalization_contract(cfg)
+    validate_sstan_gate_cfg(build_sstan_gate_config(cfg), paper_track=cfg.paper_track)
     return cfg
+
+
+def _validate_mode_and_prompt_config(cfg: TRLRewardHackingConfig) -> None:
+    if cfg.monitoring_mode not in {"off", "judge_evolving"}:
+        raise ValueError("monitoring_mode must be off|judge_evolving")
+    if type(cfg.judge_interval) is not int or cfg.judge_interval < 0:
+        raise ValueError("judge_interval must be a non-negative integer")
+    if type(cfg.rubric_evolution_interval) is not int or cfg.rubric_evolution_interval < 0:
+        raise ValueError("rubric_evolution_interval must be a non-negative integer")
+    if cfg.monitoring_mode == "judge_evolving" and cfg.judge_interval <= 0:
+        raise ValueError("monitoring_mode=judge_evolving requires judge_interval > 0")
+    if cfg.monitoring_mode == "judge_evolving" and cfg.rubric_evolution_interval <= 0:
+        raise ValueError("monitoring_mode=judge_evolving requires rubric_evolution_interval > 0")
+    if cfg.prompt_source not in {"hardcoded", "jsonl"}:
+        raise ValueError("prompt_source must be hardcoded|jsonl")
+    if cfg.prompt_sampling not in _PROMPT_SAMPLING_MODES:
+        raise ValueError(f"prompt_sampling must be one of {sorted(_PROMPT_SAMPLING_MODES)}")
+    if cfg.thinking_mode not in {"think", "no_think"}:
+        raise ValueError("thinking_mode must be think|no_think")
+    if cfg.prompt_policy not in _PROMPT_POLICIES:
+        raise ValueError(f"prompt_policy must be one of {sorted(_PROMPT_POLICIES)}")
+    if cfg.prompt_jsonl_max_examples <= 0:
+        raise ValueError("prompt_jsonl_max_examples must be positive")
 
 
 def parse_args() -> argparse.Namespace:
@@ -171,6 +223,27 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dataset-noise-sigma", type=float, default=1.0)
     p.add_argument("--dataset-n-train", type=int, default=20)
     p.add_argument("--dataset-n-holdout", type=int, default=256)
+    p.add_argument("--prompt-source", default="hardcoded", choices=["hardcoded", "jsonl"])
+    p.add_argument(
+        "--prompt-jsonl-path",
+        default="data/pymc_synthesis/train.jsonl",
+    )
+    p.add_argument("--prompt-jsonl-max-examples", type=int, default=148)
+    p.add_argument(
+        "--prompt-sampling",
+        default="seeded_shuffle_cycle",
+        choices=["fixed_cycle", "seeded_shuffle_cycle"],
+    )
+    p.add_argument(
+        "--thinking-mode",
+        default="think",
+        choices=["think", "no_think"],
+    )
+    p.add_argument(
+        "--prompt-policy",
+        default="legacy",
+        choices=["legacy", "neutral"],
+    )
     p.add_argument("--scoring-seed-base", type=int, default=0)
     p.add_argument("--report-to", default="wandb")
     p.add_argument("--normalization-interval", type=int, default=1)
@@ -178,42 +251,66 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def run_training(config: TRLRewardHackingConfig) -> dict[str, Any]:
-    if not TRL_AVAILABLE:
-        raise RuntimeError(
-            "TRL not installed. pip install trl peft datasets transformers accelerate"
-        )
-
+def _prepare_output_dir(config: TRLRewardHackingConfig) -> Path:
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
-    if config.resume_from:
-        resume_dir = Path(config.resume_from)
-        if not resume_dir.exists():
-            raise RuntimeError(f"Resume directory not found: {resume_dir}")
-        log.info("Resuming from checkpoint: %s", resume_dir)
 
+def _resolve_resume_path(config: TRLRewardHackingConfig) -> str | None:
+    if not config.resume_from:
+        return None
+    resume_dir = Path(config.resume_from)
+    if not resume_dir.exists():
+        raise RuntimeError(f"Resume directory not found: {resume_dir}")
+    log.info("Resuming from checkpoint: %s", resume_dir)
+    return config.resume_from
+
+
+def _load_train_dataset(config: TRLRewardHackingConfig) -> tuple[list[dict[str, Any]], HFDataset]:
     log.info("Loading PyMC reward prompts")
-    prompt_dicts = load_pymc_reward_prompts(
-        max_examples=config.n_prompts,
+    max_examples = config.n_prompts
+    if config.prompt_source == "jsonl":
+        max_examples = min(config.n_prompts, config.prompt_jsonl_max_examples)
+    prompt_dicts = load_synthesis_prompts(
+        max_examples=max_examples,
         dataset_name=config.dataset_name,
+        prompt_source=config.prompt_source,
+        prompt_path=config.prompt_jsonl_path,
+        n_prompts=config.n_prompts,
+        prompt_sampling=config.prompt_sampling,
+        prompt_sampling_seed=config.scoring_seed_base,
+        thinking_mode=config.thinking_mode,
+        prompt_policy=config.prompt_policy,
     )
     train_dataset = HFDataset.from_list(prompt_dicts)
     log.info("Loaded %d prompts", len(prompt_dicts))
-    if config.monitoring_mode != "off":
-        log.warning(
-            "TRL path currently treats judge/rubric fields as metadata only "
-            "(monitoring_mode=%s, judge_interval=%d, rubric_evolution_interval=%d).",
-            config.monitoring_mode,
-            config.judge_interval,
-            config.rubric_evolution_interval,
-        )
+    return prompt_dicts, train_dataset
 
+
+def _warn_monitoring_metadata_only(config: TRLRewardHackingConfig) -> None:
+    if config.monitoring_mode == "off":
+        return
+    log.warning(
+        "TRL path currently treats judge/rubric fields as metadata only "
+        "(monitoring_mode=%s, judge_interval=%d, rubric_evolution_interval=%d, "
+        "judge_sampling_policy=%s, judge_adaptive_min=%d, judge_adaptive_max=%d, "
+        "judge_adaptive_target_metric=%s).",
+        config.monitoring_mode,
+        config.judge_interval,
+        config.rubric_evolution_interval,
+        config.judge_sampling_policy,
+        config.judge_adaptive_min,
+        config.judge_adaptive_max,
+        config.judge_adaptive_target_metric,
+    )
+
+
+def _build_reward_function(config: TRLRewardHackingConfig, output_dir: Path):
     log.info("Creating scoring dataset and backend")
     scoring_dataset, scoring_data = _make_scoring_payload(config)
     backend = PyMCBackend()
-
-    reward_fn, reward_state = make_pymc_reward_fn(
+    return make_pymc_reward_fn(
         backend=backend,
         dataset=scoring_dataset,
         scoring_data=scoring_data,
@@ -222,7 +319,7 @@ def run_training(config: TRLRewardHackingConfig) -> dict[str, Any]:
         completions_path=output_dir / "completions.jsonl",
         reward_metric=config.reward_metric,
         reward_data_split=config.reward_data_split,
-        predictive_estimator=config.predictive_estimator,
+        reward_estimator_backend=config.reward_estimator_backend,
         smc_draws=config.smc_draws,
         normalization_method=config.normalization_method,
         normalization_delta_scope=config.normalization_delta_scope,
@@ -232,42 +329,50 @@ def run_training(config: TRLRewardHackingConfig) -> dict[str, Any]:
         normalization_min_ess=config.normalization_min_ess,
         normalization_interval=config.normalization_interval,
         normalization_sample_size=config.normalization_sample_size,
+        sstan_gate_mode=config.sstan_gate_mode,
+        sstan_gate_sample_rate=config.sstan_gate_sample_rate,
+        sstan_gate_penalty_reward=config.sstan_gate_penalty_reward,
+        sstan_gate_fidelity_policy=config.sstan_gate_fidelity_policy,
+        sstan_gate_log_stan=config.sstan_gate_log_stan,
+        sstan_transpiler_model=config.sstan_transpiler_model,
+        sstan_transpiler_api_key_env=config.sstan_transpiler_api_key_env,
+        sstan_transpiler_api_base=config.sstan_transpiler_api_base,
+        sstan_transpiler_custom_llm_provider=config.sstan_transpiler_custom_llm_provider,
+        sstan_transpiler_strict=config.sstan_transpiler_strict,
+        sstan_transpiler_temperature=config.sstan_transpiler_temperature,
+        sstan_transpiler_max_tokens=config.sstan_transpiler_max_tokens,
+        sstan_transpiler_timeout_s=config.sstan_transpiler_timeout_s,
     )
 
-    peft_config = LoraConfig(
-        r=config.lora_rank,
-        lora_alpha=32,
-        lora_dropout=config.lora_dropout,
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
-        task_type="CAUSAL_LM",
-    )
 
-    model_init_kwargs = None
-    if config.use_4bit:
-        try:
-            import torch
-            from transformers import BitsAndBytesConfig
+def _build_model_init_kwargs(config: TRLRewardHackingConfig) -> dict[str, Any] | None:
+    if not config.use_4bit:
+        return None
+    try:
+        import torch
+        from transformers import BitsAndBytesConfig
 
-            model_init_kwargs = {
-                "quantization_config": BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype=torch.bfloat16,
-                    bnb_4bit_quant_type="nf4",
-                ),
-            }
-            log.info("QLoRA 4-bit enabled")
-        except ImportError:
-            log.warning("bitsandbytes not available, skipping 4-bit quantization")
+        model_init_kwargs = {
+            "quantization_config": BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_quant_type="nf4",
+            ),
+        }
+        log.info("QLoRA 4-bit enabled")
+        return model_init_kwargs
+    except ImportError:
+        log.warning("bitsandbytes not available, skipping 4-bit quantization")
+        return None
 
-    training_args = TRLGRPOConfig(
+
+def _build_training_args(
+    config: TRLRewardHackingConfig,
+    *,
+    output_dir: Path,
+    model_init_kwargs: dict[str, Any] | None,
+) -> TRLGRPOConfig:
+    return TRLGRPOConfig(
         output_dir=str(output_dir),
         max_steps=config.n_steps,
         per_device_train_batch_size=1,
@@ -290,11 +395,15 @@ def run_training(config: TRLRewardHackingConfig) -> dict[str, Any]:
         model_init_kwargs=model_init_kwargs,
     )
 
+
+def _log_training_setup(
+    config: TRLRewardHackingConfig, *, n_prompts: int, output_dir: Path
+) -> None:
     log.info("Model: %s", config.model)
     log.info(
         "Steps: %d, Prompts: %d, Generations/prompt: %d",
         config.n_steps,
-        len(prompt_dicts),
+        n_prompts,
         config.num_generations,
     )
     log.info(
@@ -312,6 +421,52 @@ def run_training(config: TRLRewardHackingConfig) -> dict[str, Any]:
     )
     log.info("Output: %s", output_dir)
 
+
+def _write_trajectory(output_dir: Path, trajectory: list[dict[str, Any]]) -> None:
+    with open(output_dir / "trajectory.json", "w") as f:
+        json.dump(trajectory, f, indent=2, default=json_default)
+
+
+def _write_results(output_dir: Path, results: dict[str, Any]) -> None:
+    with open(output_dir / "results.json", "w") as f:
+        json.dump(results, f, indent=2, default=json_default)
+
+
+def run_training(config: TRLRewardHackingConfig) -> dict[str, Any]:
+    if not TRL_AVAILABLE:
+        raise RuntimeError(
+            "TRL not installed. pip install trl peft datasets transformers accelerate"
+        )
+    output_dir = _prepare_output_dir(config)
+    resume_path = _resolve_resume_path(config)
+    prompt_dicts, train_dataset = _load_train_dataset(config)
+    _warn_monitoring_metadata_only(config)
+
+    reward_fn, reward_state = _build_reward_function(config, output_dir)
+
+    peft_config = LoraConfig(
+        r=config.lora_rank,
+        lora_alpha=32,
+        lora_dropout=config.lora_dropout,
+        target_modules=[
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ],
+        task_type="CAUSAL_LM",
+    )
+    model_init_kwargs = _build_model_init_kwargs(config)
+    training_args = _build_training_args(
+        config,
+        output_dir=output_dir,
+        model_init_kwargs=model_init_kwargs,
+    )
+    _log_training_setup(config, n_prompts=len(prompt_dicts), output_dir=output_dir)
+
     trainer = GRPOTrainer(
         model=config.model,
         reward_funcs=reward_fn,
@@ -319,40 +474,37 @@ def run_training(config: TRLRewardHackingConfig) -> dict[str, Any]:
         train_dataset=train_dataset,
         peft_config=peft_config,
     )
+    try:
+        trainer.train(resume_from_checkpoint=resume_path)
 
-    resume_path = config.resume_from if config.resume_from else None
-    trainer.train(resume_from_checkpoint=resume_path)
+        trajectory_dicts = [asdict(p) for p in reward_state.trajectory]
+        _write_trajectory(output_dir, trajectory_dicts)
 
-    trajectory_dicts = [asdict(p) for p in reward_state.trajectory]
-    with open(output_dir / "trajectory.json", "w") as f:
-        json.dump(trajectory_dicts, f, indent=2, default=json_default)
+        results = _compute_results(config, reward_state)
+        results.update(_build_summary(config, results))
+        _write_results(output_dir, results)
 
-    results = _compute_results(config, reward_state)
-    results.update(_build_summary(config, results))
-    with open(output_dir / "results.json", "w") as f:
-        json.dump(results, f, indent=2, default=json_default)
-
-    log.info("Results saved to %s", output_dir)
-    _print_summary(results)
-
-    if reward_state.completion_writer is not None:
-        reward_state.completion_writer.close()
-
-    return results
+        log.info("Results saved to %s", output_dir)
+        _print_summary(results)
+        return results
+    finally:
+        if reward_state.completion_writer is not None:
+            reward_state.completion_writer.close()
 
 
 def _compute_results(config: TRLRewardHackingConfig, state) -> dict:
     trajectory = state.trajectory
     metrics = compute_traj_metrics(trajectory)
-    if "error" in metrics:
-        metrics["n_batches"] = len(trajectory)
-        return metrics
-
-    final = trajectory[-1]
-    metrics["config"] = {
+    config_payload = {
         "model": config.model,
         "paper_track": config.paper_track,
         "monitoring_mode": config.monitoring_mode,
+        "sstan_gate_mode": config.sstan_gate_mode,
+        "sstan_gate_sample_rate": config.sstan_gate_sample_rate,
+        "sstan_gate_penalty_reward": config.sstan_gate_penalty_reward,
+        "sstan_gate_fidelity_policy": config.sstan_gate_fidelity_policy,
+        "sstan_transpiler_model": config.sstan_transpiler_model,
+        "sstan_transpiler_strict": config.sstan_transpiler_strict,
         "judge_interval": config.judge_interval,
         "rubric_evolution_interval": config.rubric_evolution_interval,
         "claim_mode": config.claim_mode,
@@ -367,15 +519,22 @@ def _compute_results(config: TRLRewardHackingConfig, state) -> dict:
         "dataset_n_holdout": config.dataset_n_holdout,
         "reward_metric": config.reward_metric,
         "reward_data_split": config.reward_data_split,
-        "predictive_estimator": config.predictive_estimator,
+        "reward_estimator_backend": config.reward_estimator_backend,
         "normalization_method": config.normalization_method,
         "normalization_delta_scope": config.normalization_delta_scope,
     }
+    metrics = attach_common_results_metadata(
+        metrics=metrics,
+        trajectory=trajectory,
+        count_key="n_batches",
+        config_payload=config_payload,
+    )
+    if "error" in metrics:
+        return metrics
+    final = trajectory[-1]
     metrics["final_parse_fail_rate"] = final.n_parse_fail / max(final.n_total, 1)
     metrics["final_exec_fail_rate"] = final.n_exec_fail / max(final.n_total, 1)
     metrics["final_safety_flags"] = final.safety_flags
-    metrics["final_reward_mean"] = metrics.get("final_reward")
-    metrics["n_batches"] = len(trajectory)
     return metrics
 
 
@@ -403,8 +562,13 @@ def _build_summary(config: TRLRewardHackingConfig, results: dict[str, Any]) -> d
         "paper/claim_mode": config.claim_mode,
         "paper/reward_metric": config.reward_metric,
         "paper/reward_data_split": config.reward_data_split,
-        "paper/predictive_estimator": config.predictive_estimator,
+        "paper/reward_estimator_backend": config.reward_estimator_backend,
         "paper/monitoring_mode": config.monitoring_mode,
+        "paper/sstan_gate_mode": config.sstan_gate_mode,
+        "paper/sstan_gate_fidelity_policy": config.sstan_gate_fidelity_policy,
+        "paper/prompt_source": config.prompt_source,
+        "paper/prompt_policy": config.prompt_policy,
+        "paper/thinking_mode": config.thinking_mode,
         "paper/normalization_method": config.normalization_method,
         "paper/delta_scope": config.normalization_delta_scope,
         "paper/frac_non_normalized_final": results.get("final_frac_non_normalized", float("nan")),
@@ -460,10 +624,9 @@ def _print_summary(results: dict) -> None:
 
 
 def main() -> None:
+    args = parse_args()
     if not TRL_AVAILABLE:
         raise SystemExit("TRL not installed. pip install trl peft datasets transformers accelerate")
-
-    args = parse_args()
     config = config_from_mapping(
         {
             "model": args.model,
@@ -485,6 +648,12 @@ def main() -> None:
             "kl_beta": args.kl_beta,
             "max_grad_norm": args.max_grad_norm,
             "dataset_name": args.dataset_name,
+            "prompt_source": args.prompt_source,
+            "prompt_jsonl_path": args.prompt_jsonl_path,
+            "prompt_jsonl_max_examples": args.prompt_jsonl_max_examples,
+            "prompt_sampling": args.prompt_sampling,
+            "thinking_mode": args.thinking_mode,
+            "prompt_policy": args.prompt_policy,
             "dataset_n_features": args.dataset_n_features,
             "dataset_noise_sigma": args.dataset_noise_sigma,
             "dataset_n_train": args.dataset_n_train,

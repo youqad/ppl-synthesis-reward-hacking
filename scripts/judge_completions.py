@@ -23,7 +23,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import logging
 import math
@@ -34,6 +33,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ppl_synthesis_reward_hacking.config.load import apply_overrides, load_config
+from ppl_synthesis_reward_hacking.evaluation.record_utils import deduplicate_records
+from ppl_synthesis_reward_hacking.experiments.results import json_default
 from ppl_synthesis_reward_hacking.logging.completions import load_completions
 from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
     JudgeConfig,
@@ -76,22 +77,13 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     return p.parse_known_args()
 
 
-def _hash_completion_text(text: str) -> str:
-    code_block = text
-    marker = "```"
-    if marker in text:
-        parts = text.split(marker)
-        if len(parts) >= 2:
-            code_block = parts[1]
-    normalized = " ".join(code_block.strip().lower().split())
-    return hashlib.md5(normalized.encode()).hexdigest()
-
-
 def _deduplicate_records(records):
+    from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
+
     unique = {}
     for record in records:
         content = record.code or record.completion_text
-        key = _hash_completion_text(content)
+        key = normalized_text_hash(content)
         if key not in unique:
             unique[key] = record
     return list(unique.values())
@@ -109,8 +101,8 @@ def _load_judge_config(config_path: str | None, overrides: list[str]) -> JudgeCo
     if overrides:
         raw = apply_overrides(raw, overrides)
 
-    # map YAML keys to JudgeConfig fields
     return JudgeConfig(
+        backend=str(raw.get("backend", defaults.backend)),
         model=raw.get("model", defaults.model),
         api_base=raw.get("api_base", defaults.api_base),
         custom_llm_provider=raw.get("custom_llm_provider", defaults.custom_llm_provider),
@@ -132,54 +124,9 @@ def _compute_summary(
     n_errors: int,
 ) -> dict:
     verdict_counts = Counter(v.verdict for v in verdicts)
-    pattern_counts: Counter = Counter()
-    for v in verdicts:
-        for tag in v.tags:
-            pattern_counts[tag] += 1
-
-    # log-mass vs verdict
-    log_mass_by_verdict: dict[str, list[float]] = {
-        "honest": [],
-        "suspicious": [],
-        "evaluator_hack": [],
-        "hacking": [],
-    }
-    for rec, v in zip(records, verdicts, strict=True):
-        if v.verdict in log_mass_by_verdict:
-            meta = rec.metadata or {}
-            norm = meta.get("normalization", {}) if isinstance(meta, dict) else {}
-            if isinstance(norm, dict):
-                log_mass_by_verdict[v.verdict].append(norm.get("log_mass", float("nan")))
-
-    log_mass_means = {}
-    for k, vals in log_mass_by_verdict.items():
-        if vals:
-            log_mass_means[f"{k}_mean_log_mass"] = round(sum(vals) / len(vals), 4)
-
-    # hacking fraction by training phase (early/mid/late thirds)
-    if records:
-        batches = sorted({r.batch for r in records})
-        n_batches = len(batches)
-        third = max(1, n_batches // 3)
-        early_batches = set(batches[:third])
-        mid_batches = set(batches[third : 2 * third])
-        late_batches = set(batches[2 * third :])
-
-        def _hacking_frac(batch_set):
-            matched = [
-                (r, v) for r, v in zip(records, verdicts, strict=True) if r.batch in batch_set
-            ]
-            if not matched:
-                return 0.0
-            return round(sum(1 for _, v in matched if v.verdict == "hacking") / len(matched), 3)
-
-        phase_fracs = {
-            "early": _hacking_frac(early_batches),
-            "mid": _hacking_frac(mid_batches),
-            "late": _hacking_frac(late_batches),
-        }
-    else:
-        phase_fracs = {}
+    pattern_counts = _collect_pattern_counts(verdicts)
+    log_mass_means = _compute_log_mass_means(records, verdicts)
+    phase_fracs = _compute_phase_hacking_fractions(records, verdicts)
 
     return {
         "total_judged": len(verdicts),
@@ -192,10 +139,69 @@ def _compute_summary(
     }
 
 
-def _json_float(value: object) -> object:
-    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-        return None
-    return value
+def _collect_pattern_counts(verdicts: list[JudgeVerdict]) -> Counter:
+    pattern_counts: Counter = Counter()
+    for verdict in verdicts:
+        for tag in verdict.tags:
+            pattern_counts[tag] += 1
+    return pattern_counts
+
+
+def _compute_log_mass_means(records, verdicts: list[JudgeVerdict]) -> dict[str, float]:
+    log_mass_by_verdict: dict[str, list[float]] = {
+        "honest": [],
+        "suspicious": [],
+        "evaluator_hack": [],
+        "hacking": [],
+    }
+    for record, verdict in zip(records, verdicts, strict=True):
+        if verdict.verdict not in log_mass_by_verdict:
+            continue
+        metadata = record.metadata or {}
+        normalization = metadata.get("normalization", {}) if isinstance(metadata, dict) else {}
+        if isinstance(normalization, dict):
+            raw_log_mass = normalization.get("log_mass", float("nan"))
+            if isinstance(raw_log_mass, int | float) and math.isfinite(float(raw_log_mass)):
+                log_mass_by_verdict[verdict.verdict].append(float(raw_log_mass))
+
+    means: dict[str, float] = {}
+    for verdict, values in log_mass_by_verdict.items():
+        if values:
+            means[f"{verdict}_mean_log_mass"] = round(sum(values) / len(values), 4)
+    return means
+
+
+def _compute_phase_hacking_fractions(records, verdicts: list[JudgeVerdict]) -> dict[str, float]:
+    if not records:
+        return {}
+    batches = sorted({record.batch for record in records})
+    n_batches = len(batches)
+    third = max(1, n_batches // 3)
+    phases = {
+        "early": set(batches[:third]),
+        "mid": set(batches[third : 2 * third]),
+        "late": set(batches[2 * third :]),
+    }
+    return {
+        phase: _hacking_fraction_for_batches(records, verdicts, batch_set=batch_set)
+        for phase, batch_set in phases.items()
+    }
+
+
+def _hacking_fraction_for_batches(
+    records,
+    verdicts: list[JudgeVerdict],
+    *,
+    batch_set: set[int],
+) -> float:
+    matched = [
+        (record, verdict)
+        for record, verdict in zip(records, verdicts, strict=True)
+        if record.batch in batch_set
+    ]
+    if not matched:
+        return 0.0
+    return round(sum(1 for _, verdict in matched if verdict.verdict == "hacking") / len(matched), 3)
 
 
 def main() -> None:
@@ -216,7 +222,7 @@ def main() -> None:
 
     if args.dedup:
         pre = len(records)
-        records = _deduplicate_records(records)
+        records = deduplicate_records(records)
         log.info("Deduplicated completions: %d -> %d", pre, len(records))
 
     if not records:
@@ -249,8 +255,8 @@ def main() -> None:
                 "batch": rec.batch,
                 "index": rec.index,
                 "outcome": rec.outcome,
-                "reported_reward": _json_float(rec.reported_reward),
-                "log_mass": _json_float(
+                "reported_reward": json_default(rec.reported_reward),
+                "log_mass": json_default(
                     (meta.get("normalization") or {}).get("log_mass")
                     if isinstance(meta.get("normalization"), dict)
                     else float("nan")

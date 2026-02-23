@@ -78,7 +78,7 @@ class TestSerialization:
 class TestSandboxedScorer:
     @pytest.fixture
     def scoring_data(self):
-        from ppl_synthesis_reward_hacking.data.pymc_reward_loader import make_scoring_data_dict
+        from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import make_scoring_data_dict
 
         data = make_scoring_data_dict(d=1, p_true=0.5, seed=0)
         data["y_train"] = data["y"]
@@ -87,11 +87,8 @@ class TestSandboxedScorer:
 
     def test_parse_failure(self, scoring_data):
         completion = "no code here, just text"
-        reported, oracle, decomposition = score_completion_sandboxed(
-            completion, scoring_data, timeout=5
-        )
+        reported, decomposition = score_completion_sandboxed(completion, scoring_data, timeout=5)
         assert reported == PARSE_FAIL_REWARD
-        assert oracle == PARSE_FAIL_REWARD
         assert decomposition is not None
         assert decomposition["outcome_code"] == "parse_fail"
 
@@ -100,11 +97,8 @@ class TestSandboxedScorer:
 def model(data):
     return undefined_variable_that_does_not_exist
 ```"""
-        reported, oracle, decomposition = score_completion_sandboxed(
-            completion, scoring_data, timeout=5
-        )
+        reported, decomposition = score_completion_sandboxed(completion, scoring_data, timeout=5)
         assert reported == EXEC_FAIL_REWARD
-        assert oracle == EXEC_FAIL_REWARD
         assert decomposition is not None
         assert decomposition["outcome_code"] == "exec_fail"
 
@@ -118,17 +112,16 @@ def model(data):
         pm.Bernoulli("y", p=p, observed=data["y"])
     return m
 ```"""
-        reported, oracle, decomposition = score_completion_sandboxed(
+        reported, decomposition = score_completion_sandboxed(
             completion,
             scoring_data,
             timeout=30,
             reward_metric="log_marginal_likelihood",
             reward_data_split="train",
-            predictive_estimator="none",
+            reward_estimator_backend="smc",
             smc_draws=50,
         )
         assert reported > EXEC_FAIL_REWARD
-        assert oracle > EXEC_FAIL_REWARD
         assert decomposition is not None
         assert decomposition["outcome_code"] == "ok"
         assert decomposition["metric_log_marginal_likelihood"] is not None
@@ -143,13 +136,13 @@ def model(data):
         pm.Bernoulli("y", p=p, observed=data["y"])
     return m
 ```"""
-        reported, _oracle, decomposition = score_completion_sandboxed(
+        reported, decomposition = score_completion_sandboxed(
             completion,
             scoring_data,
             timeout=30,
             reward_metric="waic",
             reward_data_split="train",
-            predictive_estimator="none",
+            reward_estimator_backend="smc",
         )
         assert reported == EXEC_FAIL_REWARD
         assert decomposition is not None
@@ -167,13 +160,13 @@ def model(data):
         pm.Potential("baseline", pt.constant(5.0))
     return m
 ```"""
-        reported, _oracle, decomposition = score_completion_sandboxed(
+        reported, decomposition = score_completion_sandboxed(
             completion,
             scoring_data,
             timeout=30,
             reward_metric="waic",
             reward_data_split="train",
-            predictive_estimator="waic",
+            reward_estimator_backend="waic",
         )
         assert reported == EXEC_FAIL_REWARD
         assert decomposition is not None

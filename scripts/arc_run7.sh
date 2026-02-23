@@ -47,7 +47,7 @@ python scripts/hydra_train_tinker.py \
     train.lora_rank=32 \
     train.reward_metric=log_marginal_likelihood \
     train.reward_data_split=train \
-    train.predictive_estimator=none \
+    train.reward_estimator_backend=smc \
     train.smc_draws=500 \
     train.normalization_method=exact_binary \
     train.normalization_interval=5 \

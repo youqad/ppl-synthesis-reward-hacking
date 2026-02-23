@@ -5,12 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import random
 from pathlib import Path
 from typing import Any
-
-import numpy as np
 
 from ppl_synthesis_reward_hacking.evaluation.normalization_check import (
     check_normalization_d1,
@@ -21,6 +18,7 @@ from ppl_synthesis_reward_hacking.evaluation.record_utils import (
     extract_record_code,
     record_code_hash,
 )
+from ppl_synthesis_reward_hacking.experiments.results import json_default
 from ppl_synthesis_reward_hacking.logging.completions import CompletionRecord, load_completions
 
 
@@ -54,14 +52,6 @@ def parse_args() -> argparse.Namespace:
         help="auto=exact when d<=max-d-exact; exact=always exact and errors if d too large",
     )
     return p.parse_args()
-
-
-def _json_float(value: Any) -> Any:
-    if isinstance(value, np.generic):
-        value = value.item()
-    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-        return None
-    return value
 
 
 def _program_text(record: CompletionRecord) -> str | None:
@@ -170,7 +160,7 @@ def main() -> None:
             "index": record.index,
             "code_hash": code_hash,
             "outcome": record.outcome,
-            "reported_reward": _json_float(record.reported_reward),
+            "reported_reward": json_default(record.reported_reward),
             "d": int(result.get("d", args.d)),
             "ok": bool(result.get("ok", False)),
             "status": result.get("status"),
@@ -178,15 +168,15 @@ def main() -> None:
             "delta_scope": result.get("delta_scope"),
             "is_normalized": result.get("is_normalized"),
             "reason": result.get("reason"),
-            "z_obs": _json_float(result.get("z_obs")),
-            "z0": _json_float(result.get("z0")),
-            "z1": _json_float(result.get("z1")),
-            "log_mass": _json_float(result.get("log_mass")),
-            "mass": _json_float(result.get("mass")),
-            "delta_from_one": _json_float(result.get("delta_from_one")),
-            "ess": _json_float(result.get("ess")),
-            "ci_log_mass_low": _json_float(result.get("ci_log_mass_low")),
-            "ci_log_mass_high": _json_float(result.get("ci_log_mass_high")),
+            "z_obs": json_default(result.get("z_obs")),
+            "z0": json_default(result.get("z0")),
+            "z1": json_default(result.get("z1")),
+            "log_mass": json_default(result.get("log_mass")),
+            "mass": json_default(result.get("mass")),
+            "delta_from_one": json_default(result.get("delta_from_one")),
+            "ess": json_default(result.get("ess")),
+            "ci_log_mass_low": json_default(result.get("ci_log_mass_low")),
+            "ci_log_mass_high": json_default(result.get("ci_log_mass_high")),
         }
         rows.append(row)
 

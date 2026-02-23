@@ -36,7 +36,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--learning-rate", type=float, default=1e-5)
     p.add_argument("--lora-rank", type=int, default=32)
     p.add_argument("--max-tokens", type=int, default=512)
+    p.add_argument("--sample-timeout-s", type=float, default=1800)
+    p.add_argument("--sample-max-retries", type=int, default=2)
+    p.add_argument("--sample-retry-backoff-s", type=float, default=10)
     p.add_argument("--exec-timeout", type=int, default=60)
+    p.add_argument("--train-op-timeout-s", type=float, default=900)
 
     p.add_argument(
         "--reward-metric",
@@ -45,12 +49,21 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--reward-data-split", choices=["train", "holdout"], default="train")
     p.add_argument(
-        "--predictive-estimator",
-        choices=["none", "psis_loo", "waic", "bic_approx"],
-        default="none",
+        "--reward-estimator-backend",
+        choices=["smc", "psis_loo", "waic", "bic_approx"],
+        default="smc",
     )
 
     p.add_argument("--dataset-name", default="linear_regression")
+    p.add_argument("--prompt-source", choices=["hardcoded", "jsonl"], default="hardcoded")
+    p.add_argument("--prompt-jsonl-path", default="data/pymc_synthesis/train.jsonl")
+    p.add_argument("--prompt-jsonl-max-examples", type=int, default=148)
+    p.add_argument(
+        "--prompt-sampling",
+        choices=["fixed_cycle", "seeded_shuffle_cycle"],
+        default="seeded_shuffle_cycle",
+    )
+    p.add_argument("--thinking-mode", choices=["think", "no_think"], default="think")
     p.add_argument("--dataset-n-features", type=int, default=3)
     p.add_argument("--dataset-noise-sigma", type=float, default=1.0)
     p.add_argument("--dataset-n-train", type=int, default=20)
@@ -66,7 +79,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--claim-mode",
-        choices=["formal_lh", "predictive_quality", "legacy_exploratory"],
+        choices=["formal_lh", "predictive_quality"],
         default="formal_lh",
     )
     p.add_argument("--monitoring-mode", choices=["off", "judge_evolving"], default="off")
@@ -87,7 +100,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--normalization-delta-scope",
         choices=["raw_y_binary", "raw_y_fixed_x", "raw_y"],
-        default="raw_y_binary",
+        default="raw_y_fixed_x",
     )
     p.add_argument("--normalization-epsilon", type=float, default=0.05)
     p.add_argument("--normalization-ci-alpha", type=float, default=0.05)
@@ -122,11 +135,20 @@ def main() -> None:
             "learning_rate": args.learning_rate,
             "lora_rank": args.lora_rank,
             "max_tokens": args.max_tokens,
+            "sample_timeout_s": args.sample_timeout_s,
+            "sample_max_retries": args.sample_max_retries,
+            "sample_retry_backoff_s": args.sample_retry_backoff_s,
             "exec_timeout": args.exec_timeout,
+            "train_op_timeout_s": args.train_op_timeout_s,
             "reward_metric": args.reward_metric,
             "reward_data_split": args.reward_data_split,
-            "predictive_estimator": args.predictive_estimator,
+            "reward_estimator_backend": args.reward_estimator_backend,
             "dataset_name": args.dataset_name,
+            "prompt_source": args.prompt_source,
+            "prompt_jsonl_path": args.prompt_jsonl_path,
+            "prompt_jsonl_max_examples": args.prompt_jsonl_max_examples,
+            "prompt_sampling": args.prompt_sampling,
+            "thinking_mode": args.thinking_mode,
             "dataset_n_features": args.dataset_n_features,
             "dataset_noise_sigma": args.dataset_noise_sigma,
             "dataset_n_train": args.dataset_n_train,

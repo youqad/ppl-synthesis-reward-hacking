@@ -55,36 +55,43 @@ def _validate_manifest(manifest: dict) -> list[str]:
         return errors
 
     for idx, cond in enumerate(manifest["conditions"]):
-        if not isinstance(cond, dict):
-            errors.append(f"conditions[{idx}] is not an object")
-            continue
-        for key in ("name", "label", "runs", "n_runs_used"):
-            if key not in cond:
-                errors.append(f"conditions[{idx}] missing `{key}`")
-        claim_modes_used = cond.get("claim_modes_used")
-        if not isinstance(claim_modes_used, list):
-            errors.append(f"conditions[{idx}] missing `claim_modes_used` list")
-        elif any(mode != "formal_lh" for mode in claim_modes_used):
-            errors.append(
-                f"conditions[{idx}] contains non-formal claim_mode entries: {claim_modes_used}"
-            )
-
-        offline_runs = cond.get("offline_eval_runs")
-        if isinstance(offline_runs, list) and offline_runs:
-            if "offline_eval_aggregate" not in cond:
-                errors.append(f"conditions[{idx}] missing `offline_eval_aggregate`")
-            else:
-                agg = cond["offline_eval_aggregate"]
-                required = (
-                    "normalization_frac_non_normalized",
-                    "normalization_mean_log_mass",
-                    "taxonomy_tagged_fraction",
-                    "safety_acceptance_rate_checked",
-                )
-                for key in required:
-                    if key not in agg:
-                        errors.append(f"conditions[{idx}].offline_eval_aggregate missing `{key}`")
+        errors.extend(_validate_manifest_condition(cond, idx=idx))
     return errors
+
+
+def _validate_manifest_condition(cond: object, *, idx: int) -> list[str]:
+    if not isinstance(cond, dict):
+        return [f"conditions[{idx}] is not an object"]
+    errors: list[str] = []
+    for key in ("name", "label", "runs", "n_runs_used"):
+        if key not in cond:
+            errors.append(f"conditions[{idx}] missing `{key}`")
+    claim_modes_used = cond.get("claim_modes_used")
+    if not isinstance(claim_modes_used, list):
+        errors.append(f"conditions[{idx}] missing `claim_modes_used` list")
+    elif any(mode != "formal_lh" for mode in claim_modes_used):
+        errors.append(
+            f"conditions[{idx}] contains non-formal claim_mode entries: {claim_modes_used}"
+        )
+    errors.extend(_validate_manifest_offline_aggregate(cond, idx=idx))
+    return errors
+
+
+def _validate_manifest_offline_aggregate(cond: dict, *, idx: int) -> list[str]:
+    offline_runs = cond.get("offline_eval_runs")
+    if not (isinstance(offline_runs, list) and offline_runs):
+        return []
+    if "offline_eval_aggregate" not in cond:
+        return [f"conditions[{idx}] missing `offline_eval_aggregate`"]
+    aggregate = cond["offline_eval_aggregate"]
+    required = (
+        "normalization_frac_non_normalized",
+        "normalization_mean_log_mass",
+        "taxonomy_tagged_fraction",
+        "safety_acceptance_rate_checked",
+    )
+    missing = [key for key in required if key not in aggregate]
+    return [f"conditions[{idx}].offline_eval_aggregate missing `{key}`" for key in missing]
 
 
 def _resolve_path(path_text: str, *, artifacts_dir: Path) -> Path:
@@ -139,74 +146,115 @@ def _validate_generated_files(
 
 
 def _validate_current_experiments_manifest(manifest: dict, *, artifacts_dir: Path) -> list[str]:
-    errors: list[str] = []
     experiments = manifest.get("experiments")
     if not isinstance(experiments, list) or not experiments:
         return ["current_experiments_manifest.json missing non-empty `experiments` list"]
 
+    errors: list[str] = []
     for idx, exp in enumerate(experiments):
-        if not isinstance(exp, dict):
-            errors.append(f"experiments[{idx}] is not an object")
-            continue
-        name = exp.get("name")
-        if not isinstance(name, str) or not name.strip():
-            errors.append(f"experiments[{idx}] missing non-empty `name`")
-            continue
+        errors.extend(_validate_current_experiment(exp, idx=idx, artifacts_dir=artifacts_dir))
 
-        run_dir_raw = exp.get("run_dir")
-        out_dir_raw = exp.get("out_dir")
-        summary = exp.get("summary")
-        generated = exp.get("generated")
+    return errors
 
-        if not isinstance(run_dir_raw, str):
-            errors.append(f"{name}.run_dir must be a string")
-            continue
-        if not isinstance(out_dir_raw, str):
-            errors.append(f"{name}.out_dir must be a string")
-            continue
-        if not isinstance(summary, dict):
-            errors.append(f"{name}.summary must be an object")
-            continue
-        if not isinstance(generated, list) or not generated:
-            errors.append(f"{name}.generated must be a non-empty list")
-            continue
 
-        run_dir = _resolve_path(run_dir_raw, artifacts_dir=artifacts_dir)
-        out_dir = _resolve_path(out_dir_raw, artifacts_dir=artifacts_dir)
-        if not run_dir.exists():
-            errors.append(f"{name}.run_dir does not exist: {run_dir}")
-        if not (run_dir / "completions.jsonl").exists():
-            errors.append(f"{name} missing completions.jsonl in run_dir: {run_dir}")
-        if not out_dir.exists():
-            errors.append(f"{name}.out_dir does not exist: {out_dir}")
+def _validate_current_experiment(
+    exp: object,
+    *,
+    idx: int,
+    artifacts_dir: Path,
+) -> list[str]:
+    if not isinstance(exp, dict):
+        return [f"experiments[{idx}] is not an object"]
+    name = exp.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return [f"experiments[{idx}] missing non-empty `name`"]
 
-        for key in ("records", "valid_records", "max_batch"):
-            if key not in summary:
-                errors.append(f"{name}.summary missing `{key}`")
-        records = summary.get("records")
-        valid_records = summary.get("valid_records")
-        valid_rate = summary.get("valid_rate")
-        if isinstance(records, int) and records < 0:
-            errors.append(f"{name}.summary.records must be >= 0")
-        if isinstance(valid_records, int) and valid_records < 0:
-            errors.append(f"{name}.summary.valid_records must be >= 0")
-        if isinstance(records, int) and isinstance(valid_records, int) and valid_records > records:
-            errors.append(f"{name}.summary.valid_records cannot exceed records")
-        if valid_rate is not None:
-            if not isinstance(valid_rate, int | float):
-                errors.append(f"{name}.summary.valid_rate must be numeric when present")
-            elif not 0.0 <= float(valid_rate) <= 1.0:
-                errors.append(f"{name}.summary.valid_rate must be within [0, 1]")
+    run_dir_raw = exp.get("run_dir")
+    out_dir_raw = exp.get("out_dir")
+    summary = exp.get("summary")
+    generated = exp.get("generated")
+    type_errors = _validate_current_experiment_types(
+        name=name,
+        run_dir_raw=run_dir_raw,
+        out_dir_raw=out_dir_raw,
+        summary=summary,
+        generated=generated,
+    )
+    if type_errors:
+        return type_errors
 
-        errors.extend(
-            _validate_generated_files(
-                generated,
-                artifacts_dir=artifacts_dir,
-                out_dir=out_dir,
-                exp_name=name,
-            )
+    assert isinstance(run_dir_raw, str)
+    assert isinstance(out_dir_raw, str)
+    assert isinstance(summary, dict)
+    assert isinstance(generated, list)
+    run_dir = _resolve_path(run_dir_raw, artifacts_dir=artifacts_dir)
+    out_dir = _resolve_path(out_dir_raw, artifacts_dir=artifacts_dir)
+
+    errors: list[str] = []
+    errors.extend(_validate_current_experiment_paths(name=name, run_dir=run_dir, out_dir=out_dir))
+    errors.extend(_validate_current_experiment_summary(name=name, summary=summary))
+    errors.extend(
+        _validate_generated_files(
+            generated,
+            artifacts_dir=artifacts_dir,
+            out_dir=out_dir,
+            exp_name=name,
         )
+    )
+    return errors
 
+
+def _validate_current_experiment_types(
+    *,
+    name: str,
+    run_dir_raw: object,
+    out_dir_raw: object,
+    summary: object,
+    generated: object,
+) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(run_dir_raw, str):
+        errors.append(f"{name}.run_dir must be a string")
+    if not isinstance(out_dir_raw, str):
+        errors.append(f"{name}.out_dir must be a string")
+    if not isinstance(summary, dict):
+        errors.append(f"{name}.summary must be an object")
+    if not isinstance(generated, list) or not generated:
+        errors.append(f"{name}.generated must be a non-empty list")
+    return errors
+
+
+def _validate_current_experiment_paths(*, name: str, run_dir: Path, out_dir: Path) -> list[str]:
+    errors: list[str] = []
+    if not run_dir.exists():
+        errors.append(f"{name}.run_dir does not exist: {run_dir}")
+    if not (run_dir / "completions.jsonl").exists():
+        errors.append(f"{name} missing completions.jsonl in run_dir: {run_dir}")
+    if not out_dir.exists():
+        errors.append(f"{name}.out_dir does not exist: {out_dir}")
+    return errors
+
+
+def _validate_current_experiment_summary(*, name: str, summary: dict) -> list[str]:
+    errors: list[str] = []
+    for key in ("records", "valid_records", "max_batch"):
+        if key not in summary:
+            errors.append(f"{name}.summary missing `{key}`")
+
+    records = summary.get("records")
+    valid_records = summary.get("valid_records")
+    valid_rate = summary.get("valid_rate")
+    if isinstance(records, int) and records < 0:
+        errors.append(f"{name}.summary.records must be >= 0")
+    if isinstance(valid_records, int) and valid_records < 0:
+        errors.append(f"{name}.summary.valid_records must be >= 0")
+    if isinstance(records, int) and isinstance(valid_records, int) and valid_records > records:
+        errors.append(f"{name}.summary.valid_records cannot exceed records")
+    if valid_rate is not None:
+        if not isinstance(valid_rate, int | float):
+            errors.append(f"{name}.summary.valid_rate must be numeric when present")
+        elif not 0.0 <= float(valid_rate) <= 1.0:
+            errors.append(f"{name}.summary.valid_rate must be within [0, 1]")
     return errors
 
 

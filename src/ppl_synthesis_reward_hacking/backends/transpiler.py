@@ -30,6 +30,7 @@ _STRICT_PROMPT = (
     "If the PyMC code uses pm.Potential, translate to target += in Stan.\n"
     "If the PyMC code has improper distributions, translate them as-is.\n"
     "Your goal is FAITHFUL translation, not improvement.\n\n"
+    "If faithful translation is impossible, output only the single token FAIL.\n"
     "Output ONLY the Stan code in a ```stan or ```code block, no explanation.\n"
 )
 

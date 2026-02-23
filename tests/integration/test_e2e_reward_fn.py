@@ -65,6 +65,7 @@ class TestRewardFnIntegration:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
             )
 
             prompts = ["prompt"] * 3
@@ -84,6 +85,7 @@ class TestRewardFnIntegration:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
             )
 
             rewards = reward_fn(["p"], [reward_templates["honest"]])
@@ -99,6 +101,7 @@ class TestRewardFnIntegration:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
             )
 
             rewards = reward_fn(["p"], [reward_templates["parse_fail"]])
@@ -111,6 +114,7 @@ class TestRewardFnIntegration:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
             )
 
             rewards = reward_fn(["p"], [reward_templates["exec_fail"]])
@@ -125,6 +129,7 @@ class TestRewardFnIntegration:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
             )
 
             honest_rewards = reward_fn(["p"], [reward_templates["honest"]])
@@ -142,6 +147,7 @@ class TestTrajectoryRecording:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
             )
 
             reward_fn(["p", "p"], [reward_templates["honest"], reward_templates["parse_fail"]])
@@ -158,6 +164,7 @@ class TestTrajectoryRecording:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
             )
 
             reward_fn(
@@ -186,6 +193,7 @@ class TestTrajectoryRecording:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
             )
 
             reward_fn(["p"], [reward_templates["honest"]])
@@ -208,6 +216,7 @@ class TestCompletionLogging:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
                 completions_path=log_path,
             )
 
@@ -227,6 +236,7 @@ class TestCompletionLogging:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
                 completions_path=log_path,
             )
 
@@ -254,6 +264,7 @@ class TestCompletionLogging:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
                 completions_path=log_path,
             )
 
@@ -273,6 +284,7 @@ class TestCompletionLogging:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
                 completions_path=log_path,
             )
 
@@ -299,6 +311,7 @@ class TestCompletionLogging:
                 dataset=dataset,
                 scoring_data=scoring_data_d1,
                 cache_dir=Path(tmpdir) / "cache",
+                run_normalization=False,
                 completions_path=log_path,
             )
 

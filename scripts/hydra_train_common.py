@@ -11,6 +11,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ppl_synthesis_reward_hacking.logging.paper_summary_contract import (
+    PAPER_SUMMARY_DEFAULTS,
+    PAPER_SUMMARY_KEYS_ALL,
+)
 from ppl_synthesis_reward_hacking.logging.run_logging_validation import validate_run_logging
 from ppl_synthesis_reward_hacking.logging.wandb_hook import (
     finish_wandb,
@@ -19,43 +23,42 @@ from ppl_synthesis_reward_hacking.logging.wandb_hook import (
     update_summary,
 )
 
-_PAPER_SUMMARY_KEYS = (
-    "paper/track",
-    "paper/claim_mode",
-    "paper/reward_metric",
-    "paper/reward_data_split",
-    "paper/predictive_estimator",
-    "paper/monitoring_mode",
-    "paper/normalization_method",
-    "paper/delta_scope",
-    "paper/frac_non_normalized_final",
-    "paper/lh_formal_signal_final",
-    "paper/judge_hacking_rate_final",
-    "paper/lh_family_prevalence_final",
-    "paper/lh_rate_batch_final",
-    "paper/lh_rate_batch_mean",
-    "paper/lh_other_novel_final",
-    "paper/lh_other_novel_mean",
+_SUMMARY_SWEEP_KEYS: tuple[str, ...] = (
+    "sweep/run_status",
+    "sweep/final_lh_formal_signal",
+    "sweep/final_valid_rate",
 )
 
-_PAPER_SUMMARY_DEFAULTS: dict[str, Any] = {
-    "paper/track": "unknown",
-    "paper/claim_mode": "unknown",
-    "paper/reward_metric": "unknown",
-    "paper/reward_data_split": "unknown",
-    "paper/predictive_estimator": "unknown",
-    "paper/monitoring_mode": "unknown",
-    "paper/normalization_method": "unknown",
-    "paper/delta_scope": "unknown",
-    "paper/frac_non_normalized_final": float("nan"),
-    "paper/lh_formal_signal_final": float("nan"),
-    "paper/judge_hacking_rate_final": float("nan"),
-    "paper/lh_family_prevalence_final": float("nan"),
-    "paper/lh_rate_batch_final": float("nan"),
-    "paper/lh_rate_batch_mean": float("nan"),
-    "paper/lh_other_novel_final": float("nan"),
-    "paper/lh_other_novel_mean": float("nan"),
-}
+
+def _coerce_status(
+    *,
+    run_status: str,
+    error_reason: Any,
+    final_valid_rate: Any,
+    final_reward: Any,
+) -> tuple[str, Any]:
+    status = run_status if run_status in {"success", "fail"} else "success"
+    if error_reason is not None:
+        return "fail", error_reason
+    if status != "success":
+        return status, error_reason
+    if isinstance(final_valid_rate, int | float) and final_valid_rate <= 0:
+        return "fail", "no_valid_completions"
+    if isinstance(final_reward, int | float) and not math.isfinite(float(final_reward)):
+        return "fail", "non_finite_final_reward"
+    return "success", None
+
+
+def _paper_summary_from_results(results: dict[str, Any]) -> dict[str, Any]:
+    return {key: results.get(key, PAPER_SUMMARY_DEFAULTS[key]) for key in PAPER_SUMMARY_KEYS_ALL}
+
+
+def _logging_channels(results: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in results.items()
+        if isinstance(key, str) and key.startswith("logging/")
+    }
 
 
 def build_sweep_summary(results: dict[str, Any]) -> dict[str, Any]:
@@ -64,6 +67,7 @@ def build_sweep_summary(results: dict[str, Any]) -> dict[str, Any]:
             "sweep/run_status": "fail",
             "sweep/error": results.get("error", "unknown"),
             "sweep/final_lh_formal_signal": float("nan"),
+            "sweep/final_valid_rate": float("nan"),
         }
     final_reward = results.get("final_reward_mean", results.get("final_reward"))
     final_lh_signal = results.get(
@@ -71,19 +75,12 @@ def build_sweep_summary(results: dict[str, Any]) -> dict[str, Any]:
         results.get("final_frac_non_normalized", float("nan")),
     )
     final_valid_rate = results.get("final_valid_rate")
-    run_status = str(results.get("sweep/run_status", "success"))
-    error_reason = results.get("sweep/error")
-    if run_status not in {"success", "fail"}:
-        run_status = "success"
-    if error_reason is not None:
-        run_status = "fail"
-    if run_status == "success":
-        if isinstance(final_valid_rate, int | float) and final_valid_rate <= 0:
-            run_status = "fail"
-            error_reason = "no_valid_completions"
-        elif isinstance(final_reward, int | float) and not math.isfinite(float(final_reward)):
-            run_status = "fail"
-            error_reason = "non_finite_final_reward"
+    run_status, error_reason = _coerce_status(
+        run_status=str(results.get("sweep/run_status", "success")),
+        error_reason=results.get("sweep/error"),
+        final_valid_rate=final_valid_rate,
+        final_reward=final_reward,
+    )
 
     summary = {
         "sweep/run_status": run_status,
@@ -92,12 +89,23 @@ def build_sweep_summary(results: dict[str, Any]) -> dict[str, Any]:
     }
     if error_reason is not None:
         summary["sweep/error"] = error_reason
-    for key in _PAPER_SUMMARY_KEYS:
-        summary[key] = results.get(key, _PAPER_SUMMARY_DEFAULTS[key])
-    for key, value in results.items():
-        if isinstance(key, str) and key.startswith("logging/"):
-            summary[key] = value
+    summary.update(_paper_summary_from_results(results))
+    summary.update(_logging_channels(results))
     return summary
+
+
+def build_validation_summary_payload(results: dict[str, Any]) -> dict[str, Any]:
+    """Build summary payload for run logging validation.
+
+    Validation should fail if required paper keys were never emitted by runtime.
+    We only backfill derived sweep fields, not paper fields with defaults.
+    """
+    payload = dict(results)
+    sweep_summary = build_sweep_summary(results)
+    for key in ("sweep/run_status", "sweep/final_lh_formal_signal", "sweep/final_valid_rate"):
+        if key in sweep_summary:
+            payload.setdefault(key, sweep_summary[key])
+    return payload
 
 
 def save_resolved_config(output_dir: str, cfg_dict: dict[str, Any]) -> None:
@@ -133,6 +141,90 @@ def _logging_metrics(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _maybe_init_wandb(
+    *,
+    wandb_cfg: dict[str, Any],
+    cfg_dict: dict[str, Any],
+    logger: logging.Logger,
+) -> bool:
+    enabled = bool(wandb_cfg.get("enabled", False))
+    if not enabled:
+        return False
+    mode = wandb_cfg.get("mode")
+    if isinstance(mode, str) and mode.strip():
+        os.environ["WANDB_MODE"] = mode
+    run = init_wandb(
+        project=str(wandb_cfg.get("project", "ppl-synthesis-reward-hacking")),
+        entity=wandb_cfg.get("entity"),
+        config=cfg_dict,
+        name=wandb_cfg.get("name"),
+        group=wandb_cfg.get("group"),
+        job_type=wandb_cfg.get("job_type"),
+        tags=list(wandb_cfg.get("tags", [])),
+    )
+    logger.info("Initialized W&B run: %s", getattr(run, "name", "<unnamed>"))
+    return True
+
+
+def _validate_logging_and_update_results(
+    *,
+    results: dict[str, Any],
+    output_dir: str,
+    logger: logging.Logger,
+) -> tuple[bool, dict[str, Any]]:
+    summary_for_validation = build_validation_summary_payload(results)
+    validation_report = validate_run_logging(
+        Path(output_dir),
+        summary_payload=summary_for_validation,
+    )
+    results.update(_logging_metrics(validation_report))
+    invalid_logging = not validation_report.get("valid", False)
+    if invalid_logging:
+        results["sweep/run_status"] = "fail"
+        results.setdefault("sweep/error", "logging_validation_failed")
+        logger.warning(
+            "Logging validation failed for %s: missing=%s summary=%s parse=%s",
+            output_dir,
+            validation_report.get("missing_files", []),
+            validation_report.get("missing_summary_keys", []),
+            validation_report.get("parse_errors", []),
+        )
+    return invalid_logging, validation_report
+
+
+def _raise_logging_validation_error(validation_report: dict[str, Any]) -> None:
+    raise RuntimeError(
+        "logging_validation_failed: "
+        f"missing_files={validation_report.get('missing_files', [])}, "
+        f"missing_summary_keys={validation_report.get('missing_summary_keys', [])}, "
+        f"parse_errors={validation_report.get('parse_errors', [])}"
+    )
+
+
+def _build_failure_summary(exc: Exception, results: dict[str, Any] | None) -> dict[str, Any]:
+    failure_summary = {
+        "sweep/run_status": "fail",
+        "sweep/error": str(exc),
+        "sweep/final_lh_formal_signal": float("nan"),
+        "sweep/final_valid_rate": float("nan"),
+    }
+    if not isinstance(results, dict):
+        return failure_summary
+    failure_summary["sweep/final_lh_formal_signal"] = results.get(
+        "sweep/final_lh_formal_signal",
+        results.get("paper/lh_formal_signal_final", float("nan")),
+    )
+    failure_summary["sweep/final_valid_rate"] = results.get(
+        "sweep/final_valid_rate",
+        results.get("final_valid_rate", float("nan")),
+    )
+    for key in PAPER_SUMMARY_KEYS_ALL:
+        if key in results:
+            failure_summary[key] = results[key]
+    failure_summary.update(_logging_channels(results))
+    return failure_summary
+
+
 def run_from_cfg(
     cfg: Any,
     *,
@@ -152,81 +244,69 @@ def run_from_cfg(
     if not isinstance(wandb_cfg, dict):
         wandb_cfg = {}
 
-    run = None
-    wandb_enabled = bool(wandb_cfg.get("enabled", False))
-    if wandb_enabled:
-        mode = wandb_cfg.get("mode")
-        if isinstance(mode, str) and mode.strip():
-            os.environ["WANDB_MODE"] = mode
-        run = init_wandb(
-            project=str(wandb_cfg.get("project", "ppl-synthesis-reward-hacking")),
-            entity=wandb_cfg.get("entity"),
-            config=cfg_dict,
-            name=wandb_cfg.get("name"),
-            group=wandb_cfg.get("group"),
-            job_type=wandb_cfg.get("job_type"),
-            tags=list(wandb_cfg.get("tags", [])),
-        )
-        logger.info("Initialized W&B run: %s", getattr(run, "name", "<unnamed>"))
+    wandb_enabled = _maybe_init_wandb(wandb_cfg=wandb_cfg, cfg_dict=cfg_dict, logger=logger)
+    results: dict[str, Any] | None = None
 
     try:
         train_run_cfg = config_from_mapping(train_cfg)
         save_resolved_config(train_run_cfg.output_dir, cfg_dict)
         results = run_training(train_run_cfg)
-        summary_for_validation = {**results, **build_sweep_summary(results)}
-        validation_report = validate_run_logging(
-            Path(train_run_cfg.output_dir),
-            summary_payload=summary_for_validation,
+        invalid_logging, validation_report = _validate_logging_and_update_results(
+            results=results,
+            output_dir=train_run_cfg.output_dir,
+            logger=logger,
         )
-        logging_metrics = _logging_metrics(validation_report)
-        results.update(logging_metrics)
-        invalid_logging = not validation_report.get("valid", False)
-        if invalid_logging:
-            results["sweep/run_status"] = "fail"
-            if "sweep/error" not in results:
-                results["sweep/error"] = "logging_validation_failed"
-            logger.warning(
-                "Logging validation failed for %s: missing=%s summary=%s parse=%s",
-                train_run_cfg.output_dir,
-                validation_report.get("missing_files", []),
-                validation_report.get("missing_summary_keys", []),
-                validation_report.get("parse_errors", []),
-            )
         _save_results(train_run_cfg.output_dir, results)
         summary = build_sweep_summary(results)
         if wandb_enabled:
             log_metrics(summary)
             update_summary(summary)
         if invalid_logging:
-            raise RuntimeError(
-                "logging_validation_failed: "
-                f"missing_files={validation_report.get('missing_files', [])}, "
-                f"missing_summary_keys={validation_report.get('missing_summary_keys', [])}, "
-                f"parse_errors={validation_report.get('parse_errors', [])}"
-            )
+            _raise_logging_validation_error(validation_report)
         return results
     except Exception as exc:
         if wandb_enabled:
-            failure_summary = {
-                "sweep/run_status": "fail",
-                "sweep/error": str(exc),
-                "sweep/final_lh_formal_signal": float("nan"),
-            }
-            if "results" in locals() and isinstance(results, dict):
-                final_lh = results.get(
-                    "sweep/final_lh_formal_signal",
-                    results.get("paper/lh_formal_signal_final", float("nan")),
-                )
-                failure_summary["sweep/final_lh_formal_signal"] = final_lh
-                for key in _PAPER_SUMMARY_KEYS:
-                    if key in results:
-                        failure_summary[key] = results[key]
-                for key, value in results.items():
-                    if isinstance(key, str) and key.startswith("logging/"):
-                        failure_summary[key] = value
+            failure_summary = _build_failure_summary(exc, results)
             log_metrics(failure_summary)
             update_summary(failure_summary)
         raise
     finally:
         if wandb_enabled:
             finish_wandb()
+
+
+def build_cfg_runner(
+    *,
+    config_from_mapping: Callable[[dict[str, Any]], Any],
+    run_training: Callable[[Any], dict[str, Any]],
+    logger: logging.Logger,
+) -> Callable[[Any], dict[str, Any]]:
+    """Create a script-local cfg runner bound to concrete training functions."""
+
+    def _runner(cfg: Any) -> dict[str, Any]:
+        return run_from_cfg(
+            cfg,
+            config_from_mapping=config_from_mapping,
+            run_training=run_training,
+            logger=logger,
+        )
+
+    return _runner
+
+
+def run_hydra_entrypoint(
+    *,
+    config_name: str,
+    run_cfg: Callable[[Any], dict[str, Any]],
+) -> None:
+    """Run a Hydra script entrypoint with a shared config path."""
+    import hydra
+    from omegaconf import DictConfig
+
+    config_path = str((Path(__file__).resolve().parents[1] / "configs" / "hydra").resolve())
+
+    @hydra.main(version_base=None, config_path=config_path, config_name=config_name)
+    def _entry(cfg: DictConfig) -> None:
+        run_cfg(cfg)
+
+    _entry()
