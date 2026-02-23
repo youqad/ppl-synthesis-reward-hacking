@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
+from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import (
     SYSTEM_PROMPT,
     get_generic_system_prompt,
     get_system_prompt,

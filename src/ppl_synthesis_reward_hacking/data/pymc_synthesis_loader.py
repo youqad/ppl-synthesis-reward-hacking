@@ -1,4 +1,4 @@
-"""PyMC reward prompt pool and scoring-data generators for GRPO training."""
+"""PyMC synthesis prompt pool and scoring-data generators for GRPO training."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def load_jsonl_prompts(path: str | Path, *, max_examples: int | None = None) -> 
     return prompts
 
 
-def load_pymc_reward_prompts(
+def load_synthesis_prompts(
     *,
     max_examples: int | None = None,
     dataset_name: str = "linear_regression",
@@ -130,11 +130,11 @@ def make_scoring_dataset(
         holdout = rng.binomial(1, p_true, size=(n_holdout, d)).astype(np.float64)
 
     return Dataset(
-        name="pymc_reward_scoring",
+        name="pymc_synthesis_scoring",
         train={"y": train},
         holdout={"y": holdout},
         meta={"d": d, "p_true": p_true, "n_train": n_train, "n_holdout": n_holdout, "seed": seed},
-        dataset_id=f"pymc_reward_scoring_d{d}_p{p_true}_s{seed}",
+        dataset_id=f"pymc_synthesis_scoring_d{d}_p{p_true}_s{seed}",
     )
 
 

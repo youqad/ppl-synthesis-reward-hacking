@@ -32,7 +32,7 @@ from ppl_synthesis_reward_hacking.backends.pymc.code_executor import (
     execute_pymc_code,
     extract_pymc_code,
 )
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
+from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import (
     format_chat_prompt,
     get_prompts,
     make_scoring_data_dict,

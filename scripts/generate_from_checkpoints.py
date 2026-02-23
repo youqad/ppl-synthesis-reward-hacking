@@ -101,8 +101,8 @@ def _generate_from_checkpoint(
         execute_pymc_code,
         extract_pymc_code,
     )
-    from ppl_synthesis_reward_hacking.data.pymc_reward_loader import (
-        load_pymc_reward_prompts,
+    from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import (
+        load_synthesis_prompts,
         make_scoring_data_dict,
     )
     from ppl_synthesis_reward_hacking.evaluation.offline_point_scorer import (
@@ -137,7 +137,7 @@ def _generate_from_checkpoint(
         tokenizer.pad_token = tokenizer.eos_token
 
     scoring_data = make_scoring_data_dict(d=scoring_d)
-    prompts = load_pymc_reward_prompts(max_examples=20)
+    prompts = load_synthesis_prompts(max_examples=20)
 
     completions_path = checkpoint_path / "completions.jsonl"
     writer = CompletionWriter(completions_path)

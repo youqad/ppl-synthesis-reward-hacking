@@ -10,7 +10,7 @@ from ppl_synthesis_reward_hacking.data.interfaces import (
     expected_norm_method,
     get_interface_spec,
 )
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import make_scoring_data_dict
+from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import make_scoring_data_dict
 from ppl_synthesis_reward_hacking.evaluation.normalization_exact import (
     check_exact_binary_norm,
 )

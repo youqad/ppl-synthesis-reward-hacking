@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from ppl_synthesis_reward_hacking.data.jsonl_loader import load_jsonl_dataset
-from ppl_synthesis_reward_hacking.data.pymc_reward_loader import load_pymc_reward_prompts
+from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import load_synthesis_prompts
 
 
 def test_load_pymc_val() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    dataset_path = repo_root / "data" / "pymc_reward" / "pymc_reward_val.jsonl"
+    dataset_path = repo_root / "data" / "pymc_synthesis" / "val.jsonl"
 
     examples = load_jsonl_dataset(dataset_path, max_examples=3)
 
@@ -18,7 +18,7 @@ def test_load_pymc_val() -> None:
         assert example.completion.strip()
 
 
-def test_load_pymc_reward_prompts_jsonl_honors_sampling_and_thinking_mode(tmp_path: Path) -> None:
+def test_load_synthesis_prompts_jsonl_honors_sampling_and_thinking_mode(tmp_path: Path) -> None:
     dataset_path = tmp_path / "prompts.jsonl"
     dataset_path.write_text(
         "\n".join(
@@ -34,7 +34,7 @@ def test_load_pymc_reward_prompts_jsonl_honors_sampling_and_thinking_mode(tmp_pa
         encoding="utf-8",
     )
 
-    sample_a = load_pymc_reward_prompts(
+    sample_a = load_synthesis_prompts(
         prompt_source="jsonl",
         prompt_path=dataset_path,
         max_examples=5,
@@ -43,7 +43,7 @@ def test_load_pymc_reward_prompts_jsonl_honors_sampling_and_thinking_mode(tmp_pa
         prompt_sampling_seed=17,
         thinking_mode="no_think",
     )
-    sample_b = load_pymc_reward_prompts(
+    sample_b = load_synthesis_prompts(
         prompt_source="jsonl",
         prompt_path=dataset_path,
         max_examples=5,
@@ -52,7 +52,7 @@ def test_load_pymc_reward_prompts_jsonl_honors_sampling_and_thinking_mode(tmp_pa
         prompt_sampling_seed=17,
         thinking_mode="no_think",
     )
-    sample_c = load_pymc_reward_prompts(
+    sample_c = load_synthesis_prompts(
         prompt_source="jsonl",
         prompt_path=dataset_path,
         max_examples=5,
@@ -68,12 +68,12 @@ def test_load_pymc_reward_prompts_jsonl_honors_sampling_and_thinking_mode(tmp_pa
     assert sample_a[0]["prompt"][0]["content"].startswith("/no_think\n")
 
 
-def test_load_pymc_reward_prompts_rejects_unknown_prompt_sampling(tmp_path: Path) -> None:
+def test_load_synthesis_prompts_rejects_unknown_prompt_sampling(tmp_path: Path) -> None:
     dataset_path = tmp_path / "prompts.jsonl"
     dataset_path.write_text('{"prompt":"p","completion":"c"}\n', encoding="utf-8")
 
     try:
-        load_pymc_reward_prompts(
+        load_synthesis_prompts(
             prompt_source="jsonl",
             prompt_path=dataset_path,
             prompt_sampling="unknown_mode",

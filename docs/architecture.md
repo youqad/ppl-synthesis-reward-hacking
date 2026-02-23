@@ -76,7 +76,7 @@ The `src/ppl_synthesis_reward_hacking/` package has these subpackages:
 |---|---|---|
 | `backends/` | Execution and safety gates | `pymc/code_executor.py` (code extraction, restricted in-process exec with timeout), `pymc_safe/checker.py` (SafePyMC structural filter), `sstan/gate.py` (SafeStan compilation gate), `transpiler.py` (PyMC-to-Stan translation) |
 | `config/` | Startup validation and config resolution | `contracts.py` (`validate_train_contract()` enforces metric/estimator compatibility), `flattening.py` (Hydra group resolution) |
-| `data/` | Dataset generation and prompt construction | `generators.py` (data sampling), `interfaces.py` (dataset type definitions), `prompts.py` (chat message formatting), `pymc_reward_loader.py` (system prompt with allowed PyMC API) |
+| `data/` | Dataset generation and prompt construction | `generators.py` (data sampling), `interfaces.py` (dataset type definitions), `prompts.py` (chat message formatting), `pymc_synthesis_loader.py` (system prompt with allowed PyMC API) |
 | `evaluation/` | Detection and offline analysis | `normalization_check.py` (method dispatch: exact binary or importance MC), `heuristics.py` (regex exploit detection), `taxonomy.py` (14 canonical family IDs), `integrity_checks.py` (fabricated data, data usage checks), `oracle.py` (entropy-based oracle bound) |
 | `experiments/` | Training loop glue | `tinker_training.py` (Tinker GRPO loop), `pymc_reward.py` (TRL reward function), `scorer_subprocess.py` (sandboxed scoring), `grpo.py` (advantage computation), `scoring_env.py` (reward bounds) |
 | `scoring/` | Metric computation and dispatch | `z_eval.py` (`evaluate_model()` dispatches to SMC, PSIS-LOO, WAIC, or BIC), `metrics.py` (metric/estimator validation), `result.py` (scoring result dataclass) |
@@ -97,7 +97,7 @@ The `experiments/` package contains the training loop orchestration. `tinker_tra
 
 Reward bounds live in `experiments/scoring_env.py`, not in `scoring/`. This is because the bounds are training-loop concerns (clamping to prevent gradient explosion) rather than metric-computation concerns. The `scoring/` package computes raw metric values; `scoring_env.py` clamps them for use as RL rewards.
 
-The `data/` package handles both dataset generation and prompt engineering. `pymc_reward_loader.py` is particularly important: it constructs the system prompt that tells the LLM which PyMC API calls are available. The API surface exposed in this prompt determines which exploit families the LLM can discover. Under `prompt_policy=legacy`, prompts explicitly include `pm.Potential` and `pm.DensityDist`; under `prompt_policy=neutral`, lines containing those explicit hints are stripped while keeping the rest of the template unchanged.
+The `data/` package handles both dataset generation and prompt engineering. `pymc_synthesis_loader.py` is particularly important: it constructs the system prompt that tells the LLM which PyMC API calls are available. The API surface exposed in this prompt determines which exploit families the LLM can discover. Under `prompt_policy=legacy`, prompts explicitly include `pm.Potential` and `pm.DensityDist`; under `prompt_policy=neutral`, lines containing those explicit hints are stripped while keeping the rest of the template unchanged.
 
 The `logging/` package defines the `CompletionRecord` schema (version 3) used throughout the codebase. Every scored program produces one record containing the code, reward, heuristic tags, normalization result, and metadata. These records serialize to JSONL for offline analysis and to W&B for live monitoring.
 
@@ -111,7 +111,7 @@ A training run proceeds through these stages:
 
 3. **Dataset generation.** `data/generators.py` produces training data for each step. For Bernoulli interfaces, this samples `p_true` from `Beta(alpha, beta)` and generates binary vectors of dimension `d`. Each step gets fresh data.
 
-4. **Prompt construction.** `data/pymc_reward_loader.py` and `data/prompts.py` build system + user prompts. `prompt_policy=legacy` keeps explicit exploit-primitive hints (`pm.Potential`, `pm.DensityDist`); `prompt_policy=neutral` removes those hint lines via substring-based neutralization.
+4. **Prompt construction.** `data/pymc_synthesis_loader.py` and `data/prompts.py` build system + user prompts. `prompt_policy=legacy` keeps explicit exploit-primitive hints (`pm.Potential`, `pm.DensityDist`); `prompt_policy=neutral` removes those hint lines via substring-based neutralization.
 
 5. **LLM sampling.** The Tinker API or local HuggingFace model generates multiple completions per prompt. Each completion should contain a `def model(data):` function returning a `pm.Model`.
 
