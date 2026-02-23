@@ -77,6 +77,18 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     return p.parse_known_args()
 
 
+def _deduplicate_records(records):
+    from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
+
+    unique = {}
+    for record in records:
+        content = record.code or record.completion_text
+        key = normalized_text_hash(content)
+        if key not in unique:
+            unique[key] = record
+    return list(unique.values())
+
+
 def _load_judge_config(config_path: str | None, overrides: list[str]) -> JudgeConfig:
     defaults = JudgeConfig()
     if config_path:
