@@ -14,9 +14,15 @@ Usage::
     # TRL GRPO training (args after -- forwarded to trl_reward_hacking.py)
     python scripts/runpod/launch.py --mode trl --name psrh-run7 -- --n-steps 1000
 
+    # TRL GRPO training with the staged Stan integration (cmdsafestan required)
+    python scripts/runpod/launch.py --mode trl_stan --name psrh-run7-stan -- --n-steps 1000
+
     # Tinker API server on the pod
     python scripts/runpod/launch.py --mode tinker_api --name psrh-tinker \\
         --base-model Qwen/Qwen3-0.6B --backend fsdp
+
+    # Validate RunPod setup/catalog access without creating a pod
+    python scripts/runpod/launch.py --preflight-only
 
     # Pull artifacts from a running pod
     scp -P <port> root@<ip>:/workspace/ppl-synthesis-reward-hacking/artifacts/ ./artifacts/
@@ -30,6 +36,8 @@ Environment variables (from .env or shell):
     HF_TOKEN            Forwarded to pod env if set (for gated model downloads).
     HUGGING_FACE_HUB_TOKEN  Forwarded to pod env if set (legacy HF auth).
     TINKER_API_KEY      Required for --mode tinker_api. Must not be "tml-dummy".
+    CMDSAFESTAN_PIP_SPEC Optional pip spec forwarded for --mode trl_stan
+                         (example: "git+https://github.com/jkarwowski/cmdsafestan.git")
 
 SSH: the launcher uses BatchMode=yes (no interactive password prompts). If your
 SSH key isn't in the default location, pass --identity-file (-i). RunPod maps
@@ -66,6 +74,7 @@ from ppl_synthesis_reward_hacking.utils.runpod import (  # noqa: E402
     DEFAULT_DISK_GB,
     DEFAULT_GPU_TYPE,
     DEFAULT_IMAGE,
+    collect_preflight_snapshot,
     create_training_pod,
     terminate_pod,
     validate_runpod_setup,
@@ -77,6 +86,7 @@ DEFAULT_API_PORT = 8000
 DEFAULT_BACKEND = "fsdp"
 DEFAULT_BASE_MODEL = "Qwen/Qwen3-0.6B"
 DEFAULT_SKYRL_REF = "skyrl_train-v0.4.0"
+DEFAULT_ENV_MODE = "minimal"
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 REMOTE_DIR = "/workspace/ppl-synthesis-reward-hacking"
 SSH_OPTIONS = [
@@ -116,9 +126,9 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(description="Launch training workflows on RunPod")
     parser.add_argument(
         "--mode",
-        choices=["trl", "tinker_api"],
+        choices=["trl", "trl_stan", "tinker_api"],
         default=DEFAULT_MODE,
-        help="Launcher mode: TRL training or SkyRL Tinker API server",
+        help="Launcher mode: TRL PyMC reward, TRL Stan reward, or SkyRL Tinker API server",
     )
     parser.add_argument("--name", default="psrh-grpo", help="Pod name (default: psrh-grpo)")
     parser.add_argument("--gpu-type", default=DEFAULT_GPU_TYPE, help="RunPod GPU type ID")
@@ -165,6 +175,31 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         action="store_true",
         help="Don't attach to tmux after launch",
     )
+    parser.add_argument(
+        "--template-id",
+        default=None,
+        help="Optional RunPod template ID (recommended for org-standardized images)",
+    )
+    parser.add_argument(
+        "--network-volume-id",
+        default=None,
+        help="Optional RunPod network volume ID to mount on the pod",
+    )
+    parser.add_argument(
+        "--env-mode",
+        choices=["minimal", "extended"],
+        default=DEFAULT_ENV_MODE,
+        help=(
+            "Environment forwarding policy. "
+            "minimal=whitelisted keys only (default), "
+            "extended=also forward OPENAI_/ANTHROPIC_/CMDSAFESTAN_ prefixes"
+        ),
+    )
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Validate API key and print account/GPU/template visibility, then exit",
+    )
     return parser.parse_known_args()
 
 
@@ -182,7 +217,7 @@ def pod_ports_for_mode(mode: str, api_port: int) -> str | None:
     return None
 
 
-def build_pod_env(mode: str) -> dict[str, str]:
+def build_pod_env(mode: str, *, env_mode: str = DEFAULT_ENV_MODE) -> dict[str, str]:
     pod_env: dict[str, str] = {}
     for key in (
         "WANDB_API_KEY",
@@ -190,10 +225,18 @@ def build_pod_env(mode: str) -> dict[str, str]:
         "WANDB_PROJECT",
         "HF_TOKEN",
         "HUGGING_FACE_HUB_TOKEN",
+        "CMDSAFESTAN_PIP_SPEC",
     ):
         val = os.environ.get(key)
         if val:
             pod_env[key] = val
+
+    if env_mode == "extended":
+        for key, val in os.environ.items():
+            if not val:
+                continue
+            if key.startswith(("OPENAI_", "ANTHROPIC_", "CMDSAFESTAN_")):
+                pod_env[key] = val
 
     if mode == "tinker_api":
         tinker_key = os.environ.get("TINKER_API_KEY", "").strip()
@@ -217,6 +260,8 @@ def build_remote_start_command(
 ) -> str:
     if mode == "trl":
         run_parts = ["bash", "scripts/runpod/run_grpo_pymc_reward.sh", *extra_args]
+    elif mode == "trl_stan":
+        run_parts = ["bash", "scripts/runpod/run_grpo_stan_reward.sh", *extra_args]
     else:
         run_parts = [
             "bash",
@@ -318,13 +363,66 @@ def _print_manual_pod_commands(pod_id: str) -> None:
     )
 
 
+def _print_preflight(args: argparse.Namespace) -> None:
+    snapshot = collect_preflight_snapshot()
+    print("RunPod preflight")
+    print(f"- api_key_prefix: {snapshot.get('api_key_prefix')}")
+
+    user = snapshot.get("user")
+    if user:
+        teams = user.get("teams") or []
+        team_str = ", ".join(
+            f"{t.get('name') or 'unnamed'}({t.get('id')})" for t in teams if isinstance(t, dict)
+        )
+        print(f"- account: id={user.get('id')} name={user.get('name')} email={user.get('email')}")
+        if team_str:
+            print(f"- teams: {team_str}")
+    elif snapshot.get("user_error"):
+        print(f"- account lookup: unavailable ({snapshot['user_error']})")
+
+    gpus = snapshot.get("gpus") or []
+    if gpus:
+        gpu_names = [g.get("name") or g.get("id") for g in gpus if isinstance(g, dict)]
+        print(f"- visible GPU types: {len(gpus)}")
+        print(f"- sample GPUs: {', '.join(str(x) for x in gpu_names[:8])}")
+        requested_match = any(
+            args.gpu_type in {g.get("id"), g.get("name")} for g in gpus if isinstance(g, dict)
+        )
+        print(
+            f"- requested gpu_type ({args.gpu_type}) visible: "
+            f"{'yes' if requested_match else 'no/unknown'}"
+        )
+    elif snapshot.get("gpus_error"):
+        print(f"- gpu catalog: unavailable ({snapshot['gpus_error']})")
+
+    templates = snapshot.get("templates") or []
+    if templates:
+        print(f"- visible templates: {len(templates)}")
+    elif snapshot.get("templates_error"):
+        print(f"- template catalog: unavailable ({snapshot['templates_error']})")
+
+    if args.template_id:
+        template_match = any(
+            args.template_id == t.get("id") for t in templates if isinstance(t, dict)
+        )
+        print(
+            f"- requested template_id ({args.template_id}) visible: "
+            f"{'yes' if template_match else 'no/unknown'}"
+        )
+
+
 def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
     args, extra_args = parse_args()
 
     validate_runpod_setup()
-    pod_env = build_pod_env(args.mode)
+    if args.preflight_only:
+        _print_preflight(args)
+        print("Preflight completed. No pod created.")
+        return
+
+    pod_env = build_pod_env(args.mode, env_mode=args.env_mode)
     pod_ports = pod_ports_for_mode(args.mode, args.api_port)
 
     print(f"Creating RunPod pod: {args.name} ({args.gpu_type})")
@@ -338,6 +436,8 @@ def main() -> None:
         container_disk_in_gb=args.disk_gb,
         env=pod_env,
         ports=pod_ports,
+        template_id=args.template_id,
+        network_volume_id=args.network_volume_id,
     )
     pod_id = pod["id"]
     print(f"Pod created: {pod_id}")

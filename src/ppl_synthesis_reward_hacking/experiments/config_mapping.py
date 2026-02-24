@@ -177,6 +177,15 @@ def build_sstan_gate_config(config: Any) -> SStanGateConfig:
         transpiler_temperature=config.sstan_transpiler_temperature,
         transpiler_max_tokens=config.sstan_transpiler_max_tokens,
         transpiler_timeout_s=config.sstan_transpiler_timeout_s,
+        use_cmdsafestan=getattr(config, "use_cmdsafestan", False),
+        cmdsafestan_data=getattr(config, "cmdsafestan_data", None),
+        cmdsafestan_protect=getattr(config, "cmdsafestan_protect", None),
+        cmdsafestan_cmdstan_root=getattr(config, "cmdsafestan_cmdstan_root", "."),
+        cmdsafestan_jobs=getattr(config, "cmdsafestan_jobs", 4),
+        cmdsafestan_bootstrap=getattr(config, "cmdsafestan_bootstrap", True),
+        cmdsafestan_build_runtime=getattr(config, "cmdsafestan_build_runtime", True),
+        cmdsafestan_force_reinit=getattr(config, "cmdsafestan_force_reinit", False),
+        cmdsafestan_seed=getattr(config, "cmdsafestan_seed", 12345),
     )
 
 

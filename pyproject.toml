@@ -126,10 +126,12 @@ python = "3.11.*"
 
 [tool.pixi.pypi-dependencies]
 ppl-synthesis-reward-hacking = { path = ".", editable = true }
-cmdsafestan = { path = "cmdsafestan", editable = true }
 
 [tool.pixi.feature.dev.pypi-dependencies]
 ppl-synthesis-reward-hacking = { path = ".", editable = true, extras = ["dev"] }
+
+[tool.pixi.feature.stan.pypi-dependencies]
+cmdsafestan = { path = "cmdsafestan", editable = true }
 
 [tool.pixi.feature.parquet.pypi-dependencies]
 ppl-synthesis-reward-hacking = { path = ".", editable = true, extras = ["parquet"] }
@@ -146,6 +148,8 @@ cuda-toolkit = "12.4.*"
 [tool.pixi.environments]
 default = {features = [], solve-group = "default"}
 dev = {features = ["dev"], solve-group = "default"}
+stan = {features = ["stan"], solve-group = "stan"}
+stan-dev = {features = ["dev", "stan"], solve-group = "stan"}
 parquet = {features = ["parquet"], solve-group = "default"}
 all = {features = ["all"], solve-group = "default"}
 arc = {features = ["arc"], solve-group = "arc"}

@@ -9,6 +9,14 @@ Scoring path:
 Safety path (checker-only):
 - Run cmdsafestan.api with SafeStan enforcement enabled to track unsafe
   proportion over time. This check does not gate scoring.
+
+Source provenance:
+- Integrated from upstream `origin/safestan-integration` implementation with
+  repository-specific compatibility edits.
+- Upstream commits used for integration:
+  - f4fdcdc
+  - d76eb55
+  - 0d8c1f5
 """
 
 from __future__ import annotations
@@ -60,7 +68,7 @@ def _require_cmdsafestan() -> None:
     if _CMDSAFESTAN_IMPORT_ERROR is None:
         return
     raise RuntimeError(
-        "Stan reward path requires cmdsafestan. "
+        "Staged Stan reward integration path requires cmdsafestan. "
         "Install cmdsafestan and its toolchain before running this path."
     ) from _CMDSAFESTAN_IMPORT_ERROR
 
@@ -194,10 +202,9 @@ def make_stan_reward_fn(
     state = StanRewardState(
         cmdstan_root=cmdstan_root_path,
         output_dir=output_dir_path,
-        model_cache_dir=cmdstan_root_path
-        / ".cmdsafestan-tmp"
-        / "stan-reward-cache"
-        / "plain_models",
+        model_cache_dir=(
+            cmdstan_root_path / ".cmdsafestan-tmp" / "stan-reward-cache" / "plain_models"
+        ),
         checker_cache_dir=cmdstan_root_path
         / ".cmdsafestan-tmp"
         / "stan-reward-cache"
@@ -529,7 +536,9 @@ def _reason_metric_key(state: StanRewardState, reason: str) -> str:
 
 
 def _log_batch_to_wandb(
-    state: StanRewardState, point: StanTrajectoryPoint, stats: _BatchStats
+    state: StanRewardState,
+    point: StanTrajectoryPoint,
+    stats: _BatchStats,
 ) -> None:
     metrics: dict[str, Any] = {
         "stan/checker/batch": point.batch,

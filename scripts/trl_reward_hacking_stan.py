@@ -12,11 +12,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import math
 import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +91,10 @@ class TRLStanRewardConfig:
 def config_from_mapping(mapping: Mapping[str, Any]) -> TRLStanRewardConfig:
     flattened = flatten_hydra_train_mapping(mapping)
     allowed = {f.name for f in fields(TRLStanRewardConfig)}
-    return TRLStanRewardConfig(**{k: v for k, v in flattened.items() if k in allowed})
+    unknown = sorted(k for k in flattened if k not in allowed)
+    if unknown:
+        raise ValueError(f"Unsupported train config keys: {', '.join(unknown)}")
+    return TRLStanRewardConfig(**flattened)
 
 
 def parse_args() -> argparse.Namespace:
@@ -151,10 +153,9 @@ def run_training(config: TRLStanRewardConfig) -> dict[str, Any]:
     train_dataset = HFDataset.from_list(prompt_dicts)
     log.info("Loaded %d Stan prompts", len(prompt_dicts))
 
-    train_data, holdout_data = _make_scoring_payload(config)
+    train_data = _make_scoring_payload(config)
     reward_fn, reward_state = make_stan_reward_fn(
         train_data=train_data,
-        holdout_data=holdout_data,
         output_dir=output_dir,
         cmdstan_root=config.cmdstan_root,
         stanc3=config.stanc3,
@@ -296,13 +297,11 @@ def _compute_results(config: TRLStanRewardConfig, state) -> dict[str, Any]:
     metrics["final_unsafe_rate"] = final.unsafe_rate
     metrics["final_n_unsafe"] = final.n_unsafe
     metrics["final_n_checked"] = final.n_checked
-    metrics["final_oracle_mean"] = final.oracle_mean
-    metrics["final_gap_mean"] = final.gap_mean
     metrics["n_batches"] = len(trajectory)
     return metrics
 
 
-def _make_scoring_payload(config: TRLStanRewardConfig) -> tuple[dict[str, Any], dict[str, Any]]:
+def _make_scoring_payload(config: TRLStanRewardConfig) -> dict[str, Any]:
     if config.dataset_name != "bernoulli_1d":
         raise ValueError("TRL Stan reward currently supports dataset_name=bernoulli_1d only")
 
@@ -320,11 +319,7 @@ def _make_scoring_payload(config: TRLStanRewardConfig) -> tuple[dict[str, Any], 
 
     dataset = generate_dataset(config.dataset_name, params, seed=config.scoring_seed_base)
     y_train = np.asarray(dataset.train["y"], dtype=np.int64).reshape(-1)
-    y_holdout = np.asarray(dataset.holdout["y"], dtype=np.int64).reshape(-1)
-    return (
-        {"N": int(y_train.shape[0]), "y": y_train.tolist()},
-        {"N": int(y_holdout.shape[0]), "y": y_holdout.tolist()},
-    )
+    return {"N": int(y_train.shape[0]), "y": y_train.tolist()}
 
 
 def _print_summary(results: dict[str, Any]) -> None:
@@ -344,7 +339,7 @@ def _print_summary(results: dict[str, Any]) -> None:
 def _default_run_name(config: TRLStanRewardConfig) -> str:
     model_short = config.model.split("/")[-1].lower()
     model_short = re.sub(r"[^a-z0-9]+", "-", model_short).strip("-")
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return (
         f"stan-grpo-{model_short}-"
         f"s{config.n_steps}-p{config.n_prompts}-g{config.num_generations}-{ts}"

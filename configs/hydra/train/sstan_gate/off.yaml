@@ -11,3 +11,12 @@ sstan_transpiler_strict: true
 sstan_transpiler_temperature: 0.0
 sstan_transpiler_max_tokens: 2048
 sstan_transpiler_timeout_s: 60.0
+use_cmdsafestan: false
+cmdsafestan_data: null
+cmdsafestan_protect: null
+cmdsafestan_cmdstan_root: "."
+cmdsafestan_jobs: 4
+cmdsafestan_bootstrap: true
+cmdsafestan_build_runtime: true
+cmdsafestan_force_reinit: false
+cmdsafestan_seed: 12345

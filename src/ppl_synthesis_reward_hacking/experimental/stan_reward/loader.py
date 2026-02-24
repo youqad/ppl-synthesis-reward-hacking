@@ -1,4 +1,9 @@
-"""Stan reward prompt pool for TRL GRPO training."""
+"""Stan reward prompt pool for TRL GRPO training.
+
+Source provenance:
+- Integrated from upstream `origin/safestan-integration` implementation
+  (commit `f4fdcdc`).
+"""
 
 from __future__ import annotations
 
@@ -38,8 +43,8 @@ def load_stan_reward_prompts(
     *,
     max_examples: int | None = None,
 ) -> list[dict[str, list[dict[str, str]]]]:
-    prompt_count = 20 if max_examples is None else max_examples
-    prompts = get_stan_prompts(prompt_count)
+    n_examples = 20 if max_examples is None else int(max_examples)
+    prompts = get_stan_prompts(n_examples)
     return [
         {
             "prompt": [

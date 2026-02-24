@@ -17,6 +17,7 @@ def _fake_cmdsafestan_env(monkeypatch):
     """Patch module state so bridge_mod behaves as if cmdsafestan were installed."""
     monkeypatch.setattr(bridge_mod, "_CMDSAFESTAN_AVAILABLE", True)
     monkeypatch.setattr(bridge_mod, "_runtime", "fake_runtime")
+    monkeypatch.setattr(bridge_mod, "_runtime_params", (".", 4, True, True))
     # inject stubs that individual tests will override
     monkeypatch.setattr(
         bridge_mod,
@@ -29,7 +30,8 @@ def _fake_cmdsafestan_env(monkeypatch):
 
 
 class TestIsAvailable:
-    def test_reports_false_when_not_installed(self):
+    def test_reports_false_when_not_installed(self, monkeypatch):
+        monkeypatch.setattr(bridge_mod, "_CMDSAFESTAN_AVAILABLE", False)
         assert bridge_mod.is_available() is False
 
     def test_reports_true_when_installed(self, monkeypatch):
@@ -38,7 +40,8 @@ class TestIsAvailable:
 
 
 class TestCheckWithCmdsafestan:
-    def test_raises_when_not_installed(self):
+    def test_raises_when_not_installed(self, monkeypatch):
+        monkeypatch.setattr(bridge_mod, "_CMDSAFESTAN_AVAILABLE", False)
         with pytest.raises(RuntimeError, match="not installed"):
             bridge_mod.check_with_cmdsafestan("data {} model {}", {"y": [1]})
 
@@ -65,6 +68,9 @@ class TestCheckWithCmdsafestan:
         assert result.violations == []
         assert result.log_likelihood == -2.5
         assert result.timing_s > 0
+        assert result.runtime_reused is True
+        assert result.runtime_params["cmdstan_root"] == "."
+        assert result.timing_phases_ms["total"] >= 0
         fake_eval.assert_called_once()
 
     @pytest.mark.usefixtures("_fake_cmdsafestan_env")
@@ -87,6 +93,7 @@ class TestCheckWithCmdsafestan:
 
         assert result.safe is False
         assert "target updates not allowed" in result.violations
+        assert result.runtime_reused is True
 
     @pytest.mark.usefixtures("_fake_cmdsafestan_env")
     def test_handles_exception_gracefully(self, monkeypatch):
@@ -104,6 +111,7 @@ class TestCheckWithCmdsafestan:
         assert result.timing_s >= 0
         assert result.runtime_ready is False
         assert result.raw is None
+        assert result.timing_phases_ms["eval"] >= 0
 
     @pytest.mark.usefixtures("_fake_cmdsafestan_env")
     def test_default_protect_is_y(self, monkeypatch):
@@ -195,13 +203,15 @@ class TestCheckWithCmdsafestan:
 
 
 class TestEnsureRuntime:
-    def test_raises_when_not_available(self):
+    def test_raises_when_not_available(self, monkeypatch):
+        monkeypatch.setattr(bridge_mod, "_CMDSAFESTAN_AVAILABLE", False)
         with pytest.raises(RuntimeError, match="not installed"):
             bridge_mod.ensure_runtime()
 
     def test_initializes_once(self, monkeypatch):
         monkeypatch.setattr(bridge_mod, "_CMDSAFESTAN_AVAILABLE", True)
         monkeypatch.setattr(bridge_mod, "_runtime", None)
+        monkeypatch.setattr(bridge_mod, "_runtime_params", None)
         mock_init = MagicMock(return_value="fake_runtime")
         monkeypatch.setattr(bridge_mod, "_cmdsafestan_init", mock_init, raising=False)
 
@@ -216,6 +226,7 @@ class TestEnsureRuntime:
     def test_init_args_forwarded(self, monkeypatch):
         monkeypatch.setattr(bridge_mod, "_CMDSAFESTAN_AVAILABLE", True)
         monkeypatch.setattr(bridge_mod, "_runtime", None)
+        monkeypatch.setattr(bridge_mod, "_runtime_params", None)
         mock_init = MagicMock(return_value="rt")
         monkeypatch.setattr(bridge_mod, "_cmdsafestan_init", mock_init, raising=False)
 
@@ -231,14 +242,31 @@ class TestEnsureRuntime:
     def test_skips_when_already_initialized(self, monkeypatch):
         monkeypatch.setattr(bridge_mod, "_CMDSAFESTAN_AVAILABLE", True)
         monkeypatch.setattr(bridge_mod, "_runtime", "already_init")
+        monkeypatch.setattr(bridge_mod, "_runtime_params", (".", 4, True, True))
         mock_init = MagicMock()
         monkeypatch.setattr(bridge_mod, "_cmdsafestan_init", mock_init, raising=False)
 
         bridge_mod.ensure_runtime()
         mock_init.assert_not_called()
 
+    def test_param_mismatch_requires_force_reinit(self, monkeypatch):
+        monkeypatch.setattr(bridge_mod, "_CMDSAFESTAN_AVAILABLE", True)
+        monkeypatch.setattr(bridge_mod, "_runtime", "already_init")
+        monkeypatch.setattr(bridge_mod, "_runtime_params", (".", 4, True, True))
+        mock_init = MagicMock(return_value="new_runtime")
+        monkeypatch.setattr(bridge_mod, "_cmdsafestan_init", mock_init, raising=False)
+
+        with pytest.raises(RuntimeError, match="different parameters"):
+            bridge_mod.ensure_runtime(cmdstan_root="/custom")
+
+        bridge_mod.ensure_runtime(cmdstan_root="/custom", force_reinit=True)
+        assert bridge_mod._runtime == "new_runtime"
+        assert bridge_mod._runtime_params == ("/custom", 4, True, True)
+        mock_init.assert_called_once()
+
     def teardown_method(self):
         bridge_mod._runtime = None
+        bridge_mod._runtime_params = None
 
 
 class TestExtractRaw:

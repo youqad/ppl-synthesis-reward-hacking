@@ -1,6 +1,6 @@
 [submodule "cmdsafestan"]
 	path = cmdsafestan
-	url = git@github.com:jkarwowski/cmdsafestan.git
+	url = https://github.com/jkarwowski/cmdsafestan.git
 [submodule "AI-scientist-and-likelihood-hacking"]
 	path = AI-scientist-and-likelihood-hacking
-	url = git@github.com:jkarwowski/AI-scientist-and-likelihood-hacking.git
+	url = https://github.com/jkarwowski/AI-scientist-and-likelihood-hacking.git

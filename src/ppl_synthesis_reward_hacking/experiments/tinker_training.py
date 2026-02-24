@@ -209,6 +209,15 @@ class TinkerGRPOConfig:
     sstan_transpiler_temperature: float = 0.0
     sstan_transpiler_max_tokens: int = 2048
     sstan_transpiler_timeout_s: float = 60.0
+    use_cmdsafestan: bool = False
+    cmdsafestan_data: dict[str, Any] | None = None
+    cmdsafestan_protect: list[str] | None = None
+    cmdsafestan_cmdstan_root: str = "."
+    cmdsafestan_jobs: int = 4
+    cmdsafestan_bootstrap: bool = True
+    cmdsafestan_build_runtime: bool = True
+    cmdsafestan_force_reinit: bool = False
+    cmdsafestan_seed: int = 12345
 
     # judge gate
     judge_gate_mode: str = "off"

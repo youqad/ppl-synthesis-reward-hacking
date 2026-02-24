@@ -70,6 +70,15 @@ SSTAN_GATE_KEYS = (
     "sstan_transpiler_temperature",
     "sstan_transpiler_max_tokens",
     "sstan_transpiler_timeout_s",
+    "use_cmdsafestan",
+    "cmdsafestan_data",
+    "cmdsafestan_protect",
+    "cmdsafestan_cmdstan_root",
+    "cmdsafestan_jobs",
+    "cmdsafestan_bootstrap",
+    "cmdsafestan_build_runtime",
+    "cmdsafestan_force_reinit",
+    "cmdsafestan_seed",
 )
 
 JUDGE_GATE_KEYS = (
@@ -95,6 +104,12 @@ GROUP_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
     "sstan_gate": SSTAN_GATE_KEYS,
     "judge_gate": JUDGE_GATE_KEYS,
 }
+
+GROUP_MAPPING_VALUE_KEYS = frozenset(
+    {
+        "cmdsafestan_data",
+    }
+)
 
 
 def _coalesce_nested_value(raw: Any, key: str) -> Any:
@@ -128,7 +143,7 @@ def _merge_payload_values(
     for key in keys:
         if key not in flattened and key in payload:
             value = payload[key]
-            if isinstance(value, Mapping):
+            if isinstance(value, Mapping) and key not in GROUP_MAPPING_VALUE_KEYS:
                 raise TypeError(f"{key} must be a scalar value, got nested mapping")
             flattened[key] = value
 

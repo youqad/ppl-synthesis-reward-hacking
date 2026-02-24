@@ -28,6 +28,8 @@ def _clear_launcher_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "WANDB_PROJECT",
         "HF_TOKEN",
         "HUGGING_FACE_HUB_TOKEN",
+        "CMDSAFESTAN_PIP_SPEC",
+        "OPENAI_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -39,6 +41,8 @@ def test_parse_args_defaults(monkeypatch):
     assert args.mode == "trl"
     assert args.api_port == 8000
     assert args.backend == "fsdp"
+    assert args.env_mode == "minimal"
+    assert args.preflight_only is False
     assert extra == []
 
 
@@ -71,6 +75,7 @@ def test_parse_args_tinker_mode_with_extra(monkeypatch):
 def test_pod_ports_for_mode():
     mod = _load_module()
     assert mod.pod_ports_for_mode("trl", 8000) is None
+    assert mod.pod_ports_for_mode("trl_stan", 8000) is None
     assert mod.pod_ports_for_mode("tinker_api", 8123) == "22/tcp,8123/http"
 
 
@@ -95,6 +100,16 @@ def test_build_pod_env_tinker_requires_real_key(monkeypatch):
     assert out["WANDB_PROJECT"] == "proj"
 
 
+def test_build_pod_env_extended_forwards_prefixed_keys(monkeypatch):
+    mod = _load_module()
+    _clear_launcher_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("CMDSAFESTAN_PIP_SPEC", "git+https://example.com/cmdsafestan.git")
+    out = mod.build_pod_env("trl_stan", env_mode="extended")
+    assert out["OPENAI_API_KEY"] == "sk-test"
+    assert out["CMDSAFESTAN_PIP_SPEC"] == "git+https://example.com/cmdsafestan.git"
+
+
 def test_build_remote_start_command_mode_dispatch():
     mod = _load_module()
     trl_cmd = mod.build_remote_start_command(
@@ -109,6 +124,19 @@ def test_build_remote_start_command_mode_dispatch():
     assert "--n-steps" in trl_cmd
     assert " && " in trl_cmd
     assert "'&&'" not in trl_cmd
+
+    stan_cmd = mod.build_remote_start_command(
+        "trl_stan",
+        extra_args=["--n-steps", "5"],
+        backend="fsdp",
+        base_model="Qwen/Qwen3-0.6B",
+        api_port=8000,
+        skyrl_ref="skyrl_train-v0.4.0",
+    )
+    assert "scripts/runpod/run_grpo_stan_reward.sh" in stan_cmd
+    assert "--n-steps" in stan_cmd
+    assert " && " in stan_cmd
+    assert "'&&'" not in stan_cmd
 
     tinker_cmd = mod.build_remote_start_command(
         "tinker_api",

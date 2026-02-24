@@ -51,6 +51,16 @@ pixi run -e dev pytest tests/ -x
 | [SafeStan guide](docs/safestan-guide.md) | Offline evaluation, online gate, input format |
 | [Scoring methods](docs/scoring.md) | Reward metrics, normalization algorithm, detection matrix |
 | [Base-rate exploits](docs/base_rate_exploits.md) | Annotated programs from the untrained-model sweep |
+| [SafeStan integration provenance](docs/provenance/safestan_integration.md) | Upstream attribution and commit-level provenance |
+
+## Authorship and provenance
+
+The staged Stan integration path in this repository is integrated from upstream
+SafeStan/cmdsafestan work. The current opt-in staging is for runtime isolation
+and paper-track comparability, not a statement about contribution quality or
+ownership. Attribution is tracked in git commit metadata and upstream commit
+references. See the full provenance record in
+[`docs/provenance/safestan_integration.md`](docs/provenance/safestan_integration.md).
 
 ## Smoke test
 

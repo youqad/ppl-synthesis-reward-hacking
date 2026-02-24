@@ -67,6 +67,15 @@ def test_flatten_hydra_train_mapping_merges_nested_payloads() -> None:
                 "sstan_gate_penalty_reward": -123.0,
                 "sstan_gate_fidelity_policy": "reject_on_source_signal",
                 "sstan_gate_log_stan": "none",
+                "use_cmdsafestan": True,
+                "cmdsafestan_data": {"y": [1, 0, 1]},
+                "cmdsafestan_protect": ["y"],
+                "cmdsafestan_cmdstan_root": "/tmp/cmdstan",
+                "cmdsafestan_jobs": 8,
+                "cmdsafestan_bootstrap": True,
+                "cmdsafestan_build_runtime": True,
+                "cmdsafestan_force_reinit": False,
+                "cmdsafestan_seed": 9876,
                 "sstan_transpiler_model": "glm-5",
                 "sstan_transpiler_api_key_env": "TEST_KEY",
                 "sstan_transpiler_strict": True,
@@ -97,6 +106,15 @@ def test_flatten_hydra_train_mapping_merges_nested_payloads() -> None:
     assert flattened["sstan_gate_sample_rate"] == 0.25
     assert flattened["sstan_gate_penalty_reward"] == -123.0
     assert flattened["sstan_gate_fidelity_policy"] == "reject_on_source_signal"
+    assert flattened["use_cmdsafestan"] is True
+    assert flattened["cmdsafestan_data"] == {"y": [1, 0, 1]}
+    assert flattened["cmdsafestan_protect"] == ["y"]
+    assert flattened["cmdsafestan_cmdstan_root"] == "/tmp/cmdstan"
+    assert flattened["cmdsafestan_jobs"] == 8
+    assert flattened["cmdsafestan_bootstrap"] is True
+    assert flattened["cmdsafestan_build_runtime"] is True
+    assert flattened["cmdsafestan_force_reinit"] is False
+    assert flattened["cmdsafestan_seed"] == 9876
     assert flattened["sstan_transpiler_model"] == "glm-5"
     assert flattened["sstan_transpiler_api_key_env"] == "TEST_KEY"
     assert flattened["sstan_transpiler_strict"] is True

@@ -42,6 +42,12 @@ class SStanGateConfig:
     use_cmdsafestan: bool = False
     cmdsafestan_data: dict[str, Any] | None = None
     cmdsafestan_protect: list[str] | None = None
+    cmdsafestan_cmdstan_root: str = "."
+    cmdsafestan_jobs: int = 4
+    cmdsafestan_bootstrap: bool = True
+    cmdsafestan_build_runtime: bool = True
+    cmdsafestan_force_reinit: bool = False
+    cmdsafestan_seed: int = 12345
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +72,9 @@ class SStanGateResult:
     stan_hash: str | None
     cmdsafestan_safe: bool | None = None
     cmdsafestan_violations: list[str] | None = None
+    cmdsafestan_runtime_reused: bool | None = None
+    cmdsafestan_timing_ms: dict[str, float] | None = None
+    cmdsafestan_runtime_params: dict[str, Any] | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -90,6 +99,13 @@ class SStanGateResult:
             "cmdsafestan_safe": self.cmdsafestan_safe,
             "cmdsafestan_violations": list(self.cmdsafestan_violations)
             if self.cmdsafestan_violations is not None
+            else None,
+            "cmdsafestan_runtime_reused": self.cmdsafestan_runtime_reused,
+            "cmdsafestan_timing_ms": dict(self.cmdsafestan_timing_ms)
+            if self.cmdsafestan_timing_ms is not None
+            else None,
+            "cmdsafestan_runtime_params": dict(self.cmdsafestan_runtime_params)
+            if self.cmdsafestan_runtime_params is not None
             else None,
         }
 
@@ -143,7 +159,7 @@ def _validate_paper_track_constraints(config: SStanGateConfig, *, paper_track: s
 def _validate_transpiler_requirements(config: SStanGateConfig) -> None:
     if config.mode == "off":
         return
-    if not config.transpiler_model.strip():
+    if not isinstance(config.transpiler_model, str) or not config.transpiler_model.strip():
         raise ValueError("sstan_transpiler_model must be non-empty when sstan_gate_mode != off")
     if not config.transpiler_api_key_env:
         raise ValueError("sstan_transpiler_api_key_env must be set when sstan_gate_mode != off")
@@ -165,6 +181,23 @@ def _validate_cmdsafestan_requirements(config: SStanGateConfig) -> None:
         raise ValueError(
             "use_cmdsafestan=True requires cmdsafestan_data (data dict for compiler check)"
         )
+    if not isinstance(config.cmdsafestan_data, dict):
+        raise ValueError("use_cmdsafestan=True requires cmdsafestan_data to be a dict")
+    if config.cmdsafestan_protect is not None:
+        if not isinstance(config.cmdsafestan_protect, list) or not all(
+            isinstance(name, str) and name.strip() for name in config.cmdsafestan_protect
+        ):
+            raise ValueError(
+                "use_cmdsafestan=True requires cmdsafestan_protect "
+                "to be a list of non-empty strings"
+            )
+    if config.cmdsafestan_jobs <= 0:
+        raise ValueError("use_cmdsafestan=True requires cmdsafestan_jobs > 0")
+    if (
+        not isinstance(config.cmdsafestan_cmdstan_root, str)
+        or not config.cmdsafestan_cmdstan_root.strip()
+    ):
+        raise ValueError("use_cmdsafestan=True requires non-empty cmdsafestan_cmdstan_root")
 
 
 def run_sstan_gate(
@@ -282,18 +315,35 @@ def run_sstan_gate(
     cmdsafestan_safe: bool | None = None
     cmdsafestan_violations: list[str] | None = None
     cmdsafestan_ms = 0.0
+    cmdsafestan_runtime_reused: bool | None = None
+    cmdsafestan_timing_ms: dict[str, float] | None = None
+    cmdsafestan_runtime_params: dict[str, Any] | None = None
     if accepted and config.use_cmdsafestan:
-        cmdsafestan_start = time.perf_counter()
-        cms_result = _check_cmdsafestan(
-            transpile.stan_code,
-            config.cmdsafestan_data or {},
-            protect=config.cmdsafestan_protect,
-        )
-        cmdsafestan_ms = (time.perf_counter() - cmdsafestan_start) * 1000.0
-        cmdsafestan_safe = cms_result.safe
-        cmdsafestan_violations = list(cms_result.violations)
-        if not cms_result.safe:
+        try:
+            cms_result = _check_cmdsafestan(
+                transpile.stan_code,
+                config.cmdsafestan_data or {},
+                protect=config.cmdsafestan_protect,
+                seed=config.cmdsafestan_seed,
+                cmdstan_root=config.cmdsafestan_cmdstan_root,
+                jobs=config.cmdsafestan_jobs,
+                bootstrap=config.cmdsafestan_bootstrap,
+                build_runtime=config.cmdsafestan_build_runtime,
+                force_reinit=config.cmdsafestan_force_reinit,
+            )
+            cmdsafestan_ms = cms_result.timing_s * 1000.0
+            cmdsafestan_safe = cms_result.safe
+            cmdsafestan_violations = list(cms_result.violations)
+            cmdsafestan_runtime_reused = cms_result.runtime_reused
+            cmdsafestan_timing_ms = dict(cms_result.timing_phases_ms)
+            cmdsafestan_runtime_params = dict(cms_result.runtime_params)
+            if not cms_result.safe:
+                accepted = False
+        except Exception as exc:
+            # Fail closed in mitigation path: checker/runtime errors are rejects.
             accepted = False
+            cmdsafestan_safe = False
+            cmdsafestan_violations = [f"{type(exc).__name__}: {exc}"]
 
     fidelity_reject = (
         config.fidelity_policy == "reject_on_source_signal" and source_signal and accepted
@@ -315,6 +365,9 @@ def run_sstan_gate(
     }
     if cmdsafestan_ms > 0:
         timing["cmdsafestan"] = cmdsafestan_ms
+    if cmdsafestan_timing_ms is not None:
+        timing["cmdsafestan_init"] = cmdsafestan_timing_ms.get("init", 0.0)
+        timing["cmdsafestan_eval"] = cmdsafestan_timing_ms.get("eval", 0.0)
 
     return _result(
         mode=config.mode,
@@ -341,6 +394,9 @@ def run_sstan_gate(
         stan_hash=normalized_text_hash(transpile.stan_code),
         cmdsafestan_safe=cmdsafestan_safe,
         cmdsafestan_violations=cmdsafestan_violations,
+        cmdsafestan_runtime_reused=cmdsafestan_runtime_reused,
+        cmdsafestan_timing_ms=cmdsafestan_timing_ms,
+        cmdsafestan_runtime_params=cmdsafestan_runtime_params,
     )
 
 
@@ -395,6 +451,9 @@ def _result(
     stan_hash: str | None = None,
     cmdsafestan_safe: bool | None = None,
     cmdsafestan_violations: list[str] | None = None,
+    cmdsafestan_runtime_reused: bool | None = None,
+    cmdsafestan_timing_ms: dict[str, float] | None = None,
+    cmdsafestan_runtime_params: dict[str, Any] | None = None,
 ) -> SStanGateResult:
     return SStanGateResult(
         mode=mode,
@@ -418,6 +477,13 @@ def _result(
         cmdsafestan_safe=cmdsafestan_safe,
         cmdsafestan_violations=list(cmdsafestan_violations)
         if cmdsafestan_violations is not None
+        else None,
+        cmdsafestan_runtime_reused=cmdsafestan_runtime_reused,
+        cmdsafestan_timing_ms=dict(cmdsafestan_timing_ms)
+        if cmdsafestan_timing_ms is not None
+        else None,
+        cmdsafestan_runtime_params=dict(cmdsafestan_runtime_params)
+        if cmdsafestan_runtime_params is not None
         else None,
     )
 

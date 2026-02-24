@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ppl_synthesis_reward_hacking.utils.runpod import (
+    collect_preflight_snapshot,
     create_training_pod,
     get_pod_status,
     terminate_pod,
@@ -84,6 +85,33 @@ def test_create_pod_forwards_ports(rpod):
     assert result["id"] == "p1"
     kw = rpod.create_pod.call_args[1]
     assert kw["ports"] == "22/tcp,8000/http"
+
+
+def test_create_pod_forwards_template_and_network_volume(rpod):
+    rpod.create_pod.return_value = {"id": "p2"}
+
+    result = create_training_pod(
+        name="template-pod",
+        template_id="tpl_123",
+        network_volume_id="vol_456",
+    )
+
+    assert result["id"] == "p2"
+    kw = rpod.create_pod.call_args[1]
+    assert kw["template_id"] == "tpl_123"
+    assert kw["network_volume_id"] == "vol_456"
+    assert "image_name" not in kw
+    assert "gpu_type_id" not in kw
+    assert "container_disk_in_gb" not in kw
+
+
+def test_create_pod_rejects_template_with_explicit_runtime_overrides(rpod):
+    with pytest.raises(ValueError, match="template_id is incompatible with explicit"):
+        create_training_pod(
+            name="bad-template-pod",
+            template_id="tpl_123",
+            image_name="custom/image",
+        )
 
 
 def test_ssh_extracts_port(rpod):
@@ -192,3 +220,44 @@ def test_status_returns_desired(rpod):
 def test_status_returns_unknown_when_missing(rpod):
     rpod.get_pod.return_value = {}
     assert get_pod_status("p6") == "UNKNOWN"
+
+
+def test_collect_preflight_snapshot_with_catalog_data(rpod):
+    rpod.get_user.return_value = {
+        "user": {
+            "id": "u_1",
+            "name": "Uni Account",
+            "email": "user@example.edu",
+            "teams": [{"id": "team_1", "name": "Oxford Lab"}],
+        }
+    }
+    rpod.get_gpus.return_value = {
+        "gpus": [{"id": "NVIDIA A100 80GB PCIe", "displayName": "NVIDIA A100 80GB PCIe"}]
+    }
+    rpod.get_templates.return_value = {"templates": [{"id": "tpl_1", "name": "Stan Template"}]}
+
+    snapshot = collect_preflight_snapshot()
+
+    assert snapshot["api_key_set"] is True
+    assert snapshot["api_key_prefix"] == "test-k"
+    assert snapshot["user"]["id"] == "u_1"
+    assert snapshot["user"]["teams"][0]["id"] == "team_1"
+    assert snapshot["gpus"][0]["id"] == "NVIDIA A100 80GB PCIe"
+    assert snapshot["templates"][0]["id"] == "tpl_1"
+    assert snapshot["user_error"] is None
+    assert snapshot["gpus_error"] is None
+    assert snapshot["templates_error"] is None
+
+
+def test_collect_preflight_snapshot_handles_missing_optional_methods(rpod):
+    for name in ("get_user", "get_gpus", "get_templates"):
+        if hasattr(rpod, name):
+            delattr(rpod, name)
+
+    snapshot = collect_preflight_snapshot()
+    assert snapshot["user"] is None
+    assert "not available" in snapshot["user_error"]
+    assert snapshot["gpus"] == []
+    assert "not available" in snapshot["gpus_error"]
+    assert snapshot["templates"] == []
+    assert "not available" in snapshot["templates_error"]
