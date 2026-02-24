@@ -2,15 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ppl_synthesis_reward_hacking.data.jsonl_loader import load_jsonl_dataset
 from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import load_synthesis_prompts
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_VAL_JSONL = _REPO_ROOT / "data" / "pymc_synthesis" / "val.jsonl"
 
+
+@pytest.mark.skipif(
+    not _VAL_JSONL.resolve().exists(),
+    reason="data/pymc_synthesis/val.jsonl symlink target not available",
+)
 def test_load_pymc_val() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    dataset_path = repo_root / "data" / "pymc_synthesis" / "val.jsonl"
-
-    examples = load_jsonl_dataset(dataset_path, max_examples=3)
+    examples = load_jsonl_dataset(_VAL_JSONL, max_examples=3)
 
     assert len(examples) > 0
     for example in examples:
