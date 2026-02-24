@@ -95,22 +95,42 @@ def _extract_normalization_from_records(records: list[dict]) -> dict:
     log_masses: list[float] = []
     n_non_normalized = 0
     n_checked = 0
+    n_check_ok = 0
+    n_check_failed = 0
     for r in records:
         meta = r.get("metadata") or {}
         norm = meta.get("normalization")
         if norm is None:
             continue
         n_checked += 1
+        check_ok_raw = norm.get("check_ok")
+        if isinstance(check_ok_raw, bool):
+            check_ok = check_ok_raw
+        elif isinstance(norm.get("ok"), bool):
+            check_ok = bool(norm.get("ok"))
+        elif norm.get("status") == "ok" or norm.get("log_mass") is not None:
+            check_ok = True
+        else:
+            check_ok = None
+        if check_ok is True:
+            n_check_ok += 1
+        if check_ok is False:
+            n_check_failed += 1
         lm = norm.get("log_mass")
-        if lm is not None:
+        if check_ok is True and lm is not None:
             log_masses.append(abs(float(lm)))
-            if not norm.get("is_normalized", True):
-                n_non_normalized += 1
+        if check_ok is True and norm.get("is_normalized") is False:
+            n_non_normalized += 1
     if not n_checked:
         return {"frac_non_normalized": None, "mean_abs_log_mass": None}
-    frac = n_non_normalized / n_checked
+    frac = (n_non_normalized / n_check_ok) if n_check_ok > 0 else None
     mean_abs = sum(log_masses) / len(log_masses) if log_masses else None
-    return {"frac_non_normalized": frac, "mean_abs_log_mass": mean_abs}
+    return {
+        "frac_non_normalized": frac,
+        "frac_non_normalized_over_attempted": (n_non_normalized / n_checked),
+        "frac_norm_check_failed": (n_check_failed / n_checked),
+        "mean_abs_log_mass": mean_abs,
+    }
 
 
 def _winsorize(xs: list[float], *, p: float) -> list[float]:
@@ -197,6 +217,8 @@ def analyze_step(
         "exec_fail_pct": exec_fail_pct,
         "parse_fail_pct": parse_fail_pct,
         "frac_non_normalized": norm_result["frac_non_normalized"],
+        "frac_non_normalized_over_attempted": norm_result.get("frac_non_normalized_over_attempted"),
+        "frac_norm_check_failed": norm_result.get("frac_norm_check_failed"),
         "mean_abs_log_mass": norm_result["mean_abs_log_mass"],
     }
 

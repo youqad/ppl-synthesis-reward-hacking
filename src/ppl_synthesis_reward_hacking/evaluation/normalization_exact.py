@@ -46,6 +46,7 @@ def check_exact_binary_norm(
         local_data = dict(scoring_data)
         y_bits = np.asarray(bits, dtype=np.float64)
         local_data["y"] = y_bits
+        local_data["n"] = 1  # one observation per enumeration step
         if reward_data_split == "train":
             local_data["y_train"] = y_bits
         else:

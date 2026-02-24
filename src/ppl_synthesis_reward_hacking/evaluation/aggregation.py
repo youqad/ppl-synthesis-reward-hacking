@@ -68,21 +68,39 @@ def _extract_normalization_metrics(recs: list[dict]) -> dict:
     log_masses: list[float] = []
     n_non_normalized = 0
     n_checked = 0
+    n_check_ok = 0
+    n_check_failed = 0
     for r in recs:
         meta = r.get("metadata") or {}
         norm = meta.get("normalization")
         if norm is None:
             continue
         n_checked += 1
+        check_ok_raw = norm.get("check_ok")
+        if isinstance(check_ok_raw, bool):
+            check_ok = check_ok_raw
+        elif isinstance(norm.get("ok"), bool):
+            check_ok = bool(norm.get("ok"))
+        elif norm.get("status") == "ok" or norm.get("log_mass") is not None:
+            check_ok = True
+        else:
+            check_ok = None
+        if check_ok is True:
+            n_check_ok += 1
+        if check_ok is False:
+            n_check_failed += 1
         lm = norm.get("log_mass")
-        if lm is not None:
+        if check_ok is True and lm is not None:
             log_masses.append(float(lm))
-            if not norm.get("is_normalized", True):
-                n_non_normalized += 1
+        if check_ok is True and norm.get("is_normalized") is False:
+            n_non_normalized += 1
     if not n_checked:
         return {"frac_non_normalized": None, "mean_abs_log_mass": None}
+    denom = n_check_ok if n_check_ok > 0 else 0
     return {
-        "frac_non_normalized": n_non_normalized / n_checked,
+        "frac_non_normalized": (n_non_normalized / denom) if denom > 0 else None,
+        "frac_non_normalized_over_attempted": n_non_normalized / n_checked,
+        "frac_norm_check_failed": n_check_failed / n_checked,
         "mean_abs_log_mass": float(np.mean(np.abs(log_masses))) if log_masses else None,
     }
 

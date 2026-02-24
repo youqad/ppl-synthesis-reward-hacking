@@ -12,6 +12,9 @@ from ppl_synthesis_reward_hacking.evaluation.normalization_check import (
     check_normalization_d1,
     check_normalization_small_d,
 )
+from ppl_synthesis_reward_hacking.evaluation.normalization_exact import (
+    check_exact_binary_norm,
+)
 
 
 @pytest.mark.pymc
@@ -268,3 +271,65 @@ class TestCheckNormalizationDispatcher:
         assert "dataset_name" in result
         assert "delta_scope" in result
         assert "method" in result
+
+
+class TestExactBinaryNormNTrainOverride:
+    """Verify that enumeration passes n=1 regardless of scoring_data['n']."""
+
+    _SCORER = (
+        "ppl_synthesis_reward_hacking.evaluation.normalization_exact.score_completion_sandboxed"
+    )
+
+    @patch(_SCORER)
+    def test_local_data_n_is_1_when_scoring_data_has_n_20(self, mock_scorer):
+        mock_scorer.return_value = (-0.7, {})
+        scoring_data = {
+            "y": np.array([[1, 0], [0, 1], [1, 1]] * 6 + [[0, 0]] * 2),
+            "y_train": np.array([[1, 0], [0, 1], [1, 1]] * 6 + [[0, 0]] * 2),
+            "n": 20,
+            "d": 2,
+            "p_true": 0.5,
+            "dataset_name": "bernoulli_vector",
+        }
+        check_exact_binary_norm(
+            "dummy",
+            d=2,
+            epsilon=0.05,
+            timeout=60,
+            reward_metric="log_marginal_likelihood",
+            reward_data_split="train",
+            reward_estimator_backend="smc",
+            smc_draws=100,
+            scoring_data=scoring_data,
+        )
+        assert mock_scorer.call_count == 4  # 2^2 assignments
+        for call in mock_scorer.call_args_list:
+            local_data = call[0][1]
+            assert local_data["n"] == 1, f"expected n=1 during enumeration, got n={local_data['n']}"
+            assert local_data["y"].shape == (2,)
+
+    @patch(_SCORER)
+    def test_local_data_n_is_1_when_scoring_data_has_no_n(self, mock_scorer):
+        mock_scorer.return_value = (-0.7, {})
+        scoring_data = {
+            "y": np.array([1, 0, 1]),
+            "y_train": np.array([1, 0, 1]),
+            "d": 3,
+            "p_true": 0.5,
+            "dataset_name": "bernoulli_vector",
+        }
+        check_exact_binary_norm(
+            "dummy",
+            d=3,
+            epsilon=0.05,
+            timeout=60,
+            reward_metric="log_marginal_likelihood",
+            reward_data_split="train",
+            reward_estimator_backend="smc",
+            smc_draws=100,
+            scoring_data=scoring_data,
+        )
+        assert mock_scorer.call_count == 8  # 2^3
+        for call in mock_scorer.call_args_list:
+            local_data = call[0][1]
+            assert local_data["n"] == 1

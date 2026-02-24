@@ -163,6 +163,8 @@ def _summarize_completions(path: Path) -> dict[str, Any]:
     abs_log_masses: list[float] = []
     n_non_normalized = 0
     n_norm_checked = 0
+    n_norm_check_ok = 0
+    n_norm_check_failed = 0
 
     for rec in load_jsonl(path):
         records += 1
@@ -177,14 +179,27 @@ def _summarize_completions(path: Path) -> dict[str, Any]:
             norm = meta.get("normalization")
             if isinstance(norm, dict):
                 n_norm_checked += 1
+                check_ok_raw = norm.get("check_ok")
+                if isinstance(check_ok_raw, bool):
+                    check_ok = check_ok_raw
+                elif isinstance(norm.get("ok"), bool):
+                    check_ok = bool(norm.get("ok"))
+                elif norm.get("status") == "ok" or norm.get("log_mass") is not None:
+                    check_ok = True
+                else:
+                    check_ok = None
+                if check_ok is True:
+                    n_norm_check_ok += 1
+                if check_ok is False:
+                    n_norm_check_failed += 1
                 lm_f = _safe_float(norm.get("log_mass"))
-                if lm_f is not None:
+                if check_ok is True and lm_f is not None:
                     abs_log_masses.append(abs(lm_f))
-                if not norm.get("is_normalized", True):
+                if check_ok is True and norm.get("is_normalized") is False:
                     n_non_normalized += 1
 
     valid_rate = (float(valid) / float(records)) if records > 0 else None
-    frac_nn = (n_non_normalized / n_norm_checked) if n_norm_checked > 0 else None
+    frac_nn = (n_non_normalized / n_norm_check_ok) if n_norm_check_ok > 0 else None
     mean_abs_lm = float(sum(abs_log_masses) / len(abs_log_masses)) if abs_log_masses else None
     return {
         "records": records,
@@ -192,7 +207,15 @@ def _summarize_completions(path: Path) -> dict[str, Any]:
         "valid_rate": valid_rate,
         "max_batch": max_batch,
         "n_norm_checked": n_norm_checked,
+        "n_norm_check_ok": n_norm_check_ok,
+        "n_norm_check_failed": n_norm_check_failed,
         "frac_non_normalized": frac_nn,
+        "frac_non_normalized_over_attempted": (
+            (n_non_normalized / n_norm_checked) if n_norm_checked > 0 else None
+        ),
+        "frac_norm_check_failed": (
+            (n_norm_check_failed / n_norm_checked) if n_norm_checked > 0 else None
+        ),
         "mean_abs_log_mass": mean_abs_lm,
     }
 
@@ -225,9 +248,15 @@ def _print_summary_lines(summary: dict[str, Any]) -> None:
 
     detail_line = f"           max_batch={summary['max_batch']}"
     if summary["n_norm_checked"] and summary["n_norm_checked"] > 0:
-        detail_line += f" norm_checked={summary['n_norm_checked']}"
+        detail_line += (
+            f" norm_checked={summary['n_norm_checked']}"
+            f" norm_ok={summary['n_norm_check_ok']}"
+            f" norm_fail={summary['n_norm_check_failed']}"
+        )
         if summary["frac_non_normalized"] is not None:
             detail_line += f" frac_non_normalized={summary['frac_non_normalized']:.3f}"
+        if summary["frac_norm_check_failed"] is not None:
+            detail_line += f" frac_norm_check_failed={summary['frac_norm_check_failed']:.3f}"
         if summary["mean_abs_log_mass"] is not None:
             detail_line += f" mean_abs_log_mass={summary['mean_abs_log_mass']:.3f}"
     print(detail_line, flush=True)

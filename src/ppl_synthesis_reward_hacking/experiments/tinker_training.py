@@ -452,6 +452,9 @@ class TrajectoryPoint:
     frac_non_normalized: float = float("nan")
     mean_abs_log_mass: float = float("nan")
     n_norm_checked: int = 0
+    n_norm_check_ok: int = 0
+    n_norm_check_failed: int = 0
+    frac_norm_check_failed: float = float("nan")
 
 
 @dataclass
@@ -1463,6 +1466,7 @@ def _run_normalization_check(
         )
         if result.get("ok"):
             return {
+                "check_ok": True,
                 "log_mass": result["log_mass"],
                 "mass": result.get("mass"),
                 "is_normalized": result["is_normalized"],
@@ -1475,12 +1479,13 @@ def _run_normalization_check(
                 "d": result.get("d"),
             }
         return {
+            "check_ok": False,
             "ok": False,
             "reason": result.get("reason", "unknown"),
             "status": result.get("status"),
             "method": result.get("method", method),
             "delta_scope": result.get("delta_scope", delta_scope),
-            "is_normalized": False,
+            "is_normalized": None,
             "d": result.get("d"),
         }
     except Exception as exc:
@@ -1519,6 +1524,30 @@ def _validate_scorer_contract(
     return reported, cast(dict[str, Any], decomposition_raw)
 
 
+def _normalization_status_flags(norm: Mapping[str, Any]) -> tuple[bool | None, bool, bool]:
+    """Return (check_ok, true_non_normalized, check_failed) for normalization metadata.
+
+    `true_non_normalized` is only true when the normalization computation succeeded
+    and explicitly reported `is_normalized=False`.
+    """
+    check_ok_raw = norm.get("check_ok")
+    check_ok: bool | None
+    if isinstance(check_ok_raw, bool):
+        check_ok = check_ok_raw
+    elif isinstance(norm.get("ok"), bool):
+        check_ok = bool(norm.get("ok"))
+    elif norm.get("status") == "ok":
+        check_ok = True
+    elif norm.get("log_mass") is not None:
+        check_ok = True
+    else:
+        check_ok = None
+
+    true_non_normalized = (check_ok is True) and (norm.get("is_normalized") is False)
+    check_failed = check_ok is False
+    return check_ok, true_non_normalized, check_failed
+
+
 def _collect_lh_programs(
     step: int,
     step_records: list[CompletionRecord],
@@ -1542,7 +1571,8 @@ def _collect_lh_programs(
 
         if rec.metadata and rec.metadata.get("normalization"):
             norm = rec.metadata["normalization"]
-            if norm.get("is_normalized") is False:
+            _, true_non_normalized, _ = _normalization_status_flags(norm)
+            if true_non_normalized:
                 detection.append("normalization")
                 log_mass = norm.get("log_mass")
 
@@ -1732,6 +1762,8 @@ def _log_normalization_summary(
     """Aggregate and log normalization results from step records."""
     log_masses = []
     n_checked = 0
+    n_check_ok = 0
+    n_check_failed = 0
     n_non_normalized = 0
     for rec in step_data.step_records:
         if not rec.metadata:
@@ -1740,38 +1772,63 @@ def _log_normalization_summary(
         if not norm or not isinstance(norm, dict):
             continue
         n_checked += 1
+        check_ok, true_non_normalized, check_failed = _normalization_status_flags(norm)
+        if check_ok is True:
+            n_check_ok += 1
+        if check_failed:
+            n_check_failed += 1
         lm = norm.get("log_mass")
-        if norm.get("is_normalized") is False:
+        if true_non_normalized:
             n_non_normalized += 1
-        if lm is not None:
+        if check_ok is True and lm is not None:
             log_masses.append(float(lm))
 
     if not n_checked:
         return None
 
-    frac_non_norm = n_non_normalized / n_checked
+    frac_non_norm = n_non_normalized / n_check_ok if n_check_ok > 0 else float("nan")
+    frac_non_norm_over_attempted = n_non_normalized / n_checked
+    frac_check_failed = n_check_failed / n_checked
     mean_abs_lm = float(np.mean(np.abs(log_masses))) if log_masses else 0.0
 
     log.info(
-        "Step %3d NORM: checked=%d non_normalized=%.1f%% mean_abs_log_mass=%.3f",
+        (
+            "Step %3d NORM: checked=%d ok=%d fail=%d "
+            "true_non_normalized=%.1f%% check_fail=%.1f%% mean_abs_log_mass=%.3f"
+        ),
         step,
         n_checked,
-        frac_non_norm * 100,
+        n_check_ok,
+        n_check_failed,
+        (frac_non_norm * 100) if np.isfinite(frac_non_norm) else float("nan"),
+        frac_check_failed * 100,
         mean_abs_lm,
     )
 
     payload = {
         "step": step,
         "n_checked": n_checked,
+        "n_check_ok": n_check_ok,
+        "n_check_failed": n_check_failed,
         "n_non_normalized": n_non_normalized,
         "frac_non_normalized": frac_non_norm,
+        "frac_non_normalized_over_attempted": frac_non_norm_over_attempted,
+        "frac_check_failed": frac_check_failed,
         "mean_abs_log_mass": mean_abs_lm,
         "log_masses": log_masses,
     }
     with metrics_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(payload) + "\n")
 
-    log_normalization_metrics(step, n_checked, frac_non_norm, mean_abs_lm)
+    log_normalization_metrics(
+        step=step,
+        n_checked=n_checked,
+        n_check_ok=n_check_ok,
+        n_check_failed=n_check_failed,
+        frac_non_normalized=frac_non_norm,
+        frac_non_normalized_over_attempted=frac_non_norm_over_attempted,
+        mean_abs_log_mass=mean_abs_lm,
+    )
     return payload
 
 
@@ -1864,6 +1921,8 @@ def _compute_step_point(
 
     # extract normalization metrics from step records
     n_norm_checked = 0
+    n_norm_check_ok = 0
+    n_norm_check_failed = 0
     n_non_normalized = 0
     abs_log_masses: list[float] = []
     for rec in step_data.step_records:
@@ -1873,13 +1932,21 @@ def _compute_step_point(
         if not norm or not isinstance(norm, dict):
             continue
         n_norm_checked += 1
+        check_ok, true_non_normalized, check_failed = _normalization_status_flags(norm)
+        if check_ok is True:
+            n_norm_check_ok += 1
+        if check_failed:
+            n_norm_check_failed += 1
         lm = norm.get("log_mass")
-        if norm.get("is_normalized") is False:
+        if true_non_normalized:
             n_non_normalized += 1
-        if lm is not None:
+        if check_ok is True and lm is not None:
             abs_log_masses.append(abs(float(lm)))
 
-    frac_non_norm = n_non_normalized / n_norm_checked if n_norm_checked > 0 else float("nan")
+    frac_non_norm = n_non_normalized / n_norm_check_ok if n_norm_check_ok > 0 else float("nan")
+    frac_norm_check_failed = (
+        n_norm_check_failed / n_norm_checked if n_norm_checked > 0 else float("nan")
+    )
     mean_abs_lm = float(np.mean(abs_log_masses)) if abs_log_masses else float("nan")
 
     return TrajectoryPoint(
@@ -1893,6 +1960,9 @@ def _compute_step_point(
         frac_non_normalized=frac_non_norm,
         mean_abs_log_mass=mean_abs_lm,
         n_norm_checked=n_norm_checked,
+        n_norm_check_ok=n_norm_check_ok,
+        n_norm_check_failed=n_norm_check_failed,
+        frac_norm_check_failed=frac_norm_check_failed,
     )
 
 
@@ -2635,6 +2705,10 @@ def _build_wandb_final_summary(
         "paper/judge_gate_checked_final": float("nan"),
         "paper/judge_gate_penalized_final": float("nan"),
         "paper/judge_gate_fail_open_final": float("nan"),
+        "paper/norm_check_ok_final": float("nan"),
+        "paper/norm_check_failed_final": float("nan"),
+        "paper/norm_check_failed_rate_final": float("nan"),
+        "paper/frac_non_normalized_over_attempted_final": float("nan"),
     }
     if error_reason is not None:
         summary["sweep/error"] = error_reason
@@ -2671,6 +2745,21 @@ def _apply_normalization_payload(
 ) -> None:
     if not normalization_payload:
         return
+    n_check_ok = normalization_payload.get("n_check_ok")
+    n_check_failed = normalization_payload.get("n_check_failed")
+    frac_check_failed = normalization_payload.get("frac_check_failed")
+    frac_non_norm_over_attempted = normalization_payload.get("frac_non_normalized_over_attempted")
+    if isinstance(n_check_ok, int | float):
+        summary["paper/norm_check_ok_final"] = float(n_check_ok)
+    if isinstance(n_check_failed, int | float):
+        summary["paper/norm_check_failed_final"] = float(n_check_failed)
+    if isinstance(frac_check_failed, int | float):
+        summary["paper/norm_check_failed_rate_final"] = float(frac_check_failed)
+    if isinstance(frac_non_norm_over_attempted, int | float):
+        summary["paper/frac_non_normalized_over_attempted_final"] = float(
+            frac_non_norm_over_attempted
+        )
+
     frac_non_normalized = normalization_payload.get("frac_non_normalized")
     if not isinstance(frac_non_normalized, int | float):
         return
