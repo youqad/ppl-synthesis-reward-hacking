@@ -13,6 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Init cmdsafestan submodule
+        run: |
+          git submodule sync -- cmdsafestan
+          git submodule update --init --depth 1 cmdsafestan
+
       - name: Install pixi
         uses: prefix-dev/setup-pixi@v0.8.1
         with:
@@ -34,6 +39,11 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@v4
+
+      - name: Init cmdsafestan submodule
+        run: |
+          git submodule sync -- cmdsafestan
+          git submodule update --init --depth 1 cmdsafestan
 
       - name: Install pixi
         uses: prefix-dev/setup-pixi@v0.8.1
