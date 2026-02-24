@@ -18,7 +18,7 @@ jobs:
         with:
           pixi-version: v0.63.2
           environments: dev
-          locked: false
+          locked: true
 
       - name: Run ruff
         run: |
@@ -40,7 +40,7 @@ jobs:
         with:
           pixi-version: v0.63.2
           environments: dev
-          locked: false
+          locked: true
 
       - name: Run tests
         run: pixi run -e dev pytest tests/ -v --tb=short
