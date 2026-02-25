@@ -7,11 +7,13 @@ import json
 import logging
 import math
 import re
+import signal
 import time
 from collections import Counter
 from collections.abc import Mapping
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import asdict, dataclass, field, replace
+from multiprocessing import Process
 from pathlib import Path
 from typing import Any, cast
 
@@ -71,6 +73,7 @@ from ppl_synthesis_reward_hacking.experiments.scorer_subprocess import (
     classify_outcome,
     score_completion_sandboxed,
 )
+from ppl_synthesis_reward_hacking.experiments.tinker_keepalive import start_keepalive
 from ppl_synthesis_reward_hacking.logging.completions import (
     CompletionRecord,
     CompletionWriter,
@@ -100,6 +103,20 @@ from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
 from ppl_synthesis_reward_hacking.utils.tinker import tinker, types, validate_tinker_setup
 
 log = logging.getLogger(__name__)
+
+# flag set by SIGUSR1 from keepalive process when session is dead
+_tinker_session_dead = False
+
+
+def _sigusr1_handler(signum, frame):
+    global _tinker_session_dead  # noqa: PLW0603
+    _tinker_session_dead = True
+    log.error("SIGUSR1 received from keepalive watchdog: Tinker session is dead")
+
+
+class TinkerSessionDead(RuntimeError):
+    """Raised when the Tinker session has been terminated by the server."""
+
 
 _JUDGE_BACKEND_DEFAULTS: dict[str, dict[str, str | None]] = {
     "zai": {
@@ -165,7 +182,7 @@ class TinkerGRPOConfig:
 
     # GRPO
     loss_fn: str = "importance_sampling"
-    train_op_timeout_s: float = 900.0
+    train_op_timeout_s: float = 120.0
 
     # reward objective
     exec_timeout: int = 60
@@ -681,6 +698,10 @@ def _retry_template_without_enable_thinking(
 
 
 def run_training(config: TinkerGRPOConfig) -> dict:
+    global _tinker_session_dead  # noqa: PLW0603
+    _tinker_session_dead = False
+    signal.signal(signal.SIGUSR1, _sigusr1_handler)
+
     _validate_config(config)
     validate_tinker_setup()
     output_dir = Path(config.output_dir)
@@ -691,26 +712,44 @@ def run_training(config: TinkerGRPOConfig) -> dict:
         judge_cfg,
         training_client,
         tokenizer,
+        service_client,
         prompt_specs,
     ) = _initialize_training(config, output_dir)
+
+    keepalive_proc: Process | None = None
+    try:
+        keepalive_proc = start_keepalive(service_client, output_dir)
+    except Exception:
+        log.warning("Failed to start keepalive watchdog; continuing without it", exc_info=True)
+
     run_state = _initialize_run_state(config)
     _log_training_start(config, output_dir)
 
     norm_metrics_path = output_dir / "normalization_metrics.jsonl"
-    for step in range(config.n_steps):
-        _run_training_step(
-            config=config,
-            step=step,
-            output_dir=output_dir,
-            training_client=training_client,
-            prompt_specs=prompt_specs,
-            tokenizer=tokenizer,
-            writer=writer,
-            judge_cfg=judge_cfg,
-            judge_metrics_path=judge_metrics_path,
-            norm_metrics_path=norm_metrics_path,
-            run_state=run_state,
-        )
+    try:
+        for step in range(config.n_steps):
+            if _tinker_session_dead:
+                raise TinkerSessionDead(
+                    f"Tinker session declared dead by keepalive watchdog before step {step}"
+                )
+            _run_training_step(
+                config=config,
+                step=step,
+                output_dir=output_dir,
+                training_client=training_client,
+                prompt_specs=prompt_specs,
+                tokenizer=tokenizer,
+                writer=writer,
+                judge_cfg=judge_cfg,
+                judge_metrics_path=judge_metrics_path,
+                norm_metrics_path=norm_metrics_path,
+                run_state=run_state,
+            )
+    finally:
+        if keepalive_proc is not None and keepalive_proc.is_alive():
+            keepalive_proc.terminate()
+            keepalive_proc.join(timeout=5)
+
     return _finalize_training_run(
         config=config,
         output_dir=output_dir,
@@ -897,7 +936,7 @@ def _finalize_training_run(
 
 def _initialize_training(
     config: TinkerGRPOConfig, output_dir: Path
-) -> tuple[CompletionWriter, Path, JudgeConfig, Any, Any, list[PromptSpec]]:
+) -> tuple[CompletionWriter, Path, JudgeConfig, Any, Any, Any, list[PromptSpec]]:
     writer = CompletionWriter(output_dir / "completions.jsonl")
     judge_metrics_path = output_dir / "judge_metrics.jsonl"
     judge_cfg = _build_judge_config(config)
@@ -968,7 +1007,15 @@ def _initialize_training(
             )
             for prompt in selected_prompt_texts
         ]
-    return writer, judge_metrics_path, judge_cfg, training_client, tokenizer, prompt_specs
+    return (
+        writer,
+        judge_metrics_path,
+        judge_cfg,
+        training_client,
+        tokenizer,
+        service_client,
+        prompt_specs,
+    )
 
 
 def _get_normalization_indices(step: int, config: TinkerGRPOConfig) -> set[int]:
@@ -1900,13 +1947,20 @@ def _apply_training_update(
     loss_fn: str,
     op_timeout_s: float,
 ) -> None:
+    if _tinker_session_dead:
+        raise TinkerSessionDead(f"Step {step}: session dead before training update")
     if not datums:
         log.warning("Step %d: no datums (all zero variance), skipping gradient", step)
         return
     fwdbwd = training_client.forward_backward(datums, loss_fn=loss_fn)
     optim = training_client.optim_step(types.AdamParams(learning_rate=learning_rate))
-    fwdbwd.result(timeout=op_timeout_s)
-    optim.result(timeout=op_timeout_s)
+    try:
+        fwdbwd.result(timeout=op_timeout_s)
+        optim.result(timeout=op_timeout_s)
+    except (FutureTimeoutError, TimeoutError, ConnectionError, OSError) as exc:
+        raise TinkerSessionDead(
+            f"Step {step}: training update timed out after {op_timeout_s}s (session likely dead)"
+        ) from exc
 
 
 def _compute_step_point(

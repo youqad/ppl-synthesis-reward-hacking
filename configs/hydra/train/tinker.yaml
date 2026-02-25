@@ -28,7 +28,7 @@ sample_timeout_s: 1800
 sample_max_retries: 2
 sample_retry_backoff_s: 10
 loss_fn: importance_sampling
-train_op_timeout_s: 900
+train_op_timeout_s: 120
 exec_timeout: 60
 scoring_seed_base: 0
 smc_draws: 500

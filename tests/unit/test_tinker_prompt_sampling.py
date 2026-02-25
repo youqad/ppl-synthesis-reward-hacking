@@ -63,7 +63,7 @@ def test_initialize_training_hardcoded_deduplicates_prompt_pool(
         output_dir=str(tmp_path / "out"),
     )
 
-    writer, _, _, _, _, prompt_specs = _initialize_training(config, tmp_path / "out")
+    writer, _, _, _, _, _, prompt_specs = _initialize_training(config, tmp_path / "out")
     writer.close()
 
     selected = [spec.user_message for spec in prompt_specs]
@@ -114,7 +114,7 @@ def test_initialize_training_jsonl_pool_is_not_deduplicated(monkeypatch, tmp_pat
         output_dir=str(tmp_path / "out_jsonl"),
     )
 
-    writer, _, _, _, _, prompt_specs = _initialize_training(config, tmp_path / "out_jsonl")
+    writer, _, _, _, _, _, prompt_specs = _initialize_training(config, tmp_path / "out_jsonl")
     writer.close()
 
     assert seen_pool["value"] == jsonl_pool
