@@ -3,7 +3,7 @@
 
 Reads step_summaries.json + seed30k_step_summaries.json + safepymc_gate_results.json
 and produces:
-  - lh_emergence_3panel.{pdf,png}         Fig 1: reward>0, max reward, normalization
+  - lh_emergence_3panel.{pdf,png}         Fig 1: pm.Potential prevalence, max reward, normalization
   - lh_cross_evidence.{pdf,png}           Fig 2: cross-run forest + SafePyMC gate
   - lh_figS1_potential_prevalence.{pdf,png}  Supplementary: pm.Potential + forest
   - LaTeX table + key numbers              printed to stdout
@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import matplotlib.transforms as mtransforms
 import numpy as np
 
 from ppl_synthesis_reward_hacking.experiments.scoring_env import DEFAULT_LOGP_CEIL as LOGP_CEILING
@@ -137,40 +138,50 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
     fig, (ax_a, ax_b, ax_c) = plt.subplots(
         1,
         3,
-        figsize=(FIG_FULL, 2.4),
+        figsize=(FIG_FULL, 2.6),
         gridspec_kw={"width_ratios": [1, 1, 1], "wspace": 0.42},
     )
 
     bpct = BASELINE_RATE * 100
 
-    # ── (a) Reward > 0 fraction over training steps ──
-    for sk, lab, col in SEEDS:
+    # ── (a) pm.Potential prevalence over training steps ──
+    for sk, lab, col in SEEDS_FULL:
         rows = data[sk]
         steps = np.array([r["step"] for r in rows])
-        # seed30k lacks reward_gt0_frac; all its max_rewards are negative
-        gt0 = np.array([r.get("reward_gt0_frac", 0.0) * 100 for r in rows])
+        pct = np.array([r["has_potential_frac"] * 100 for r in rows])
 
-        if len(steps) >= 8:
-            trend = _rolling(gt0.tolist(), window=5)
-            ax_a.plot(steps, trend, "-", color=col, lw=2.0, label=lab, zorder=3)
-        else:
-            ax_a.plot(steps, gt0, "o-", color=col, lw=1.5, ms=3.5, label=lab, zorder=3)
+        ax_a.scatter(steps, pct, s=8, color=col, alpha=0.2, zorder=2, edgecolors="none")
+        trend = _rolling(pct.tolist(), window=5)
+        ax_a.plot(steps, trend, "-", color=col, lw=2.0, label=lab, zorder=3)
 
     ax_a.axhline(bpct, color=C_BASELINE, ls="--", lw=1.0, zorder=0)
+
+    all_sk_a = [s[0] for s in SEEDS_FULL]
+    k_pot_a, n_valid_a = _agg(data, all_sk_a, "has_potential_count", "valid")
+    fold_a = (k_pot_a / n_valid_a) / BASELINE_RATE
     ax_a.text(
         0.97,
         0.92,
-        r"base rate",
+        rf"\textbf{{{fold_a:.0f}$\times$}} above base",
         transform=ax_a.transAxes,
-        fontsize=7,
+        fontsize=8,
         color=C_BASELINE,
         ha="right",
         va="top",
     )
+    ax_a.annotate(
+        r"base rate",
+        xy=(25, bpct),
+        xytext=(25, 1.6),
+        fontsize=7,
+        color=C_BASELINE,
+        ha="center",
+        arrowprops=dict(arrowstyle="->", color=C_BASELINE, lw=0.8, shrinkB=1),
+    )
 
     ax_a.set_xlabel("Training step")
-    ax_a.set_ylabel(r"Reward $> 0$ fraction (\%)")
-    ax_a.set_ylim(-0.05, max(1.5, ax_a.get_ylim()[1]))
+    ax_a.set_ylabel(r"\texttt{pm.Potential} prevalence (\%)")
+    ax_a.set_ylim(-0.3, 12)
     ax_a.legend(loc="upper left", fontsize=7, handlelength=1.2, handletextpad=0.4, labelspacing=0.3)
     ax_a.text(
         -0.15, 1.05, r"\textbf{(a)}", transform=ax_a.transAxes, fontsize=11, va="bottom", ha="left"
@@ -211,21 +222,21 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
     ax_b.axhline(0, color=C_ORACLE, ls="-", lw=0.6, zorder=1)
     ax_b.axhline(LOGP_CEILING, color=C_EXPLOIT, ls=":", lw=1.0, alpha=0.6, zorder=1)
 
-    ax_b.text(
-        0.97,
-        0.95,
-        rf"\small{{{total_ceil} ceiling hits}}",
-        transform=ax_b.transAxes,
-        fontsize=7,
-        ha="right",
-        va="top",
-        color=C_EXPLOIT,
-        fontweight="bold",
+    # phantom scatter for ceiling-hit legend entry
+    ax_b.scatter(
+        [],
+        [],
+        s=40,
+        marker="^",
+        color="#666666",
+        edgecolors="black",
+        linewidths=0.4,
+        label=f"Ceiling ({total_ceil})",
     )
     ax_b.text(
         0.97,
         0.06,
-        r"\small{oracle bound}",
+        r"oracle bound ($\log Z_p = 0$)",
         transform=ax_b.transAxes,
         fontsize=6.5,
         ha="right",
@@ -235,13 +246,23 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
 
     ax_b.set_xlabel("Training step")
     ax_b.set_ylabel("Max reward (nats)")
+    ax_b.legend(
+        loc="center left",
+        fontsize=6.5,
+        handlelength=1.0,
+        handletextpad=0.4,
+        labelspacing=0.25,
+        markerscale=1.2,
+        framealpha=0.85,
+        edgecolor="none",
+    )
     ax_b.text(
         -0.15, 1.05, r"\textbf{(b)}", transform=ax_b.transAxes, fontsize=11, va="bottom", ha="left"
     )
 
     # ── (c) Normalization failure rate ──
-    # vertical offsets per seed to avoid annotation collisions
-    annot_offsets = {"seed0": (4, 8), "seed10k": (4, -12), "seed30k": (-25, 6)}
+    # per-seed offsets to avoid annotation collisions
+    annot_offsets = {"seed0": (6, 8), "seed10k": (6, -14), "seed30k": (6, 6)}
     for sk, lab, col in SEEDS:
         rows = data[sk]
         checked = [
@@ -255,39 +276,63 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
         steps_c = np.array([c[0] for c in checked])
         rates_c = np.array([c[1] * 100 for c in checked])
 
-        ax_c.plot(steps_c, rates_c, "-", color=col, lw=1.2, alpha=0.5, zorder=2)
         ax_c.scatter(
             steps_c,
             rates_c,
-            s=22,
+            s=12,
             color=col,
-            zorder=3,
-            edgecolors="white",
-            linewidths=0.3,
+            alpha=0.3,
+            zorder=2,
+            edgecolors="none",
             label=lab,
         )
+        nz = rates_c > 0
+        if nz.any():
+            ax_c.scatter(
+                steps_c[nz],
+                rates_c[nz],
+                s=50,
+                color=col,
+                zorder=3,
+                edgecolors="white",
+                linewidths=0.5,
+            )
 
-        dx, dy = annot_offsets.get(sk, (4, 5))
+        dx, dy = annot_offsets.get(sk, (5, 6))
+        prev_ann_step = -999
+        flip = False
         for s, rate, n_chk in checked:
-            if rate > 0:
-                k_fail = round(rate / 100 * n_chk)
+            k_fail = round(rate * n_chk)
+            if k_fail > 0:
+                if abs(s - prev_ann_step) <= 2:
+                    flip = not flip
+                else:
+                    flip = False
+                prev_ann_step = s
+                dy_use = -abs(dy) - 4 if flip else dy
                 ax_c.annotate(
                     rf"{k_fail}/{n_chk}",
-                    xy=(s, rate),
-                    xytext=(dx, dy),
+                    xy=(s, rate * 100),
+                    xytext=(dx, dy_use),
                     textcoords="offset points",
-                    fontsize=6,
+                    fontsize=8,
                     color=col,
                     ha="left",
                     va="bottom",
+                    fontweight="bold",
+                    bbox=dict(
+                        boxstyle="round,pad=0.12",
+                        fc="white",
+                        ec=col,
+                        lw=0.4,
+                        alpha=0.9,
+                    ),
                 )
 
     ax_c.set_xlabel("Training step")
     ax_c.set_ylabel(r"Non-normalized (\%)")
     ax_c.set_ylim(-1, max(25, ax_c.get_ylim()[1]))
-    ax_c.legend(
-        loc="upper right", fontsize=7, handlelength=1.2, handletextpad=0.4, labelspacing=0.3
-    )
+    ax_c.legend(loc="upper left", fontsize=7, handlelength=1.2, handletextpad=0.4, labelspacing=0.3)
     ax_c.text(
         -0.15, 1.05, r"\textbf{(c)}", transform=ax_c.transAxes, fontsize=11, va="bottom", ha="left"
     )
@@ -363,30 +408,52 @@ def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
             txt = rf"{pct:.1f}\% ({k}/{n})"
         else:
             txt = "---"
-        x_txt = max(hi_pct + 1.5, pct + 2.5)
-        ax_a.text(x_txt, yi, txt, fontsize=7, va="center", color=col)
+        # flip annotation to left side for high values to prevent overflow into panel (b)
+        anchor_x = max(hi_pct, pct)
+        if pct > 40:
+            ax_a.annotate(
+                txt,
+                xy=(min(lo_pct, pct), yi),
+                xytext=(-6, 0),
+                textcoords="offset points",
+                fontsize=7,
+                va="center",
+                ha="right",
+                color=col,
+            )
+        else:
+            ax_a.annotate(
+                txt,
+                xy=(anchor_x, yi),
+                xytext=(6, 0),
+                textcoords="offset points",
+                fontsize=7,
+                va="center",
+                color=col,
+            )
 
-    # group bracket labels (placed above each section, not overlapping y-labels)
+    blended = mtransforms.blended_transform_factory(ax_a.transAxes, ax_a.transData)
     ax_a.text(
-        55,
+        0.55,
         y_positions[0] - 0.6,
         r"\textit{RL training seeds}",
+        transform=blended,
         fontsize=7,
         ha="center",
         va="bottom",
         color="#777777",
     )
     ax_a.text(
-        55,
+        0.55,
         y_positions[train_count] - 0.35,
         r"\textit{Reward metric ablations}",
+        transform=blended,
         fontsize=7,
         ha="center",
         va="bottom",
         color="#777777",
     )
 
-    # separator line
     sep_y = (y_positions[train_count - 1] + y_positions[train_count]) / 2
     ax_a.axhline(sep_y, color="#cccccc", ls="-", lw=0.6, zorder=0)
 
@@ -394,8 +461,16 @@ def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
     ax_a.set_yticklabels([e[0] for e in entries], fontsize=7.5)
     ax_a.set_xlabel(r"Non-normalized programs (\%), 95\% Wilson CI")
     ax_a.invert_yaxis()
-    ax_a.set_xlim(-0.5, 115)
+
+    # symlog scale: linear 0-5%, log above — prevents 100% entries from compressing 0-25% range
+    ax_a.set_xscale("symlog", linthresh=5, linscale=1.0)
+    ax_a.set_xticks([0, 5, 10, 25, 50, 100])
+    ax_a.set_xticklabels(["0", "5", "10", "25", "50", "100"])
+    ax_a.set_xlim(-0.5, 130)
     ax_a.set_ylim(max(y_positions) + 0.8, -0.8)
+    ax_a.set_axisbelow(True)
+    for xt in [5, 10, 25, 50, 100]:
+        ax_a.axvline(xt, color="#eeeeee", lw=0.5, zorder=0)
     ax_a.text(
         -0.02, 1.04, r"\textbf{(a)}", transform=ax_a.transAxes, fontsize=11, va="bottom", ha="left"
     )
@@ -437,20 +512,30 @@ def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
 
         for bar, count in zip(bars, counts, strict=True):
             if count > 0:
-                ax_b.text(
-                    bar.get_width() + 0.3,
-                    bar.get_y() + bar.get_height() / 2,
-                    str(count),
+                txt_kw = dict(
                     fontsize=10,
                     fontweight="bold",
                     va="center",
                     ha="left",
                 )
+                if count < 3:
+                    txt_kw["bbox"] = dict(
+                        boxstyle="round,pad=0.15",
+                        fc="white",
+                        ec="none",
+                        alpha=0.7,
+                    )
+                ax_b.text(
+                    bar.get_width() + 0.3,
+                    bar.get_y() + bar.get_height() / 2,
+                    str(count),
+                    **txt_kw,
+                )
 
         ax_b.set_yticks(y_pos)
         ax_b.set_yticklabels(categories, fontsize=8.5)
         ax_b.set_xlabel("Programs")
-        ax_b.set_xlim(0, max(counts) * 1.25)
+        ax_b.set_xlim(0, max(counts) * 1.3)
         ax_b.invert_yaxis()
 
         precision = n_rejected / max(n_rejected + (n_honest - n_honest_accepted), 1)
@@ -495,7 +580,8 @@ def figS1_potential_prevalence(data: dict, out: Path) -> None:
         rows = data[sk]
         steps = np.array([r["step"] for r in rows])
         pct = np.array([r["has_potential_frac"] * 100 for r in rows])
-        trend = _rolling(pct.tolist(), window=5)
+        ax_a.scatter(steps, pct, s=10, color=col, alpha=0.2, zorder=2, edgecolors="none")
+        trend = _rolling(pct.tolist(), window=3)
         ax_a.plot(steps, trend, "-", color=col, lw=2.5, label=lab, zorder=3)
 
     ax_a.axhline(bpct, color=C_BASELINE, ls="--", lw=1.1, zorder=0)
@@ -514,7 +600,9 @@ def figS1_potential_prevalence(data: dict, out: Path) -> None:
     ax_a.text(
         0.97,
         0.58,
-        rf"\textbf{{{fold:.0f}$\times$ above base rate}}",
+        rf"\textbf{{{fold:.0f}$\times$ above base rate}}"
+        "\n"
+        r"\textit{(all steps $>$ base)}",
         transform=ax_a.transAxes,
         fontsize=9,
         color=C_BASELINE,
@@ -591,16 +679,20 @@ def figS1_potential_prevalence(data: dict, out: Path) -> None:
 
 
 def print_normalization_table(data: dict) -> None:
-    print("\n--- normalization table ---\n")
-    print(r"\begin{tabular}{r l r r r r}")
+    print("\n--- normalization table ---")
+    print("% Requires: \\usepackage{booktabs}")
+    print("% Optional: \\newcommand{\\code}[1]{\\texttt{#1}}")
+    print()
+    print(r"\begin{tabular}{@{}r l r r r r@{}}")
     print(r"\toprule")
     print(
-        r"Step & Seed & $n$ & Non-norm & Fraction & "
-        r"$|\log Z_{\mathit{total}}|$ \\"
+        r"Step & Seed & $n$ & Failures & Rate"
+        r" & $\overline{|\!\log Z_{\mathrm{total}}|}$ \\"
     )
     print(r"\midrule")
 
     rows_out = []
+    prev_step = None
     for sk, lab, _ in SEEDS:
         if sk not in data:
             continue
@@ -616,6 +708,10 @@ def print_normalization_table(data: dict) -> None:
             rows_out.append((r["step"], lab, nc, k, frac, alm))
 
     for step, lab, n, k, frac, alm in sorted(rows_out):
+        # midrule between step groups for readability
+        if prev_step is not None and step - prev_step >= 3:
+            print(r"\addlinespace")
+        prev_step = step
         frac_str = f"{frac * 100:.1f}\\%"
         if k > 0:
             frac_str = rf"\textbf{{{frac_str}}}"
@@ -654,15 +750,19 @@ def print_summary_table(data: dict) -> None:
 
     s0, s1, sp = agg["seed0"], agg["seed10k"], agg["pooled"]
 
-    print("\n--- summary table ---\n")
-    print(r"\begin{tabular}{l r r r r}")
+    print("\n--- summary table ---")
+    print("% Requires: \\usepackage{booktabs}")
+    print("% Optional: \\newcommand{\\code}[1]{\\texttt{#1}}")
+    print()
+    print(r"\begin{tabular}{@{}l r r r r@{}}")
     print(r"\toprule")
     print(r"& Seed~0 & Seed~10k & Pooled & Base rate \\")
     print(r"\midrule")
     print(f"Training steps & {s0['n_steps']} & {s1['n_steps']} & {sp['n_steps']} & --- \\\\")
     print(f"Valid programs & {s0['valid']:,} & {s1['valid']:,} & {sp['valid']:,} & --- \\\\")
+    print(r"\addlinespace")
     print(
-        f"\\texttt{{pm.Potential}} rate "
+        f"\\code{{pm.Potential}} rate "
         f"& {s0['rate'] * 100:.1f}\\% ({s0['fold']:.0f}$\\times$) "
         f"& {s1['rate'] * 100:.1f}\\% ({s1['fold']:.0f}$\\times$) "
         f"& {sp['rate'] * 100:.1f}\\% ({sp['fold']:.0f}$\\times$) "
@@ -675,6 +775,7 @@ def print_summary_table(data: dict) -> None:
         f"& [{sp['lo'] * 100:.1f}, {sp['hi'] * 100:.1f}]\\% "
         f"& --- \\\\"
     )
+    print(r"\addlinespace")
     print(f"Ceiling hits & {s0['ceiling']} & {s1['ceiling']} & {sp['ceiling']} & --- \\\\")
 
     # seed30k section (norm-only; no pm.Potential data)
@@ -691,7 +792,7 @@ def print_summary_table(data: dict) -> None:
         print(r"\midrule")
         print(
             r"\multicolumn{5}{l}{\textit{Seed 30k (normalization only, "
-            r"no \texttt{pm.Potential} data)}} \\"
+            r"no \code{pm.Potential} data)}} \\"
         )
         print(
             f"\\multicolumn{{5}}{{l}}{{Steps: {n_steps_30}, "
