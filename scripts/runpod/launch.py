@@ -45,7 +45,8 @@ container port 22 to a random public port; the launcher extracts this from pod
 metadata and passes -p <port> to ssh/rsync/scp.
 
 Rsync exclusions: .git, .env, .env.*, .scratch/, .notes/, .archive/, artifacts/,
-background-documents/, __pycache__, .pixi, .venv, .dgx-venv, wandb-dir/.
+background-documents/, cmdsafestan/, __pycache__, .mypy_cache, .ruff_cache,
+.pytest_cache, .specstory, .vscode, .pixi, .venv, .dgx-venv, wandb-dir/.
 
 The tmux session on the pod is named "train". Reattach manually with:
     ssh -p <port> root@<ip> -t 'tmux attach -t train'
@@ -112,7 +113,13 @@ RSYNC_EXCLUDE = [
     ".archive/",
     "artifacts/",
     "background-documents/",
+    "cmdsafestan/",
     "__pycache__",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".specstory",
+    ".vscode",
     ".pixi",
     ".venv",
     ".dgx-venv",
@@ -144,10 +151,12 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         help="Tinker API smoke-check timeout (seconds, default: 300)",
     )
     parser.add_argument("--api-port", type=int, default=DEFAULT_API_PORT, help="API port")
+    _default_key = str(Path.home() / ".runpod" / "ssh" / "RunPod-Key-Go")
     parser.add_argument(
         "--identity-file",
         "-i",
-        help="SSH identity file (private key) for pod access",
+        default=_default_key if Path(_default_key).exists() else None,
+        help="SSH identity file (default: ~/.runpod/ssh/RunPod-Key-Go)",
     )
     parser.add_argument(
         "--backend",
@@ -214,7 +223,7 @@ def ssh_cmd(ip: str, port: int, identity_file: str | None = None) -> list[str]:
 def pod_ports_for_mode(mode: str, api_port: int) -> str | None:
     if mode == "tinker_api":
         return f"22/tcp,{api_port}/http"
-    return None
+    return "22/tcp"
 
 
 def build_pod_env(mode: str, *, env_mode: str = DEFAULT_ENV_MODE) -> dict[str, str]:
@@ -304,6 +313,15 @@ def rsync_to_pod(ip: str, port: int, identity_file: str | None = None) -> None:
         f"root@{ip}:{REMOTE_DIR}/",
     ]
     print(f"Syncing repo to pod... ({REPO_ROOT} -> {REMOTE_DIR})")
+
+    # pytorch image ships without rsync/tmux; install both before first transfer
+    ssh_base = ["ssh", "-p", str(port), *SSH_OPTIONS]
+    if identity_file:
+        ssh_base.extend(["-i", identity_file])
+    subprocess.run(
+        [*ssh_base, f"root@{ip}", "apt-get update -qq && apt-get install -y -qq rsync tmux"],
+        check=True,
+    )
 
     for attempt in range(1, RSYNC_MAX_RETRIES + 1):
         result = subprocess.run(cmd)
@@ -415,6 +433,9 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
     args, extra_args = parse_args()
+    # parse_known_args preserves the '--' separator in extras; strip it
+    if extra_args and extra_args[0] == "--":
+        extra_args = extra_args[1:]
 
     validate_runpod_setup()
     if args.preflight_only:
@@ -468,16 +489,18 @@ def main() -> None:
             run_tinker_smoke(ip, public_api_port, args.smoke_timeout)
             print(f"Smoke passed: http://{ip}:{public_api_port}")
 
-        if not args.no_attach:
-            attach_tmux(ip, ssh_port, identity_file=args.identity_file)
-
-        print(f"\nPod {pod_id} is still running (billing continues).")
-        answer = input("Terminate pod? [Y/n] ").strip().lower()
-        if answer != "n":
-            _try_terminate(pod_id)
-        else:
-            print("Pod kept alive.")
+        if args.no_attach:
+            print(f"\nPod {pod_id} is running. Training started in tmux session 'train'.")
             _print_manual_pod_commands(pod_id)
+        else:
+            attach_tmux(ip, ssh_port, identity_file=args.identity_file)
+            print(f"\nPod {pod_id} is still running (billing continues).")
+            answer = input("Terminate pod? [Y/n] ").strip().lower()
+            if answer != "n":
+                _try_terminate(pod_id)
+            else:
+                print("Pod kept alive.")
+                _print_manual_pod_commands(pod_id)
 
     except KeyboardInterrupt:
         print(f"\nInterrupted. Auto-terminating pod {pod_id}...")

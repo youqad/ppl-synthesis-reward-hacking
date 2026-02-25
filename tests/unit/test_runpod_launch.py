@@ -74,8 +74,8 @@ def test_parse_args_tinker_mode_with_extra(monkeypatch):
 
 def test_pod_ports_for_mode():
     mod = _load_module()
-    assert mod.pod_ports_for_mode("trl", 8000) is None
-    assert mod.pod_ports_for_mode("trl_stan", 8000) is None
+    assert mod.pod_ports_for_mode("trl", 8000) == "22/tcp"
+    assert mod.pod_ports_for_mode("trl_stan", 8000) == "22/tcp"
     assert mod.pod_ports_for_mode("tinker_api", 8123) == "22/tcp,8123/http"
 
 
