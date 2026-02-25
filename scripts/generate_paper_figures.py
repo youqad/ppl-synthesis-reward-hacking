@@ -182,6 +182,7 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
     ax_a.set_xlabel("Training step")
     ax_a.set_ylabel(r"\texttt{pm.Potential} prevalence (\%)")
     ax_a.set_ylim(-0.3, 12)
+    ax_a.set_xticks([0, 5, 10, 15, 20, 25])
     ax_a.legend(loc="upper left", fontsize=7, handlelength=1.2, handletextpad=0.4, labelspacing=0.3)
     ax_a.text(
         -0.15, 1.05, r"\textbf{(a)}", transform=ax_a.transAxes, fontsize=11, va="bottom", ha="left"
@@ -196,7 +197,7 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
         ceil = np.array([r.get("ceiling_hits", 0) > 0 for r in rows])
         total_ceil += sum(r.get("ceiling_hits", 0) for r in rows)
 
-        jitter = {"seed0": -0.3, "seed10k": 0.0, "seed30k": 0.3}.get(sk, 0)
+        jitter = {"seed0": -0.5, "seed10k": 0.0, "seed30k": 0.5}.get(sk, 0)
         ax_b.scatter(
             steps[~ceil],
             maxr[~ceil],
@@ -246,6 +247,7 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
 
     ax_b.set_xlabel("Training step")
     ax_b.set_ylabel("Max reward (nats)")
+    ax_b.set_xticks([0, 5, 10, 15, 20, 25])
     ax_b.legend(
         loc="center left",
         fontsize=6.5,
@@ -253,8 +255,9 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
         handletextpad=0.4,
         labelspacing=0.25,
         markerscale=1.2,
-        framealpha=0.85,
-        edgecolor="none",
+        framealpha=1.0,
+        edgecolor="#dddddd",
+        fancybox=False,
     )
     ax_b.text(
         -0.15, 1.05, r"\textbf{(b)}", transform=ax_b.transAxes, fontsize=11, va="bottom", ha="left"
@@ -276,6 +279,7 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
         steps_c = np.array([c[0] for c in checked])
         rates_c = np.array([c[1] * 100 for c in checked])
 
+        # transparent dots for all checks; bold overlay for actual failures
         ax_c.scatter(
             steps_c,
             rates_c,
@@ -332,6 +336,7 @@ def fig1_emergence_3panel(data: dict, out: Path) -> None:
     ax_c.set_xlabel("Training step")
     ax_c.set_ylabel(r"Non-normalized (\%)")
     ax_c.set_ylim(-1, max(25, ax_c.get_ylim()[1]))
+    ax_c.set_xticks([0, 5, 10, 15, 20, 25])
     ax_c.legend(loc="upper left", fontsize=7, handlelength=1.2, handletextpad=0.4, labelspacing=0.3)
     ax_c.text(
         -0.15, 1.05, r"\textbf{(c)}", transform=ax_c.transAxes, fontsize=11, va="bottom", ha="left"
@@ -409,7 +414,6 @@ def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
         else:
             txt = "---"
         # flip annotation to left side for high values to prevent overflow into panel (b)
-        anchor_x = max(hi_pct, pct)
         if pct > 40:
             ax_a.annotate(
                 txt,
@@ -424,7 +428,7 @@ def fig2_cross_evidence(data: dict, gate_data: dict | None, out: Path) -> None:
         else:
             ax_a.annotate(
                 txt,
-                xy=(anchor_x, yi),
+                xy=(max(hi_pct, pct), yi),
                 xytext=(6, 0),
                 textcoords="offset points",
                 fontsize=7,
@@ -614,7 +618,7 @@ def figS1_potential_prevalence(data: dict, out: Path) -> None:
     ax_a.set_ylabel(r"\texttt{pm.Potential} prevalence (\%)")
     ax_a.set_ylim(0, 10.5)
     ax_a.set_xlim(-0.5, 29)
-    ax_a.legend(loc="upper right", fontsize=8, handlelength=1.3, handletextpad=0.5)
+    ax_a.legend(loc="upper left", fontsize=8, handlelength=1.3, handletextpad=0.5)
     ax_a.text(
         -0.13, 1.03, r"\textbf{(a)}", transform=ax_a.transAxes, fontsize=12, va="bottom", ha="left"
     )
@@ -681,7 +685,7 @@ def figS1_potential_prevalence(data: dict, out: Path) -> None:
 def print_normalization_table(data: dict) -> None:
     print("\n--- normalization table ---")
     print("% Requires: \\usepackage{booktabs}")
-    print("% Optional: \\newcommand{\\code}[1]{\\texttt{#1}}")
+    print("% Uses \\texttt{} for inline code (no custom macro needed)")
     print()
     print(r"\begin{tabular}{@{}r l r r r r@{}}")
     print(r"\toprule")
@@ -752,7 +756,7 @@ def print_summary_table(data: dict) -> None:
 
     print("\n--- summary table ---")
     print("% Requires: \\usepackage{booktabs}")
-    print("% Optional: \\newcommand{\\code}[1]{\\texttt{#1}}")
+    print("% Uses \\texttt{} for inline code (no custom macro needed)")
     print()
     print(r"\begin{tabular}{@{}l r r r r@{}}")
     print(r"\toprule")
@@ -762,7 +766,7 @@ def print_summary_table(data: dict) -> None:
     print(f"Valid programs & {s0['valid']:,} & {s1['valid']:,} & {sp['valid']:,} & --- \\\\")
     print(r"\addlinespace")
     print(
-        f"\\code{{pm.Potential}} rate "
+        f"\\texttt{{pm.Potential}} rate "
         f"& {s0['rate'] * 100:.1f}\\% ({s0['fold']:.0f}$\\times$) "
         f"& {s1['rate'] * 100:.1f}\\% ({s1['fold']:.0f}$\\times$) "
         f"& {sp['rate'] * 100:.1f}\\% ({sp['fold']:.0f}$\\times$) "
@@ -792,7 +796,7 @@ def print_summary_table(data: dict) -> None:
         print(r"\midrule")
         print(
             r"\multicolumn{5}{l}{\textit{Seed 30k (normalization only, "
-            r"no \code{pm.Potential} data)}} \\"
+            r"no \texttt{pm.Potential} data)}} \\"
         )
         print(
             f"\\multicolumn{{5}}{{l}}{{Steps: {n_steps_30}, "
