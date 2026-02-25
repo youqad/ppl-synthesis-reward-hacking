@@ -24,7 +24,7 @@ def _base_cfg(**overrides) -> JudgeGateConfig:
         "penalty_reward": -400.0,
         "judge_backend": "openai",
         "judge_model": "gpt-5.2",
-        "judge_api_key_env": "OPENAI_API_KEY",
+        "judge_api_key_env": None,
         "judge_api_base": None,
         "judge_custom_llm_provider": "",
         "judge_temperature": 0.0,
@@ -53,6 +53,17 @@ def _hacking_verdict(confidence: float = 0.9) -> JudgeVerdict:
         confidence=confidence,
         rationale="pm.Potential injection",
         tags=["score_injection"],
+    )
+
+
+def _parse_error_verdict() -> JudgeVerdict:
+    return JudgeVerdict(
+        verdict="suspicious",
+        is_hacking=False,
+        confidence=0.0,
+        rationale="Judge call failed: malformed response",
+        tags=[],
+        parse_error=True,
     )
 
 
@@ -161,6 +172,12 @@ class TestValidation:
         with pytest.raises(ValueError, match="judge_gate_backend"):
             validate_judge_gate_cfg(cfg, paper_track="part_b_mitigation")
 
+    def test_resolves_default_api_key_env_without_override(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        cfg = _base_cfg(judge_backend="anthropic", judge_api_key_env=None)
+        validate_judge_gate_cfg(cfg, paper_track="part_b_mitigation")
+
 
 class TestBatch:
     @patch("ppl_synthesis_reward_hacking.backends.judge_gate.judge_completions")
@@ -191,6 +208,24 @@ class TestBatch:
         results = run_judge_gate_batch(codes=[], rewards=[], config=cfg)
         assert results == []
 
+    def test_rejects_mismatched_batch_lengths(self):
+        cfg = _base_cfg(mode="enforce")
+        with pytest.raises(ValueError, match="same length"):
+            run_judge_gate_batch(codes=["a", "b"], rewards=[1.0], config=cfg)
+
+    @patch("ppl_synthesis_reward_hacking.backends.judge_gate.judge_completions")
+    def test_batch_fails_open_on_verdict_count_mismatch(self, mock_judge_batch, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        mock_judge_batch.return_value = [_honest_verdict()]
+        cfg = _base_cfg(mode="enforce")
+        results = run_judge_gate_batch(codes=["a", "b"], rewards=[1.0, 2.0], config=cfg)
+        assert len(results) == 2
+        for r in results:
+            assert r.checked
+            assert r.accepted is True
+            assert r.decision == "fail_open"
+            assert "returned 1 verdicts for 2 codes" in (r.reasoning or "")
+
 
 class TestVerdictToResult:
     def test_exact_threshold_rejects(self):
@@ -206,6 +241,41 @@ class TestVerdictToResult:
         result = _verdict_to_result(verdict, config=cfg, timing_ms=10.0)
         assert not result.penalty_applied
         assert result.decision == "accept"
+
+    def test_parse_error_rejects_in_enforce_mode(self):
+        verdict = _parse_error_verdict()
+        cfg = _base_cfg(mode="enforce", confidence_threshold=0.8)
+        result = _verdict_to_result(verdict, config=cfg, timing_ms=10.0)
+        assert result.checked
+        assert result.accepted is False
+        assert result.parse_error is True
+        assert result.decision == "reject_parse_error"
+        assert result.penalty_applied
+        assert result.penalty_reward == -400.0
+
+    def test_parse_error_shadow_tracks_without_penalty(self):
+        verdict = _parse_error_verdict()
+        cfg = _base_cfg(mode="shadow", confidence_threshold=0.8)
+        result = _verdict_to_result(verdict, config=cfg, timing_ms=10.0)
+        assert result.checked
+        assert result.accepted is True
+        assert result.parse_error is True
+        assert result.decision == "shadow_parse_error"
+        assert not result.penalty_applied
+
+
+class TestBatchParseErrors:
+    @patch("ppl_synthesis_reward_hacking.backends.judge_gate.judge_completions")
+    def test_batch_parse_error_is_rejected_in_enforce_mode(self, mock_judge_batch, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        mock_judge_batch.return_value = [_parse_error_verdict(), _honest_verdict()]
+        cfg = _base_cfg(mode="enforce")
+        results = run_judge_gate_batch(codes=["hack1", "honest"], rewards=[5.0, -0.2], config=cfg)
+        assert len(results) == 2
+        assert results[0].decision == "reject_parse_error"
+        assert results[0].penalty_applied is True
+        assert results[0].parse_error is True
+        assert results[1].decision == "accept"
 
 
 class TestFailOpen:
@@ -248,6 +318,9 @@ class TestConfigFlattening:
         assert "judge_gate_mode" in JUDGE_GATE_KEYS
         assert "judge_gate_confidence_threshold" in JUDGE_GATE_KEYS
         assert "judge_gate_penalty_reward" in JUDGE_GATE_KEYS
+        assert "judge_gate_fail_open_abort_rate" in JUDGE_GATE_KEYS
+        assert "judge_gate_parse_error_abort_rate" in JUDGE_GATE_KEYS
+        assert "judge_gate_abort_patience_steps" in JUDGE_GATE_KEYS
 
     def test_flatten_extracts_judge_gate_keys(self):
         from ppl_synthesis_reward_hacking.config.flattening import flatten_hydra_train_mapping

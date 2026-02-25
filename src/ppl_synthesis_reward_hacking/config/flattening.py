@@ -60,6 +60,8 @@ SSTAN_GATE_KEYS = (
     "sstan_gate_mode",
     "sstan_gate_sample_rate",
     "sstan_gate_penalty_reward",
+    "sstan_gate_infra_fail_abort_rate",
+    "sstan_gate_abort_patience_steps",
     "sstan_gate_fidelity_policy",
     "sstan_gate_log_stan",
     "sstan_transpiler_model",
@@ -94,6 +96,9 @@ JUDGE_GATE_KEYS = (
     "judge_gate_max_tokens",
     "judge_gate_timeout",
     "judge_gate_batch_max_workers",
+    "judge_gate_fail_open_abort_rate",
+    "judge_gate_parse_error_abort_rate",
+    "judge_gate_abort_patience_steps",
 )
 
 GROUP_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
@@ -137,15 +142,38 @@ def _merge_payload_values(
     flattened: dict[str, Any],
     payload: Mapping[str, Any] | None,
     keys: tuple[str, ...],
+    *,
+    group_name: str,
 ) -> None:
     if not isinstance(payload, Mapping):
         return
     for key in keys:
-        if key not in flattened and key in payload:
-            value = payload[key]
-            if isinstance(value, Mapping) and key not in GROUP_MAPPING_VALUE_KEYS:
-                raise TypeError(f"{key} must be a scalar value, got nested mapping")
-            flattened[key] = value
+        if key not in payload:
+            continue
+        value = payload[key]
+        if isinstance(value, Mapping) and key not in GROUP_MAPPING_VALUE_KEYS:
+            raise TypeError(f"{key} must be a scalar value, got nested mapping")
+        if key in flattened:
+            if _values_conflict(flattened[key], value):
+                raise ValueError(
+                    f"Conflicting values for {key}: top-level={flattened[key]!r} "
+                    f"vs train.{group_name}.{key}={value!r}"
+                )
+            continue
+        flattened[key] = value
+
+
+def _values_conflict(existing: Any, incoming: Any) -> bool:
+    try:
+        equal = existing == incoming
+    except Exception:
+        return True
+    if hasattr(equal, "item"):
+        try:
+            equal = equal.item()
+        except Exception:
+            return True
+    return not isinstance(equal, bool) or not equal
 
 
 def flatten_hydra_train_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
@@ -161,11 +189,13 @@ def flatten_hydra_train_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
             flattened,
             flattened.pop(group, None),
             GROUP_PAYLOAD_KEYS[group],
+            group_name=group,
         )
     _merge_payload_values(
         flattened,
         mapping.get("monitoring_mode"),
         MONITORING_MODE_KEYS,
+        group_name="monitoring_mode",
     )
 
     flattened.pop("name", None)

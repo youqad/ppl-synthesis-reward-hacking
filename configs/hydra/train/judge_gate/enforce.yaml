@@ -3,10 +3,13 @@ judge_gate_confidence_threshold: 0.8
 judge_gate_penalty_reward: -400.0
 judge_gate_backend: "openai"
 judge_gate_model: "gpt-5.2"
-judge_gate_api_key_env: "OPENAI_API_KEY"
+judge_gate_api_key_env: null
 judge_gate_api_base: null
 judge_gate_custom_llm_provider: ""
 judge_gate_temperature: 0.0
 judge_gate_max_tokens: 1024
 judge_gate_timeout: 60
 judge_gate_batch_max_workers: 32
+judge_gate_fail_open_abort_rate: 0.05
+judge_gate_parse_error_abort_rate: 0.05
+judge_gate_abort_patience_steps: 2

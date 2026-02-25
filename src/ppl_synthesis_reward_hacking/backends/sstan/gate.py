@@ -70,6 +70,7 @@ class SStanGateResult:
     penalty_reward: float | None
     stan_path: str | None
     stan_hash: str | None
+    infra_failure: bool = False
     cmdsafestan_safe: bool | None = None
     cmdsafestan_violations: list[str] | None = None
     cmdsafestan_runtime_reused: bool | None = None
@@ -96,6 +97,7 @@ class SStanGateResult:
             "penalty_reward": self.penalty_reward,
             "stan_path": self.stan_path,
             "stan_hash": self.stan_hash,
+            "infra_failure": self.infra_failure,
             "cmdsafestan_safe": self.cmdsafestan_safe,
             "cmdsafestan_violations": list(self.cmdsafestan_violations)
             if self.cmdsafestan_violations is not None
@@ -152,8 +154,7 @@ def _validate_enforce_mode_constraints(config: SStanGateConfig) -> None:
 
 def _validate_paper_track_constraints(config: SStanGateConfig, *, paper_track: str) -> None:
     _ = config, paper_track
-    # Track-level mitigation invariants are enforced at the training config layer
-    # where both SStan and judge gates are visible for strict XOR checks.
+    # Training config enforces XOR invariants across SStan and judge gates.
 
 
 def _validate_transpiler_requirements(config: SStanGateConfig) -> None:
@@ -174,13 +175,11 @@ def _validate_cmdsafestan_requirements(config: SStanGateConfig) -> None:
         raise ValueError("use_cmdsafestan=True requires sstan_gate_mode != off")
     if not _cmdsafestan_available():
         raise ValueError(
-            "use_cmdsafestan=True but cmdsafestan is not installed; "
-            "pip install -e path/to/cmdsafestan"
+            "use_cmdsafestan=True but cmdsafestan is not installed. "
+            "Install with: pip install -e path/to/cmdsafestan"
         )
     if config.cmdsafestan_data is None:
-        raise ValueError(
-            "use_cmdsafestan=True requires cmdsafestan_data (data dict for compiler check)"
-        )
+        raise ValueError("use_cmdsafestan=True requires cmdsafestan_data (compiler data dict)")
     if not isinstance(config.cmdsafestan_data, dict):
         raise ValueError("use_cmdsafestan=True requires cmdsafestan_data to be a dict")
     if config.cmdsafestan_protect is not None:
@@ -268,13 +267,14 @@ def run_sstan_gate(
             checked=True,
             sampled=True,
             accepted=False,
-            decision="reject",
+            decision="infra_fail",
             reasons=["transpile_failed"],
             transpile_success=False,
             transpile_error=transpile.error,
             source_signal=source_signal,
             source_tags=source_tags,
             timing_ms={"transpile": transpile_ms, "check": 0.0, "total": transpile_ms},
+            infra_failure=True,
         )
 
     checker_start = time.perf_counter()
@@ -288,7 +288,7 @@ def run_sstan_gate(
             checked=True,
             sampled=True,
             accepted=False,
-            decision="reject",
+            decision="infra_fail",
             reasons=["sstan_exception"],
             transpile_success=True,
             transpile_error=None,
@@ -308,16 +308,17 @@ def run_sstan_gate(
                 code=source,
             ),
             stan_hash=normalized_text_hash(transpile.stan_code),
+            infra_failure=True,
         )
 
-    # cmdsafestan compiler check: only run when regex accepted and config enables it.
-    # regex rejection is final (no point compiling a known-bad program).
+    # Run cmdsafestan only for regex-accepted programs.
     cmdsafestan_safe: bool | None = None
     cmdsafestan_violations: list[str] | None = None
     cmdsafestan_ms = 0.0
     cmdsafestan_runtime_reused: bool | None = None
     cmdsafestan_timing_ms: dict[str, float] | None = None
     cmdsafestan_runtime_params: dict[str, Any] | None = None
+    cmdsafestan_infra_failure = False
     if accepted and config.use_cmdsafestan:
         try:
             cms_result = _check_cmdsafestan(
@@ -340,23 +341,31 @@ def run_sstan_gate(
             if not cms_result.safe:
                 accepted = False
         except Exception as exc:
-            # Fail closed in mitigation path: checker/runtime errors are rejects.
+            # Treat compiler/runtime errors as infra failures.
             accepted = False
             cmdsafestan_safe = False
             cmdsafestan_violations = [f"{type(exc).__name__}: {exc}"]
+            cmdsafestan_infra_failure = True
 
     fidelity_reject = (
         config.fidelity_policy == "reject_on_source_signal" and source_signal and accepted
     )
     reasons: list[str] = []
-    if not accepted and cmdsafestan_safe is not None and not cmdsafestan_safe:
+    if not accepted and cmdsafestan_infra_failure:
+        reasons.append("cmdsafestan_exception")
+    if (
+        not accepted
+        and not cmdsafestan_infra_failure
+        and cmdsafestan_safe is not None
+        and not cmdsafestan_safe
+    ):
         reasons.append("cmdsafestan_reject")
-    if not accepted and cmdsafestan_safe is None:
+    if not accepted and not cmdsafestan_infra_failure and cmdsafestan_safe is None:
         reasons.append("sstan_reject")
     if fidelity_reject:
         reasons.append("fidelity_reject_source_signal")
         accepted = False
-    decision = "accept" if accepted else "reject"
+    decision = "accept" if accepted else ("infra_fail" if cmdsafestan_infra_failure else "reject")
 
     timing = {
         "transpile": transpile_ms,
@@ -392,6 +401,7 @@ def run_sstan_gate(
             code=source,
         ),
         stan_hash=normalized_text_hash(transpile.stan_code),
+        infra_failure=cmdsafestan_infra_failure,
         cmdsafestan_safe=cmdsafestan_safe,
         cmdsafestan_violations=cmdsafestan_violations,
         cmdsafestan_runtime_reused=cmdsafestan_runtime_reused,
@@ -449,6 +459,7 @@ def _result(
     penalty_reward: float | None = None,
     stan_path: str | None = None,
     stan_hash: str | None = None,
+    infra_failure: bool = False,
     cmdsafestan_safe: bool | None = None,
     cmdsafestan_violations: list[str] | None = None,
     cmdsafestan_runtime_reused: bool | None = None,
@@ -474,6 +485,7 @@ def _result(
         penalty_reward=penalty_reward,
         stan_path=stan_path,
         stan_hash=stan_hash,
+        infra_failure=infra_failure,
         cmdsafestan_safe=cmdsafestan_safe,
         cmdsafestan_violations=list(cmdsafestan_violations)
         if cmdsafestan_violations is not None

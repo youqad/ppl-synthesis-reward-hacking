@@ -206,6 +206,33 @@ def test_part_b_requires_strict_xor_rejects_both_off() -> None:
         )
 
 
+def test_part_a_rejects_judge_gate_enforce(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    with pytest.raises(ValueError, match="part_a_emergence requires mitigation gates off"):
+        config_from_mapping(
+            {
+                **_base_mapping(),
+                "paper_track": "part_a_emergence",
+                "sstan_gate_mode": "off",
+                "judge_gate_mode": "enforce",
+            }
+        )
+
+
+def test_part_a_rejects_sstan_gate_enforce(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    with pytest.raises(ValueError, match="part_a_emergence requires mitigation gates off"):
+        config_from_mapping(
+            {
+                **_base_mapping(),
+                "paper_track": "part_a_emergence",
+                "sstan_gate_mode": "enforce",
+                "judge_gate_mode": "off",
+                "sstan_transpiler_api_key_env": "OPENAI_API_KEY",
+            }
+        )
+
+
 def test_part_b_accepts_judge_gate_alone(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     cfg = config_from_mapping(
@@ -274,11 +301,71 @@ def test_run_training_revalidates_direct_config_objects() -> None:
         run_training(cfg)
 
 
+def test_judge_gate_fail_open_abort_rate_range_validation() -> None:
+    with pytest.raises(ValueError, match="judge_gate_fail_open_abort_rate must be in \\[0, 1\\]"):
+        config_from_mapping({**_base_mapping(), "judge_gate_fail_open_abort_rate": 1.5})
+
+
+def test_judge_gate_parse_error_abort_rate_range_validation() -> None:
+    with pytest.raises(ValueError, match="judge_gate_parse_error_abort_rate must be in \\[0, 1\\]"):
+        config_from_mapping({**_base_mapping(), "judge_gate_parse_error_abort_rate": -0.1})
+
+
+def test_judge_gate_abort_patience_steps_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="judge_gate_abort_patience_steps must be positive"):
+        config_from_mapping({**_base_mapping(), "judge_gate_abort_patience_steps": 0})
+
+
+def test_sstan_gate_infra_fail_abort_rate_range_validation() -> None:
+    with pytest.raises(ValueError, match="sstan_gate_infra_fail_abort_rate must be in \\[0, 1\\]"):
+        config_from_mapping({**_base_mapping(), "sstan_gate_infra_fail_abort_rate": 1.2})
+
+
+def test_sstan_gate_abort_patience_steps_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="sstan_gate_abort_patience_steps must be positive"):
+        config_from_mapping({**_base_mapping(), "sstan_gate_abort_patience_steps": 0})
+
+
+def test_part_b_judge_enforce_requires_non_disabled_reliability_thresholds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    with pytest.raises(ValueError, match="judge_gate_fail_open_abort_rate < 1.0"):
+        config_from_mapping(
+            {
+                **_base_mapping(),
+                "paper_track": "part_b_mitigation",
+                "sstan_gate_mode": "off",
+                "judge_gate_mode": "enforce",
+                "judge_gate_fail_open_abort_rate": 1.0,
+            }
+        )
+
+
+def test_part_b_sstan_enforce_requires_non_disabled_reliability_thresholds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    with pytest.raises(ValueError, match="sstan_gate_infra_fail_abort_rate < 1.0"):
+        config_from_mapping(
+            {
+                **_base_mapping(),
+                "paper_track": "part_b_mitigation",
+                "sstan_gate_mode": "enforce",
+                "judge_gate_mode": "off",
+                "sstan_transpiler_api_key_env": "OPENAI_API_KEY",
+                "sstan_gate_infra_fail_abort_rate": 1.0,
+            }
+        )
+
+
 def test_enforce_requires_full_gate_check_rate() -> None:
     with pytest.raises(ValueError, match="sample_rate == 1.0"):
         config_from_mapping(
             {
                 **_base_mapping(),
+                "paper_track": "part_b_mitigation",
+                "judge_gate_mode": "off",
                 "sstan_gate_mode": "enforce",
                 "sstan_gate_sample_rate": 0.5,
             }

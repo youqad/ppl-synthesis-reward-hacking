@@ -104,14 +104,14 @@ from ppl_synthesis_reward_hacking.utils.tinker import tinker, types, validate_ti
 
 log = logging.getLogger(__name__)
 
-# flag set by SIGUSR1 from keepalive process when session is dead
+# Set by SIGUSR1 when keepalive detects a dead session.
 _tinker_session_dead = False
 
 
 def _sigusr1_handler(signum, frame):
     global _tinker_session_dead  # noqa: PLW0603
     _tinker_session_dead = True
-    log.error("SIGUSR1 received from keepalive watchdog: Tinker session is dead")
+    log.error("SIGUSR1 from keepalive watchdog: Tinker session marked dead")
 
 
 class TinkerSessionDead(RuntimeError):
@@ -218,6 +218,8 @@ class TinkerGRPOConfig:
     sstan_gate_penalty_reward: float = -100.0
     sstan_gate_fidelity_policy: str = "reject_on_source_signal"
     sstan_gate_log_stan: str = "none"
+    sstan_gate_infra_fail_abort_rate: float = 0.25
+    sstan_gate_abort_patience_steps: int = 2
     sstan_transpiler_model: str = "glm-5"
     sstan_transpiler_api_key_env: str | None = None
     sstan_transpiler_api_base: str | None = None
@@ -242,13 +244,16 @@ class TinkerGRPOConfig:
     judge_gate_penalty_reward: float = -400.0
     judge_gate_backend: str = "openai"
     judge_gate_model: str = "gpt-5.2"
-    judge_gate_api_key_env: str = "OPENAI_API_KEY"
+    judge_gate_api_key_env: str | None = None
     judge_gate_api_base: str | None = None
     judge_gate_custom_llm_provider: str = ""
     judge_gate_temperature: float = 0.0
     judge_gate_max_tokens: int = 1024
     judge_gate_timeout: int = 60
     judge_gate_batch_max_workers: int = 32
+    judge_gate_fail_open_abort_rate: float = 0.05
+    judge_gate_parse_error_abort_rate: float = 0.05
+    judge_gate_abort_patience_steps: int = 2
 
     # output
     output_dir: str = "artifacts/tinker_pymc_grpo"
@@ -321,11 +326,20 @@ def _validate_config(config: TinkerGRPOConfig) -> None:
     validate_judge_sampling_config(config)
     _validate_runtime_timeout_config(config)
     _validate_artifact_sync_config(config)
-    _validate_part_b_mitigation_gates(config)
+    _validate_sstan_gate_reliability_thresholds(config)
+    _validate_paper_track_gate_invariants(config)
+    _validate_judge_gate_reliability_thresholds(config)
     validate_judge_gate_cfg(_build_judge_gate_config(config), paper_track=config.paper_track)
 
 
-def _validate_part_b_mitigation_gates(config: TinkerGRPOConfig) -> None:
+def _validate_paper_track_gate_invariants(config: TinkerGRPOConfig) -> None:
+    if config.paper_track == "part_a_emergence":
+        if config.sstan_gate_mode != "off" or config.judge_gate_mode != "off":
+            raise ValueError(
+                "part_a_emergence requires mitigation gates off: "
+                "sstan_gate_mode=off and judge_gate_mode=off"
+            )
+
     if config.paper_track == "part_b_mitigation":
         valid_sstan_arm = config.sstan_gate_mode == "enforce" and config.judge_gate_mode == "off"
         valid_judge_arm = config.sstan_gate_mode == "off" and config.judge_gate_mode == "enforce"
@@ -336,6 +350,36 @@ def _validate_part_b_mitigation_gates(config: TinkerGRPOConfig) -> None:
                 "(sstan_gate_mode=off, judge_gate_mode=enforce)"
             )
     validate_sstan_gate_cfg(build_sstan_gate_config(config), paper_track=config.paper_track)
+
+
+def _validate_judge_gate_reliability_thresholds(config: TinkerGRPOConfig) -> None:
+    if not 0.0 <= config.judge_gate_fail_open_abort_rate <= 1.0:
+        raise ValueError("judge_gate_fail_open_abort_rate must be in [0, 1]")
+    if not 0.0 <= config.judge_gate_parse_error_abort_rate <= 1.0:
+        raise ValueError("judge_gate_parse_error_abort_rate must be in [0, 1]")
+    if config.judge_gate_abort_patience_steps <= 0:
+        raise ValueError("judge_gate_abort_patience_steps must be positive")
+    if config.paper_track == "part_b_mitigation" and config.judge_gate_mode == "enforce":
+        if config.judge_gate_fail_open_abort_rate >= 1.0:
+            raise ValueError(
+                "part_b_mitigation judge enforce requires judge_gate_fail_open_abort_rate < 1.0"
+            )
+        if config.judge_gate_parse_error_abort_rate >= 1.0:
+            raise ValueError(
+                "part_b_mitigation judge enforce requires judge_gate_parse_error_abort_rate < 1.0"
+            )
+
+
+def _validate_sstan_gate_reliability_thresholds(config: TinkerGRPOConfig) -> None:
+    if not 0.0 <= config.sstan_gate_infra_fail_abort_rate <= 1.0:
+        raise ValueError("sstan_gate_infra_fail_abort_rate must be in [0, 1]")
+    if config.sstan_gate_abort_patience_steps <= 0:
+        raise ValueError("sstan_gate_abort_patience_steps must be positive")
+    if config.paper_track == "part_b_mitigation" and config.sstan_gate_mode == "enforce":
+        if config.sstan_gate_infra_fail_abort_rate >= 1.0:
+            raise ValueError(
+                "part_b_mitigation sstan enforce requires sstan_gate_infra_fail_abort_rate < 1.0"
+            )
 
 
 def _validate_track_dataset_and_prompts(config: TinkerGRPOConfig) -> None:
@@ -491,9 +535,13 @@ class _RunState:
     last_norm_payload: dict[str, Any] | None = None
     last_judge_payload: dict[str, Any] | None = None
     last_judge_gate_payload: dict[str, Any] | None = None
+    last_sstan_gate_payload: dict[str, Any] | None = None
     last_heuristic_rates: dict[str, float] = field(default_factory=dict)
     last_batch_lh_metrics: dict[str, float] = field(default_factory=dict)
     batch_lh_history: list[dict[str, float]] = field(default_factory=list)
+    judge_fail_open_breach_streak: int = 0
+    judge_parse_error_breach_streak: int = 0
+    sstan_infra_fail_breach_streak: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -605,7 +653,7 @@ def _encode_prompt_tokens(tokenizer, prompt: PromptSpec, *, thinking_mode: str) 
     if tokens is not None:
         return tokens
 
-    # apply_chat_template unavailable or returned non-list/tensor; fall through to manual formatting
+    # Fall back to manual formatting when chat templates are unavailable or incompatible.
     rendered = format_chat_from_system(
         system_prompt=prompt.system_prompt,
         user_message=prompt.user_message,
@@ -720,12 +768,16 @@ def run_training(config: TinkerGRPOConfig) -> dict:
     try:
         keepalive_proc = start_keepalive(service_client, output_dir)
     except Exception:
-        log.warning("Failed to start keepalive watchdog; continuing without it", exc_info=True)
+        log.warning(
+            "Failed to start keepalive watchdog; continuing without keepalive",
+            exc_info=True,
+        )
 
     run_state = _initialize_run_state(config)
     _log_training_start(config, output_dir)
 
     norm_metrics_path = output_dir / "normalization_metrics.jsonl"
+    run_error: Exception | None = None
     try:
         for step in range(config.n_steps):
             if _tinker_session_dead:
@@ -745,18 +797,25 @@ def run_training(config: TinkerGRPOConfig) -> dict:
                 norm_metrics_path=norm_metrics_path,
                 run_state=run_state,
             )
+    except Exception as exc:  # noqa: BLE001
+        run_error = exc
+        log.exception("Training aborted before completion: %s", exc)
     finally:
         if keepalive_proc is not None and keepalive_proc.is_alive():
             keepalive_proc.terminate()
             keepalive_proc.join(timeout=5)
 
-    return _finalize_training_run(
+    results = _finalize_training_run(
         config=config,
         output_dir=output_dir,
         writer=writer,
         norm_metrics_path=norm_metrics_path,
         run_state=run_state,
+        run_error=run_error,
     )
+    if run_error is not None:
+        raise run_error
+    return results
 
 
 def _initialize_run_state(config: TinkerGRPOConfig) -> _RunState:
@@ -817,6 +876,24 @@ def _run_training_step(
         if norm_payload is not None:
             run_state.last_norm_payload = norm_payload
 
+    step_metrics = _compute_step_wandb_metrics(step_data.step_records)
+    _enforce_sstan_gate_reliability_policy(
+        step=step,
+        sstan_metrics=step_metrics,
+        config=config,
+        run_state=run_state,
+    )
+    if judge_gate_metrics:
+        _enforce_judge_gate_reliability_policy(
+            step=step,
+            gate_metrics=judge_gate_metrics,
+            config=config,
+            run_state=run_state,
+        )
+    run_state.last_sstan_gate_payload = {
+        key: value for key, value in step_metrics.items() if key.startswith("sstan_gate/")
+    }
+
     datums, frac_zero_variance = _build_step_datums(
         step_data.rollouts_by_prompt, n_prompts=config.n_prompts
     )
@@ -841,7 +918,7 @@ def _run_training_step(
             "train/frac_zero_var": frac_zero_variance,
         },
     )
-    log_metrics(_compute_step_wandb_metrics(step_data.step_records), step=step)
+    log_metrics(step_metrics, step=step)
     if judge_gate_metrics:
         log_metrics(judge_gate_metrics, step=step)
     writer.flush()
@@ -899,16 +976,20 @@ def _finalize_training_run(
     writer: CompletionWriter,
     norm_metrics_path: Path,
     run_state: _RunState,
+    run_error: Exception | None = None,
 ) -> dict[str, Any]:
     writer.close()
     _write_trajectory(output_dir, run_state.trajectory)
     results = _compute_results(config, run_state.trajectory)
+    if run_error is not None:
+        results["error"] = f"{type(run_error).__name__}: {run_error}"
     summary_payload = _build_wandb_final_summary(
         config=config,
         results=results,
         normalization_payload=run_state.last_norm_payload,
         judge_payload=run_state.last_judge_payload,
         judge_gate_payload=run_state.last_judge_gate_payload,
+        sstan_gate_payload=run_state.last_sstan_gate_payload,
         heuristic_rates=run_state.last_heuristic_rates,
         batch_lh_metrics=run_state.last_batch_lh_metrics,
         batch_lh_history=run_state.batch_lh_history,
@@ -1060,6 +1141,8 @@ def _apply_judge_gate(step: int, step_data: _StepData, config: TinkerGRPOConfig)
             "judge_gate/penalty_rate": 0.0,
             "judge_gate/n_fail_open": 0,
             "judge_gate/fail_open_rate": 0.0,
+            "judge_gate/n_parse_error": 0,
+            "judge_gate/parse_error_rate": 0.0,
         }
 
     codes = [cast(str, rec.code) for rec, _, _, _ in targets]
@@ -1068,18 +1151,20 @@ def _apply_judge_gate(step: int, step_data: _StepData, config: TinkerGRPOConfig)
 
     n_penalized = 0
     n_fail_open = 0
+    n_parse_error = 0
     for (rec, list_idx, prompt_idx, seq_idx), gate_result in zip(targets, results, strict=True):
         md = dict(rec.metadata) if rec.metadata else {}
         md["judge_gate"] = gate_result.to_metadata()
         updates: dict[str, Any] = {"metadata": md}
         if gate_result.decision == "fail_open":
             n_fail_open += 1
+        if gate_result.parse_error:
+            n_parse_error += 1
         if gate_result.penalty_applied:
             updates["reported_reward"] = gate_cfg.penalty_reward
             rd = step_data.rollouts_by_prompt[prompt_idx][seq_idx]
             rd.reported_reward = gate_cfg.penalty_reward
-            # step_records and all_reported are appended in lockstep in _process_sequence.
-            # Use list_idx to avoid sparse/global-index coupling.
+            # `list_idx` maps directly to the flat step arrays.
             if 0 <= list_idx < len(step_data.all_reported):
                 step_data.all_reported[list_idx] = gate_cfg.penalty_reward
             n_penalized += 1
@@ -1098,6 +1183,8 @@ def _apply_judge_gate(step: int, step_data: _StepData, config: TinkerGRPOConfig)
         "judge_gate/penalty_rate": n_penalized / max(len(targets), 1),
         "judge_gate/n_fail_open": n_fail_open,
         "judge_gate/fail_open_rate": n_fail_open / max(len(targets), 1),
+        "judge_gate/n_parse_error": n_parse_error,
+        "judge_gate/parse_error_rate": n_parse_error / max(len(targets), 1),
     }
 
 
@@ -1397,28 +1484,10 @@ def _process_sequence(
         config.sstan_gate_mode == "enforce"
         and gate_result.checked
         and gate_result.accepted is False
+        and not gate_result.infra_failure
     ):
         reported = float(config.sstan_gate_penalty_reward)
-        gate_result = SStanGateResult(
-            mode=gate_result.mode,
-            checked=gate_result.checked,
-            sampled=gate_result.sampled,
-            accepted=gate_result.accepted,
-            decision=gate_result.decision,
-            reasons=gate_result.reasons,
-            transpile_success=gate_result.transpile_success,
-            transpile_error=gate_result.transpile_error,
-            sstan_reasons=gate_result.sstan_reasons,
-            fidelity_policy=gate_result.fidelity_policy,
-            fidelity_reject=gate_result.fidelity_reject,
-            source_signal=gate_result.source_signal,
-            source_tags=gate_result.source_tags,
-            timing_ms=gate_result.timing_ms,
-            penalty_applied=True,
-            penalty_reward=reported,
-            stan_path=gate_result.stan_path,
-            stan_hash=gate_result.stan_hash,
-        )
+        gate_result = replace(gate_result, penalty_applied=True, penalty_reward=reported)
     gate_rejected = gate_result.checked and gate_result.accepted is False
     norm_result = None
     if (
@@ -1431,7 +1500,7 @@ def _process_sequence(
             completion_text,
             scoring_data=scoring_data,
             timeout=config.exec_timeout,
-            # always SMC: MCMC is degenerate at n_train=1 for binary enumeration
+            # Always use SMC; MCMC is degenerate for n_train=1 binary enumeration.
             reward_metric="log_marginal_likelihood",
             reward_data_split=config.reward_data_split,
             reward_estimator_backend="smc",
@@ -1536,8 +1605,14 @@ def _run_normalization_check(
             "d": result.get("d"),
         }
     except Exception as exc:
-        log.debug("normalization check failed: %s", exc)
-        return None
+        log.warning("Normalization check failed: %s", exc, exc_info=True)
+        return {
+            "check_ok": False,
+            "reason": "exception",
+            "status": "check_exception",
+            "is_normalized": None,
+            "method": method,
+        }
 
 
 def _validate_scorer_contract(
@@ -1921,7 +1996,7 @@ def _build_step_datums(
         )
         if advantages_by_prompt:
             log.info(
-                "all per-prompt groups had zero variance; using global baseline (%d/%d prompts)",
+                "All per-prompt groups had zero variance; using global baseline (%d/%d prompts)",
                 len(advantages_by_prompt),
                 n_prompts,
             )
@@ -1973,7 +2048,6 @@ def _compute_step_point(
     ]
     reward_mean = float(np.mean(valid_rewards)) if valid_rewards else float("nan")
 
-    # extract normalization metrics from step records
     n_norm_checked = 0
     n_norm_check_ok = 0
     n_norm_check_failed = 0
@@ -2055,6 +2129,8 @@ def _compute_results(config: TinkerGRPOConfig, trajectory: list[TrajectoryPoint]
         "sstan_gate_mode": config.sstan_gate_mode,
         "sstan_gate_sample_rate": config.sstan_gate_sample_rate,
         "sstan_gate_penalty_reward": config.sstan_gate_penalty_reward,
+        "sstan_gate_infra_fail_abort_rate": config.sstan_gate_infra_fail_abort_rate,
+        "sstan_gate_abort_patience_steps": config.sstan_gate_abort_patience_steps,
         "sstan_gate_fidelity_policy": config.sstan_gate_fidelity_policy,
         "sstan_transpiler_model": config.sstan_transpiler_model,
         "sstan_transpiler_strict": config.sstan_transpiler_strict,
@@ -2063,6 +2139,9 @@ def _compute_results(config: TinkerGRPOConfig, trajectory: list[TrajectoryPoint]
         "judge_gate_penalty_reward": config.judge_gate_penalty_reward,
         "judge_gate_backend": config.judge_gate_backend,
         "judge_gate_model": config.judge_gate_model,
+        "judge_gate_fail_open_abort_rate": config.judge_gate_fail_open_abort_rate,
+        "judge_gate_parse_error_abort_rate": config.judge_gate_parse_error_abort_rate,
+        "judge_gate_abort_patience_steps": config.judge_gate_abort_patience_steps,
         "normalization_method": config.normalization_method,
         "normalization_delta_scope": config.normalization_delta_scope,
         "normalization_epsilon": config.normalization_epsilon,
@@ -2595,6 +2674,8 @@ class _StepMetricsAccumulator:
     gate_checked: int = 0
     gate_accept: int = 0
     gate_reject: int = 0
+    gate_policy_reject: int = 0
+    gate_infra_fail: int = 0
     gate_transpile_fail: int = 0
     gate_sstan_reject: int = 0
     gate_fidelity_reject: int = 0
@@ -2653,6 +2734,10 @@ def _accumulate_gate_metrics(
         agg.gate_accept += 1
     elif accepted is False:
         agg.gate_reject += 1
+        if bool(gate_payload.get("infra_failure")):
+            agg.gate_infra_fail += 1
+        else:
+            agg.gate_policy_reject += 1
     if gate_payload.get("transpile_success") is False:
         agg.gate_transpile_fail += 1
 
@@ -2702,6 +2787,8 @@ def _attach_sstan_gate_metrics(metrics: dict[str, Any], agg: _StepMetricsAccumul
     metrics["sstan_gate/accept"] = agg.gate_accept
     metrics["sstan_gate/reject"] = agg.gate_reject
     metrics["sstan_gate/reject_rate"] = agg.gate_reject / max(agg.gate_checked, 1)
+    metrics["sstan_gate/policy_reject_rate"] = agg.gate_policy_reject / max(agg.gate_checked, 1)
+    metrics["sstan_gate/infra_fail_rate"] = agg.gate_infra_fail / max(agg.gate_checked, 1)
     metrics["sstan_gate/transpile_fail_rate"] = agg.gate_transpile_fail / max(agg.gate_checked, 1)
     metrics["sstan_gate/sstan_reject_rate"] = agg.gate_sstan_reject / max(agg.gate_checked, 1)
     metrics["sstan_gate/fidelity_reject_rate"] = agg.gate_fidelity_reject / max(agg.gate_checked, 1)
@@ -2722,6 +2809,7 @@ def _build_wandb_final_summary(
     normalization_payload: dict[str, Any] | None,
     judge_payload: dict[str, Any] | None,
     judge_gate_payload: dict[str, Any] | None,
+    sstan_gate_payload: dict[str, Any] | None,
     heuristic_rates: dict[str, float] | None,
     batch_lh_metrics: dict[str, float] | None = None,
     batch_lh_history: list[dict[str, float]] | None = None,
@@ -2756,9 +2844,19 @@ def _build_wandb_final_summary(
         "paper/lh_other_novel_mean": float("nan"),
         "paper/judge_gate_penalty_rate_final": float("nan"),
         "paper/judge_gate_fail_open_rate_final": float("nan"),
+        "paper/judge_gate_fail_open_breach_streak_final": float("nan"),
         "paper/judge_gate_checked_final": float("nan"),
         "paper/judge_gate_penalized_final": float("nan"),
         "paper/judge_gate_fail_open_final": float("nan"),
+        "paper/judge_gate_parse_error_final": float("nan"),
+        "paper/judge_gate_parse_error_rate_final": float("nan"),
+        "paper/judge_gate_parse_error_breach_streak_final": float("nan"),
+        "paper/sstan_gate_checked_final": float("nan"),
+        "paper/sstan_gate_reject_rate_final": float("nan"),
+        "paper/sstan_gate_policy_reject_rate_final": float("nan"),
+        "paper/sstan_gate_infra_fail_rate_final": float("nan"),
+        "paper/sstan_gate_transpile_fail_rate_final": float("nan"),
+        "paper/sstan_gate_infra_fail_breach_streak_final": float("nan"),
         "paper/norm_check_ok_final": float("nan"),
         "paper/norm_check_failed_final": float("nan"),
         "paper/norm_check_failed_rate_final": float("nan"),
@@ -2773,6 +2871,7 @@ def _build_wandb_final_summary(
     _apply_normalization_payload(summary, normalization_payload, final_step=final_step)
     _apply_judge_payload(summary, judge_payload)
     _apply_judge_gate_payload(summary, judge_gate_payload)
+    _apply_sstan_gate_payload(summary, sstan_gate_payload)
     _apply_heuristic_payload(summary, heuristic_rates)
     _apply_batch_lh_payload(summary, batch_lh_metrics)
     _apply_batch_lh_history(summary, batch_lh_history)
@@ -2840,6 +2939,10 @@ def _apply_judge_gate_payload(summary: dict[str, Any], gate_payload: dict[str, A
     penalty_rate = gate_payload.get("judge_gate/penalty_rate")
     fail_open = gate_payload.get("judge_gate/n_fail_open")
     fail_open_rate = gate_payload.get("judge_gate/fail_open_rate")
+    parse_error = gate_payload.get("judge_gate/n_parse_error")
+    parse_error_rate = gate_payload.get("judge_gate/parse_error_rate")
+    fail_open_breach_streak = gate_payload.get("judge_gate/fail_open_breach_streak")
+    parse_error_breach_streak = gate_payload.get("judge_gate/parse_error_breach_streak")
     if isinstance(checked, int | float):
         summary["paper/judge_gate_checked_final"] = float(checked)
     if isinstance(penalized, int | float):
@@ -2850,6 +2953,148 @@ def _apply_judge_gate_payload(summary: dict[str, Any], gate_payload: dict[str, A
         summary["paper/judge_gate_fail_open_final"] = float(fail_open)
     if isinstance(fail_open_rate, int | float):
         summary["paper/judge_gate_fail_open_rate_final"] = float(fail_open_rate)
+    if isinstance(parse_error, int | float):
+        summary["paper/judge_gate_parse_error_final"] = float(parse_error)
+    if isinstance(parse_error_rate, int | float):
+        summary["paper/judge_gate_parse_error_rate_final"] = float(parse_error_rate)
+    if isinstance(fail_open_breach_streak, int | float):
+        summary["paper/judge_gate_fail_open_breach_streak_final"] = float(fail_open_breach_streak)
+    if isinstance(parse_error_breach_streak, int | float):
+        summary["paper/judge_gate_parse_error_breach_streak_final"] = float(
+            parse_error_breach_streak
+        )
+
+
+def _apply_sstan_gate_payload(summary: dict[str, Any], gate_payload: dict[str, Any] | None) -> None:
+    if not gate_payload:
+        return
+    checked = gate_payload.get("sstan_gate/checked")
+    reject_rate = gate_payload.get("sstan_gate/reject_rate")
+    policy_reject_rate = gate_payload.get("sstan_gate/policy_reject_rate")
+    infra_fail_rate = gate_payload.get("sstan_gate/infra_fail_rate")
+    transpile_fail_rate = gate_payload.get("sstan_gate/transpile_fail_rate")
+    infra_fail_breach_streak = gate_payload.get("sstan_gate/infra_fail_breach_streak")
+    if isinstance(checked, int | float):
+        summary["paper/sstan_gate_checked_final"] = float(checked)
+    if isinstance(reject_rate, int | float):
+        summary["paper/sstan_gate_reject_rate_final"] = float(reject_rate)
+    if isinstance(policy_reject_rate, int | float):
+        summary["paper/sstan_gate_policy_reject_rate_final"] = float(policy_reject_rate)
+    if isinstance(infra_fail_rate, int | float):
+        summary["paper/sstan_gate_infra_fail_rate_final"] = float(infra_fail_rate)
+    if isinstance(transpile_fail_rate, int | float):
+        summary["paper/sstan_gate_transpile_fail_rate_final"] = float(transpile_fail_rate)
+    if isinstance(infra_fail_breach_streak, int | float):
+        summary["paper/sstan_gate_infra_fail_breach_streak_final"] = float(infra_fail_breach_streak)
+
+
+def _enforce_judge_gate_reliability_policy(
+    *,
+    step: int,
+    gate_metrics: dict[str, Any],
+    config: TinkerGRPOConfig,
+    run_state: _RunState,
+) -> None:
+    if config.judge_gate_mode != "enforce":
+        run_state.judge_fail_open_breach_streak = 0
+        run_state.judge_parse_error_breach_streak = 0
+        gate_metrics["judge_gate/fail_open_breach_streak"] = 0
+        gate_metrics["judge_gate/parse_error_breach_streak"] = 0
+        return
+    if config.paper_track != "part_b_mitigation":
+        run_state.judge_fail_open_breach_streak = 0
+        run_state.judge_parse_error_breach_streak = 0
+        gate_metrics["judge_gate/fail_open_breach_streak"] = 0
+        gate_metrics["judge_gate/parse_error_breach_streak"] = 0
+        return
+
+    n_checked = gate_metrics.get("judge_gate/n_checked")
+    if not isinstance(n_checked, int | float) or float(n_checked) <= 0:
+        run_state.judge_fail_open_breach_streak = 0
+        run_state.judge_parse_error_breach_streak = 0
+        gate_metrics["judge_gate/fail_open_breach_streak"] = 0
+        gate_metrics["judge_gate/parse_error_breach_streak"] = 0
+        return
+
+    fail_open_rate = gate_metrics.get("judge_gate/fail_open_rate", 0.0)
+    parse_error_rate = gate_metrics.get("judge_gate/parse_error_rate", 0.0)
+    fail_open_breach = (
+        isinstance(fail_open_rate, int | float)
+        and float(fail_open_rate) > config.judge_gate_fail_open_abort_rate
+    )
+    parse_error_breach = (
+        isinstance(parse_error_rate, int | float)
+        and float(parse_error_rate) > config.judge_gate_parse_error_abort_rate
+    )
+    run_state.judge_fail_open_breach_streak = (
+        run_state.judge_fail_open_breach_streak + 1 if fail_open_breach else 0
+    )
+    run_state.judge_parse_error_breach_streak = (
+        run_state.judge_parse_error_breach_streak + 1 if parse_error_breach else 0
+    )
+    gate_metrics["judge_gate/fail_open_breach_streak"] = run_state.judge_fail_open_breach_streak
+    gate_metrics["judge_gate/parse_error_breach_streak"] = run_state.judge_parse_error_breach_streak
+
+    if (
+        run_state.judge_fail_open_breach_streak >= config.judge_gate_abort_patience_steps
+        or run_state.judge_parse_error_breach_streak >= config.judge_gate_abort_patience_steps
+    ):
+        raise RuntimeError(
+            "judge_gate reliability abort at step "
+            f"{step}: fail_open_rate={float(fail_open_rate):.4f} "
+            f"(threshold={config.judge_gate_fail_open_abort_rate:.4f}, "
+            "streak="
+            f"{run_state.judge_fail_open_breach_streak}/"
+            f"{config.judge_gate_abort_patience_steps}), "
+            f"parse_error_rate={float(parse_error_rate):.4f} "
+            f"(threshold={config.judge_gate_parse_error_abort_rate:.4f}, "
+            "streak="
+            f"{run_state.judge_parse_error_breach_streak}/"
+            f"{config.judge_gate_abort_patience_steps})"
+        )
+
+
+def _enforce_sstan_gate_reliability_policy(
+    *,
+    step: int,
+    sstan_metrics: dict[str, Any],
+    config: TinkerGRPOConfig,
+    run_state: _RunState,
+) -> None:
+    if config.sstan_gate_mode != "enforce":
+        run_state.sstan_infra_fail_breach_streak = 0
+        sstan_metrics["sstan_gate/infra_fail_breach_streak"] = 0
+        return
+    if config.paper_track != "part_b_mitigation":
+        run_state.sstan_infra_fail_breach_streak = 0
+        sstan_metrics["sstan_gate/infra_fail_breach_streak"] = 0
+        return
+
+    checked = sstan_metrics.get("sstan_gate/checked")
+    if not isinstance(checked, int | float) or float(checked) <= 0:
+        run_state.sstan_infra_fail_breach_streak = 0
+        sstan_metrics["sstan_gate/infra_fail_breach_streak"] = 0
+        return
+
+    infra_fail_rate = sstan_metrics.get("sstan_gate/infra_fail_rate", 0.0)
+    breach = (
+        isinstance(infra_fail_rate, int | float)
+        and float(infra_fail_rate) > config.sstan_gate_infra_fail_abort_rate
+    )
+    run_state.sstan_infra_fail_breach_streak = (
+        run_state.sstan_infra_fail_breach_streak + 1 if breach else 0
+    )
+    sstan_metrics["sstan_gate/infra_fail_breach_streak"] = run_state.sstan_infra_fail_breach_streak
+
+    if run_state.sstan_infra_fail_breach_streak >= config.sstan_gate_abort_patience_steps:
+        raise RuntimeError(
+            "sstan_gate reliability abort at step "
+            f"{step}: infra_fail_rate={float(infra_fail_rate):.4f} "
+            f"(threshold={config.sstan_gate_infra_fail_abort_rate:.4f}, "
+            "streak="
+            f"{run_state.sstan_infra_fail_breach_streak}/"
+            f"{config.sstan_gate_abort_patience_steps})"
+        )
 
 
 def _apply_heuristic_payload(

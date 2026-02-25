@@ -1,4 +1,4 @@
-"""Penalty gate for hacking verdicts."""
+"""Judge gate for hacking verdicts."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ class JudgeGateConfig:
     penalty_reward: float = -400.0
     judge_backend: str = "openai"
     judge_model: str = "gpt-5.2"
-    judge_api_key_env: str = "OPENAI_API_KEY"
+    judge_api_key_env: str | None = None
     judge_api_base: str | None = None
     judge_custom_llm_provider: str = ""
     judge_temperature: float = 0.0
@@ -78,6 +78,7 @@ class JudgeGateResult:
     penalty_applied: bool
     penalty_reward: float | None
     timing_ms: float
+    parse_error: bool = False
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -92,6 +93,7 @@ class JudgeGateResult:
             "penalty_applied": self.penalty_applied,
             "penalty_reward": self.penalty_reward,
             "timing_ms": self.timing_ms,
+            "parse_error": self.parse_error,
         }
 
 
@@ -165,6 +167,38 @@ def _verdict_to_result(
     config: JudgeGateConfig,
     timing_ms: float,
 ) -> JudgeGateResult:
+    if verdict.parse_error:
+        if config.mode == "enforce":
+            return JudgeGateResult(
+                mode=config.mode,
+                checked=True,
+                accepted=False,
+                decision="reject_parse_error",
+                verdict=verdict.verdict,
+                confidence=verdict.confidence,
+                tags=list(verdict.tags),
+                reasoning=verdict.rationale,
+                penalty_applied=True,
+                penalty_reward=config.penalty_reward,
+                timing_ms=timing_ms,
+                parse_error=True,
+            )
+        if config.mode == "shadow":
+            return JudgeGateResult(
+                mode=config.mode,
+                checked=True,
+                accepted=True,
+                decision="shadow_parse_error",
+                verdict=verdict.verdict,
+                confidence=verdict.confidence,
+                tags=list(verdict.tags),
+                reasoning=verdict.rationale,
+                penalty_applied=False,
+                penalty_reward=None,
+                timing_ms=timing_ms,
+                parse_error=True,
+            )
+
     should_reject = verdict.is_hacking and verdict.confidence >= config.confidence_threshold
     if config.mode == "enforce" and should_reject:
         return JudgeGateResult(
@@ -179,6 +213,7 @@ def _verdict_to_result(
             penalty_applied=True,
             penalty_reward=config.penalty_reward,
             timing_ms=timing_ms,
+            parse_error=False,
         )
     if config.mode == "shadow" and should_reject:
         return JudgeGateResult(
@@ -193,6 +228,7 @@ def _verdict_to_result(
             penalty_applied=False,
             penalty_reward=None,
             timing_ms=timing_ms,
+            parse_error=False,
         )
     return JudgeGateResult(
         mode=config.mode,
@@ -206,6 +242,7 @@ def _verdict_to_result(
         penalty_applied=False,
         penalty_reward=None,
         timing_ms=timing_ms,
+        parse_error=False,
     )
 
 
@@ -222,6 +259,7 @@ def _fail_open_result(mode: str, error: str, timing_ms: float) -> JudgeGateResul
         penalty_applied=False,
         penalty_reward=None,
         timing_ms=timing_ms,
+        parse_error=False,
     )
 
 
@@ -261,6 +299,11 @@ def run_judge_gate_batch(
         return [_skipped_result("off") for _ in codes]
     if not codes:
         return []
+    if len(codes) != len(rewards):
+        raise ValueError(
+            "run_judge_gate_batch requires codes and rewards with the same length; "
+            f"got len(codes)={len(codes)}, len(rewards)={len(rewards)}"
+        )
 
     judge_cfg = _build_judge_config(config)
     ts = make_timestamp()
@@ -280,10 +323,15 @@ def run_judge_gate_batch(
     t0 = time.perf_counter()
     try:
         verdicts = judge_completions(records, judge_cfg)
+        if len(verdicts) != len(codes):
+            raise RuntimeError(
+                f"judge gate batch returned {len(verdicts)} verdicts for {len(codes)} codes"
+            )
     except Exception as exc:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        per_item_ms = elapsed_ms / max(len(codes), 1)
         log.warning("judge gate fail-open on batch call: %s", exc)
-        return [_fail_open_result(config.mode, str(exc), elapsed_ms) for _ in codes]
+        return [_fail_open_result(config.mode, str(exc), per_item_ms) for _ in codes]
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     per_item_ms = elapsed_ms / max(len(codes), 1)
 

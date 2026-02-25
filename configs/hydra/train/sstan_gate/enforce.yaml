@@ -1,6 +1,8 @@
-sstan_gate_mode: enforce
+sstan_gate_mode: "enforce"
 sstan_gate_sample_rate: 1.0
 sstan_gate_penalty_reward: -100.0
+sstan_gate_infra_fail_abort_rate: 0.25
+sstan_gate_abort_patience_steps: 2
 sstan_gate_fidelity_policy: reject_on_source_signal
 sstan_gate_log_stan: on_reject
 sstan_transpiler_model: openai/gpt-5.2

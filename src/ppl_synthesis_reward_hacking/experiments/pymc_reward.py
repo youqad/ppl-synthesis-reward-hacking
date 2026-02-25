@@ -189,7 +189,7 @@ def make_pymc_reward_fn(
     judge_gate_penalty_reward: float = -400.0,
     judge_gate_backend: str = "openai",
     judge_gate_model: str = "gpt-5.2",
-    judge_gate_api_key_env: str = "OPENAI_API_KEY",
+    judge_gate_api_key_env: str | None = None,
     judge_gate_api_base: str | None = None,
     judge_gate_custom_llm_provider: str = "",
     judge_gate_temperature: float = 0.0,
@@ -311,7 +311,7 @@ def _init_reward_state(
     judge_gate_penalty_reward: float = -400.0,
     judge_gate_backend: str = "openai",
     judge_gate_model: str = "gpt-5.2",
-    judge_gate_api_key_env: str = "OPENAI_API_KEY",
+    judge_gate_api_key_env: str | None = None,
     judge_gate_api_base: str | None = None,
     judge_gate_custom_llm_provider: str = "",
     judge_gate_temperature: float = 0.0,
@@ -391,7 +391,6 @@ def _apply_judge_gate_trl(state: PyMCRewardState, batch: _BatchResult) -> None:
     cfg = state.judge_gate_config
     if cfg.mode == "off":
         return
-    # valid_completion_texts only has entries for outcome="valid".
     valid_idx_map: list[int] = []
     for i, o in enumerate(batch.outcomes):
         if o == "valid":
@@ -587,6 +586,7 @@ def _score_executed_model(
         state.sstan_gate_config.mode == "enforce"
         and gate_result.checked
         and gate_result.accepted is False
+        and not gate_result.infra_failure
     ):
         reported = float(state.sstan_gate_config.penalty_reward)
         gate_result = _with_gate_penalty(gate_result, penalty_reward=reported)
@@ -699,26 +699,7 @@ def _gate_skipped_result(state: PyMCRewardState, *, reason: str) -> SStanGateRes
 
 
 def _with_gate_penalty(result: SStanGateResult, *, penalty_reward: float) -> SStanGateResult:
-    return SStanGateResult(
-        mode=result.mode,
-        checked=result.checked,
-        sampled=result.sampled,
-        accepted=result.accepted,
-        decision=result.decision,
-        reasons=result.reasons,
-        transpile_success=result.transpile_success,
-        transpile_error=result.transpile_error,
-        sstan_reasons=result.sstan_reasons,
-        fidelity_policy=result.fidelity_policy,
-        fidelity_reject=result.fidelity_reject,
-        source_signal=result.source_signal,
-        source_tags=result.source_tags,
-        timing_ms=result.timing_ms,
-        penalty_applied=True,
-        penalty_reward=penalty_reward,
-        stan_path=result.stan_path,
-        stan_hash=result.stan_hash,
-    )
+    return replace(result, penalty_applied=True, penalty_reward=penalty_reward)
 
 
 @dataclass
@@ -938,5 +919,8 @@ def _run_safety_check(pymc_model: Any, counts: dict[str, int]) -> None:
         if not accepted:
             for reason in reasons:
                 counts[reason] = counts.get(reason, 0) + 1
-    except Exception:  # noqa: BLE001 -- best-effort
-        log.debug("safety check failed; skipping", exc_info=True)
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "Safety check failed; gate open for this completion",
+            exc_info=True,
+        )

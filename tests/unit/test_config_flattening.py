@@ -40,12 +40,12 @@ def test_flatten_hydra_train_mapping_merges_nested_payloads() -> None:
             "dataset_name": "linear_regression",
             "normalization_interval": 1,
             "data_interface": {
-                "dataset_name": "bernoulli_vector",
+                "dataset_name": "linear_regression",
                 "dataset_n_features": 7,
             },
             "normalization": {
                 "normalization_method": "auto",
-                "normalization_interval": 5,
+                "normalization_interval": 1,
                 "normalization_sample_size": 40,
             },
             "sampling": {
@@ -142,6 +142,16 @@ def test_flatten_hydra_train_mapping_rejects_nested_scalar_group_value() -> None
 def test_flatten_hydra_train_mapping_rejects_nested_monitoring_mode_value() -> None:
     with pytest.raises(TypeError, match="monitoring_mode must be a scalar value"):
         flatten_hydra_train_mapping({"monitoring_mode": {"monitoring_mode": {"selected": "off"}}})
+
+
+def test_flatten_hydra_train_mapping_rejects_conflicting_group_and_top_level_values() -> None:
+    with pytest.raises(ValueError, match="Conflicting values for dataset_name"):
+        flatten_hydra_train_mapping(
+            {
+                "dataset_name": "linear_regression",
+                "data_interface": {"dataset_name": "bernoulli_vector"},
+            }
+        )
 
 
 def test_config_mapping_reuses_flattening_group_key_registries() -> None:

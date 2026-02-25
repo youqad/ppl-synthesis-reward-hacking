@@ -35,7 +35,7 @@ def _patch_happy_path(monkeypatch) -> None:
     )
 
 
-def test_score_completion_enforce_mode_applies_sstan_penalty(monkeypatch, tmp_path) -> None:
+def test_enforce_mode_applies_sstan_penalty(monkeypatch, tmp_path) -> None:
     _patch_happy_path(monkeypatch)
     monkeypatch.setattr(
         module,
@@ -94,7 +94,45 @@ def test_score_completion_enforce_mode_applies_sstan_penalty(monkeypatch, tmp_pa
     assert gate_meta["penalty_applied"] is True
 
 
-def test_score_completion_shadow_mode_keeps_original_reward(monkeypatch, tmp_path) -> None:
+def test_with_gate_penalty_preserves_cmdsafestan_metadata() -> None:
+    original = SStanGateResult(
+        mode="enforce",
+        checked=True,
+        sampled=True,
+        accepted=False,
+        decision="reject",
+        reasons=["cmdsafestan_reject"],
+        transpile_success=True,
+        transpile_error=None,
+        sstan_reasons=[],
+        fidelity_policy="none",
+        fidelity_reject=False,
+        source_signal=False,
+        source_tags=[],
+        timing_ms={"transpile": 1.0, "check": 1.0, "total": 2.0},
+        penalty_applied=False,
+        penalty_reward=None,
+        stan_path="/tmp/example.stan",
+        stan_hash="abc123",
+        infra_failure=False,
+        cmdsafestan_safe=False,
+        cmdsafestan_violations=["target_update"],
+        cmdsafestan_runtime_reused=True,
+        cmdsafestan_timing_ms={"init": 100.0, "eval": 400.0},
+        cmdsafestan_runtime_params={"jobs": 4},
+    )
+
+    updated = module._with_gate_penalty(original, penalty_reward=-123.0)
+    assert updated.penalty_applied is True
+    assert updated.penalty_reward == -123.0
+    assert updated.cmdsafestan_safe is False
+    assert updated.cmdsafestan_violations == ["target_update"]
+    assert updated.cmdsafestan_runtime_reused is True
+    assert updated.cmdsafestan_timing_ms == {"init": 100.0, "eval": 400.0}
+    assert updated.cmdsafestan_runtime_params == {"jobs": 4}
+
+
+def test_shadow_mode_keeps_original_reward(monkeypatch, tmp_path) -> None:
     _patch_happy_path(monkeypatch)
     monkeypatch.setattr(
         module,
@@ -153,7 +191,68 @@ def test_score_completion_shadow_mode_keeps_original_reward(monkeypatch, tmp_pat
     assert gate_meta["penalty_applied"] is False
 
 
-def test_make_pymc_reward_fn_fails_fast_for_invalid_split() -> None:
+def test_enforce_mode_ignores_infra_failure(monkeypatch, tmp_path) -> None:
+    _patch_happy_path(monkeypatch)
+    monkeypatch.setattr(
+        module,
+        "run_sstan_gate",
+        lambda **kwargs: SStanGateResult(
+            mode="enforce",
+            checked=True,
+            sampled=True,
+            accepted=False,
+            decision="infra_fail",
+            reasons=["transpile_failed"],
+            transpile_success=False,
+            transpile_error="boom",
+            sstan_reasons=[],
+            fidelity_policy="reject_on_source_signal",
+            fidelity_reject=False,
+            source_signal=False,
+            source_tags=[],
+            timing_ms={"transpile": 2.0, "check": 0.0, "total": 2.0},
+            penalty_applied=False,
+            penalty_reward=None,
+            stan_path=None,
+            stan_hash=None,
+            infra_failure=True,
+        ),
+    )
+
+    writer = CompletionWriter(tmp_path / "completions_enforce_infra.jsonl")
+    state = module.PyMCRewardState(
+        backend=object(),
+        dataset=object(),
+        scoring_data={"y": [0, 1], "seed": 3},
+        cache_dir=tmp_path,
+        completion_writer=writer,
+        sstan_gate_config=SStanGateConfig(mode="enforce", penalty_reward=-123.0),
+        sstan_sampling_seed=11,
+    )
+    state.call_count = 1
+    batch = module._BatchResult()
+
+    module._score_completion(
+        state,
+        batch,
+        index=0,
+        prompt="prompt",
+        completion="completion",
+        exec_timeout=10,
+    )
+    module._write_pending_records(state, batch)
+    writer.close()
+
+    assert batch.rewards == [7.5]
+    rows = load_completions(tmp_path / "completions_enforce_infra.jsonl")
+    assert len(rows) == 1
+    gate_meta = rows[0].metadata["sstan_gate"]
+    assert gate_meta["decision"] == "infra_fail"
+    assert gate_meta["infra_failure"] is True
+    assert gate_meta["penalty_applied"] is False
+
+
+def test_make_pymc_reward_fn_rejects_invalid_split() -> None:
     with pytest.raises(ValueError, match="y_holdout"):
         module.make_pymc_reward_fn(
             backend=object(),

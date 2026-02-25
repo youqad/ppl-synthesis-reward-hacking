@@ -65,7 +65,8 @@ def test_run_sstan_gate_rejects_on_transpile_failure(monkeypatch, tmp_path) -> N
 
     assert result.checked is True
     assert result.accepted is False
-    assert result.decision == "reject"
+    assert result.decision == "infra_fail"
+    assert result.infra_failure is True
     assert "transpile_failed" in result.reasons
 
 
@@ -172,7 +173,7 @@ def _make_cmdsafestan_result(*, safe: bool, violations: list[str] | None = None)
 
 
 def test_run_sstan_gate_cmdsafestan_overrides_regex_accept(monkeypatch, tmp_path) -> None:
-    """Regex accepts but cmdsafestan rejects -> final decision is reject."""
+    """Rejects if regex accepts but cmdsafestan rejects."""
     cfg = _base_gate_cfg(
         mode="enforce",
         use_cmdsafestan=True,
@@ -217,7 +218,7 @@ def test_run_sstan_gate_cmdsafestan_overrides_regex_accept(monkeypatch, tmp_path
 
 
 def test_run_sstan_gate_cmdsafestan_accept_propagates(monkeypatch, tmp_path) -> None:
-    """Both regex and cmdsafestan accept -> final decision is accept."""
+    """Accepts when regex and cmdsafestan both accept."""
     cfg = _base_gate_cfg(
         mode="enforce",
         fidelity_policy="none",
@@ -259,7 +260,7 @@ def test_run_sstan_gate_cmdsafestan_accept_propagates(monkeypatch, tmp_path) -> 
 
 
 def test_run_sstan_gate_cmdsafestan_skipped_when_regex_rejects(monkeypatch, tmp_path) -> None:
-    """cmdsafestan should not be called when regex already rejects."""
+    """Skips cmdsafestan when regex already rejects."""
     cfg = _base_gate_cfg(
         mode="enforce",
         use_cmdsafestan=True,
@@ -301,7 +302,7 @@ def test_run_sstan_gate_cmdsafestan_skipped_when_regex_rejects(monkeypatch, tmp_
 
 
 def test_run_sstan_gate_cmdsafestan_timing_recorded(monkeypatch, tmp_path) -> None:
-    """cmdsafestan timing should appear in result timing_ms when invoked."""
+    """Records cmdsafestan timing in result metadata."""
     cfg = _base_gate_cfg(
         mode="enforce",
         fidelity_policy="none",
@@ -383,22 +384,23 @@ def test_run_sstan_gate_cmdsafestan_exception_fails_closed(monkeypatch, tmp_path
     )
 
     assert result.accepted is False
-    assert result.decision == "reject"
+    assert result.decision == "infra_fail"
+    assert result.infra_failure is True
     assert result.cmdsafestan_safe is False
-    assert "cmdsafestan_reject" in result.reasons
+    assert "cmdsafestan_exception" in result.reasons
     assert result.cmdsafestan_violations is not None
     assert "cmdsafestan init failed" in result.cmdsafestan_violations[0]
 
 
 def test_validate_sstan_gate_cfg_cmdsafestan_requires_gate_active(monkeypatch) -> None:
-    """use_cmdsafestan=True with mode=off should fail validation."""
+    """Validation fails if cmdsafestan is enabled while mode is off."""
     cfg = _base_gate_cfg(mode="off", use_cmdsafestan=True, cmdsafestan_data={"y": [1]})
     with pytest.raises(ValueError, match="sstan_gate_mode != off"):
         gate_mod.validate_sstan_gate_cfg(cfg, paper_track="part_a_emergence")
 
 
 def test_validate_sstan_gate_cfg_cmdsafestan_requires_data(monkeypatch) -> None:
-    """use_cmdsafestan=True without cmdsafestan_data should fail validation."""
+    """Validation fails if cmdsafestan is enabled without data."""
     monkeypatch.setenv("TEST_TRANSPILER_KEY", "secret")
     monkeypatch.setattr(gate_mod, "_cmdsafestan_available", lambda: True)
     cfg = _base_gate_cfg(use_cmdsafestan=True, cmdsafestan_data=None)
@@ -430,7 +432,7 @@ def test_validate_sstan_gate_cfg_cmdsafestan_requires_string_protect_list(monkey
 
 
 def test_validate_sstan_gate_cfg_cmdsafestan_requires_installed(monkeypatch) -> None:
-    """use_cmdsafestan=True when cmdsafestan is not installed should fail validation."""
+    """Validation fails if cmdsafestan is enabled but not installed."""
     monkeypatch.setenv("TEST_TRANSPILER_KEY", "secret")
     monkeypatch.setattr(gate_mod, "_cmdsafestan_available", lambda: False)
     cfg = _base_gate_cfg(use_cmdsafestan=True, cmdsafestan_data={"y": [1]})
