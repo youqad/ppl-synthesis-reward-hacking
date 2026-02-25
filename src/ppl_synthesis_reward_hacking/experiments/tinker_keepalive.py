@@ -16,6 +16,7 @@ import logging
 import os
 import signal
 import time
+import urllib.error
 import urllib.request
 from multiprocessing import Process
 from pathlib import Path
@@ -23,6 +24,9 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod"
+
+# log a success entry every N heartbeats to avoid log bloat
+_SUCCESS_LOG_EVERY = 60  # at 5s interval = every 5 min
 
 
 def _post_heartbeat(*, base_url: str, api_key: str, session_id: str, timeout_s: float) -> int:
@@ -58,9 +62,16 @@ def _keepalive_loop(
     """Runs in a child process. Pings heartbeat, writes status to JSONL file."""
     last_ok = time.monotonic()
     consecutive_failures = 0
+    total_beats = 0
+    total_ok = 0
+
+    def _write(entry: dict) -> None:
+        with open(status_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
 
     while True:
         ok = False
+        err_detail = ""
         try:
             status = _post_heartbeat(
                 base_url=base_url,
@@ -69,46 +80,59 @@ def _keepalive_loop(
                 timeout_s=http_timeout_s,
             )
             ok = status == 200
-        except Exception:
-            ok = False
+            if not ok:
+                err_detail = f"http_{status}"
+        except urllib.error.HTTPError as exc:
+            err_detail = f"http_{exc.code}"
+        except urllib.error.URLError as exc:
+            err_detail = f"url_error:{exc.reason}"
+        except TimeoutError:
+            err_detail = "timeout"
+        except Exception as exc:
+            err_detail = f"{type(exc).__name__}:{exc}"
 
+        total_beats += 1
         now = time.monotonic()
+
         if ok:
             last_ok = now
             consecutive_failures = 0
+            total_ok += 1
+            if total_beats % _SUCCESS_LOG_EVERY == 0:
+                _write(
+                    {
+                        "ts": time.time(),
+                        "status": "ok",
+                        "total_beats": total_beats,
+                        "total_ok": total_ok,
+                    }
+                )
         else:
             consecutive_failures += 1
             dt = now - last_ok
 
-            if dt > warn_after_s:
-                with open(status_path, "a") as f:
-                    f.write(
-                        json.dumps(
-                            {
-                                "ts": time.time(),
-                                "status": "warn",
-                                "dt_since_ok_s": round(dt, 1),
-                                "consecutive_failures": consecutive_failures,
-                            }
-                        )
-                        + "\n"
-                    )
+            # log every failure so we can diagnose
+            _write(
+                {
+                    "ts": time.time(),
+                    "status": "warn" if dt > warn_after_s else "fail",
+                    "dt_since_ok_s": round(dt, 1),
+                    "consecutive_failures": consecutive_failures,
+                    "error": err_detail,
+                    "total_beats": total_beats,
+                }
+            )
 
             if dt > dead_after_s:
-                with open(status_path, "a") as f:
-                    f.write(
-                        json.dumps(
-                            {
-                                "ts": time.time(),
-                                "status": "dead",
-                                "dt_since_ok_s": round(dt, 1),
-                                "consecutive_failures": consecutive_failures,
-                            }
-                        )
-                        + "\n"
-                    )
-                # signal parent to abort rather than waste hours scoring
-                # for a dead session
+                _write(
+                    {
+                        "ts": time.time(),
+                        "status": "dead",
+                        "dt_since_ok_s": round(dt, 1),
+                        "consecutive_failures": consecutive_failures,
+                        "error": err_detail,
+                    }
+                )
                 try:
                     os.kill(os.getppid(), signal.SIGUSR1)
                 except (ProcessLookupError, OSError):
@@ -150,10 +174,14 @@ def start_keepalive(
     *,
     interval_s: float = 5.0,
     http_timeout_s: float = 10.0,
-    warn_after_s: float = 60.0,
-    dead_after_s: float = 150.0,
+    warn_after_s: float = 30.0,
+    dead_after_s: float = 60.0,
 ) -> Process:
-    """Spawn a keepalive process for the Tinker session. Caller must .terminate() on exit."""
+    """Spawn a keepalive process for the Tinker session. Caller must .terminate() on exit.
+
+    dead_after_s MUST be less than the training-update timeout (120s) so the
+    keepalive can signal SIGUSR1 before the training path raises TinkerSessionDead.
+    """
     api_key = os.environ.get("TINKER_API_KEY", "")
     if not api_key:
         raise RuntimeError("TINKER_API_KEY not set; cannot start keepalive")
@@ -162,10 +190,23 @@ def start_keepalive(
     session_id = _resolve_session_id(service_client)
     status_path = str(Path(output_dir) / "tinker_keepalive.jsonl")
 
+    # verify heartbeat works before spawning long-lived process
+    try:
+        probe_status = _post_heartbeat(
+            base_url=base_url,
+            api_key=api_key,
+            session_id=session_id,
+            timeout_s=http_timeout_s,
+        )
+        log.info("Keepalive probe: session %s, HTTP %d", session_id, probe_status)
+    except Exception as exc:
+        log.warning("Keepalive probe failed (will start anyway): %s", exc)
+
     log.info(
-        "Starting out-of-band keepalive for session %s (interval=%.0fs, dead_after=%.0fs)",
+        "Starting out-of-band keepalive for session %s (interval=%.0fs, warn=%.0fs, dead=%.0fs)",
         session_id,
         interval_s,
+        warn_after_s,
         dead_after_s,
     )
 

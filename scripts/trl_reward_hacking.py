@@ -186,6 +186,10 @@ def _validate_mode_and_prompt_config(cfg: TRLRewardHackingConfig) -> None:
         raise ValueError(f"prompt_policy must be one of {sorted(_PROMPT_POLICIES)}")
     if cfg.prompt_jsonl_max_examples <= 0:
         raise ValueError("prompt_jsonl_max_examples must be positive")
+    if cfg.n_prompts <= 0:
+        raise ValueError("n_prompts must be positive")
+    if cfg.num_generations < 2:
+        raise ValueError("num_generations must be >= 2")
 
 
 def parse_args() -> argparse.Namespace:
@@ -381,11 +385,19 @@ def _build_training_args(
     output_dir: Path,
     model_init_kwargs: dict[str, Any] | None,
 ) -> TRLGRPOConfig:
+    # Each paper step = one reward call + one optimizer update on
+    # n_prompts × num_generations completions.
+    # per_device_train_batch_size=num_generations (one prompt's completions).
+    # gradient_accumulation_steps=n_prompts (accumulate over all prompts).
+    # This makes steps_per_generation=n_prompts=gradient_accumulation_steps, so TRL regenerates
+    # exactly once per optimizer update (generate_every = n_prompts gradient steps = 1 accum round).
+    programs_per_step = config.n_prompts * config.num_generations
     return TRLGRPOConfig(
         output_dir=str(output_dir),
         max_steps=config.n_steps,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=config.rollouts_per_prompt,
+        per_device_train_batch_size=config.num_generations,
+        generation_batch_size=programs_per_step,
+        gradient_accumulation_steps=config.n_prompts,
         learning_rate=config.lr,
         num_generations=config.num_generations,
         max_completion_length=config.max_completion_length,
@@ -410,10 +422,11 @@ def _log_training_setup(
 ) -> None:
     log.info("Model: %s", config.model)
     log.info(
-        "Steps: %d, Prompts: %d, Generations/prompt: %d",
+        "Steps: %d, Prompts/step: %d, Generations/prompt: %d, Programs/step: %d",
         config.n_steps,
         n_prompts,
         config.num_generations,
+        n_prompts * config.num_generations,
     )
     log.info(
         "LoRA rank=%d, alpha=%d, dropout=%.2f, targets=attn+mlp",

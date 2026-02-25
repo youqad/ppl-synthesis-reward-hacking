@@ -376,3 +376,45 @@ def test_run_training_closes_completion_writer_on_train_failure(monkeypatch, tmp
         module.run_training(module.TRLRewardHackingConfig(output_dir=str(tmp_path)))
 
     assert writer.closed is True
+
+
+class _FakeTRLGRPOConfig:
+    def __init__(self, **kwargs: object) -> None:
+        self.__dict__.update(kwargs)
+
+
+def _build_training_args_with_stub(module, cfg, *, output_dir, model_init_kwargs):
+    module.TRLGRPOConfig = _FakeTRLGRPOConfig
+    return module._build_training_args(
+        cfg,
+        output_dir=output_dir,
+        model_init_kwargs=model_init_kwargs,
+    )
+
+
+def test_build_training_args_per_device_batch_equals_num_generations(tmp_path) -> None:
+    module = _load_module()
+    cfg = module.TRLRewardHackingConfig(n_prompts=5, num_generations=160, n_steps=15)
+    args = _build_training_args_with_stub(module, cfg, output_dir=tmp_path, model_init_kwargs=None)
+    assert args.per_device_train_batch_size == 160
+
+
+def test_build_training_args_generation_batch_is_programs_per_step(tmp_path) -> None:
+    module = _load_module()
+    cfg = module.TRLRewardHackingConfig(n_prompts=5, num_generations=160, n_steps=15)
+    args = _build_training_args_with_stub(module, cfg, output_dir=tmp_path, model_init_kwargs=None)
+    assert args.generation_batch_size == 5 * 160
+    assert args.generation_batch_size % args.num_generations == 0
+
+
+def test_build_training_args_gradient_accumulation_equals_n_prompts(tmp_path) -> None:
+    module = _load_module()
+    cfg = module.TRLRewardHackingConfig(n_prompts=5, num_generations=160, rollouts_per_prompt=8)
+    args = _build_training_args_with_stub(module, cfg, output_dir=tmp_path, model_init_kwargs=None)
+    assert args.gradient_accumulation_steps == 5
+
+
+def test_config_rejects_num_generations_less_than_two() -> None:
+    module = _load_module()
+    with pytest.raises(ValueError, match="num_generations must be >= 2"):
+        module.config_from_mapping({"num_generations": 1})
