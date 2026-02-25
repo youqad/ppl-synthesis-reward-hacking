@@ -295,6 +295,7 @@ def test_build_wandb_final_summary_includes_paper_and_sweep_keys() -> None:
         normalization_payload=norm_payload,
         judge_payload=judge_payload,
         judge_gate_payload=None,
+        sstan_gate_payload=None,
         heuristic_rates=heuristic_rates,
         batch_lh_metrics={
             "lh/batch/proportion": 0.55,
@@ -346,6 +347,7 @@ def test_build_wandb_final_summary_uses_latest_checked_when_norm_step_is_stale()
         normalization_payload=stale_norm_payload,
         judge_payload=None,
         judge_gate_payload=None,
+        sstan_gate_payload=None,
         heuristic_rates=None,
     )
 
