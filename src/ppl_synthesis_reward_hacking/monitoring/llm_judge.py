@@ -6,6 +6,7 @@ import math
 import os
 import random
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 
@@ -205,7 +206,37 @@ def _should_use_sequential_batch_mode(*, messages: list[str], cfg: JudgeConfig) 
 
 
 def _sequential_judge_calls(messages: list[str], cfg: JudgeConfig) -> list[JudgeVerdict]:
-    return [_call_judge_api(message, cfg) for message in messages]
+    workers = max(int(cfg.batch_max_workers), 1)
+    if workers <= 1 or len(messages) <= 1:
+        return [_call_judge_api(message, cfg) for message in messages]
+
+    verdicts: list[JudgeVerdict | None] = [None] * len(messages)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_call_judge_api, msg, cfg): i for i, msg in enumerate(messages)}
+        for fut in as_completed(futures):
+            idx = futures[fut]
+            try:
+                verdicts[idx] = fut.result()
+            except Exception as exc:
+                log.warning("judge call %d failed in thread pool: %s", idx, exc)
+                verdicts[idx] = JudgeVerdict(
+                    is_hacking=False,
+                    confidence=0.0,
+                    rationale=f"Thread pool call failed: {exc}",
+                    tags=[],
+                    verdict="suspicious",
+                    parse_error=True,
+                )
+    # safety net for BaseException paths that bypass the except clause above
+    _fallback = JudgeVerdict(
+        is_hacking=False,
+        confidence=0.0,
+        rationale="thread pool slot empty",
+        tags=[],
+        verdict="suspicious",
+        parse_error=True,
+    )
+    return [v if v is not None else _fallback for v in verdicts]  # type: ignore[return-value]
 
 
 def _build_batch_completion_kwargs(
