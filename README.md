@@ -17,29 +17,38 @@ pixi install
 cp .env.example .env
 ```
 
-Set `TINKER_API_KEY` in `.env` for API-based training. Leave `.env` otherwise unchanged for the smoke test and local TRL training.
+Fill in `.env` (see `.env.example` for all keys). Only `TINKER_API_KEY` is needed for basic Tinker training. Judge monitoring additionally needs an LLM key (`OPENAI_API_KEY` by default); the SStan transpiler needs `ZHIPUAI_API_KEY`. W&B keys are needed for sweep-based runs.
 
-Verify:
+Source it before any API-dependent command:
+
+```bash
+set -a && source .env && set +a
+```
+
+Verify the environment:
 
 ```bash
 pixi run -e dev pytest tests/ -x
 ```
 
-## Which entry point?
+## Entry points
 
-| Your goal | You need | Entry point | Guide |
-|---|---|---|---|
-| Sanity-check detection pipeline (no training) | PyMC installed | `pixi run -e dev pytest tests/integration/test_e2e_exploit_pipeline.py -v` | [quickstart](docs/quickstart.md) |
-| Smoke test the full environment | Nothing extra | `pixi run -e dev pytest tests/ -x` | [quickstart](docs/quickstart.md) |
-| Simplest training run (no GPU) | Tinker API key | `scripts/tinker_pymc_grpo.py` | [quickstart](docs/quickstart.md) |
-| Training via Hydra configs | Tinker API key | `scripts/hydra_train_tinker.py` | [configuration](docs/configuration.md) |
-| Training on local GPU | CUDA + TRL deps | `scripts/hydra_train_trl.py` or `scripts/trl_reward_hacking.py` | [quickstart](docs/quickstart.md) |
-| Stan reward training (SafeStan checker + plain-score reward) | cmdsafestan submodule + TRL deps | `scripts/trl_reward_hacking_stan.py` | [SafeStan guide](docs/safestan-guide.md) |
-| Test SafeStan on exemplars | LLM API key | `scripts/eval_sstan_exemplars.py` | [SafeStan guide](docs/safestan-guide.md) |
-| Evaluate SafeStan on labeled suite | LLM API key | `scripts/evaluate_safestan_mitigation.py` | [SafeStan guide](docs/safestan-guide.md) |
-| Train with SafeStan mitigation | SafeStan prereqs | Same training entry + `train/sstan_gate=enforce` | [SafeStan guide](docs/safestan-guide.md) |
-| Offline normalization check | PyMC installed | `scripts/eval_normalization.py` | [scoring](docs/scoring.md) |
-| Heuristic exploit taxonomy | PyMC installed | `scripts/eval_taxonomy.py` | [scoring](docs/scoring.md) |
+| Entry point | Keys needed | Notes |
+|---|---|---|
+| `scripts/smoke_test_exploit.py` | none | detection pipeline on hardcoded programs, ~2 min |
+| `pixi run -e dev pytest tests/ -x` | none | full test suite |
+| `scripts/eval_normalization.py` | none | offline normalization check on existing runs |
+| `scripts/eval_taxonomy.py` | none | heuristic exploit taxonomy on existing runs |
+| `scripts/eval_safety_gate.py` | none | SafePyMC gate evaluation |
+| `scripts/hydra_train_tinker.py` | `TINKER_API_KEY` | Tinker API training (no GPU); add `train/monitoring_mode=judge_evolving` for LLM judge, `train/sstan_gate=enforce` for SStan gate, `train/judge_gate=enforce` for judge gate |
+| `scripts/create_wandb_sweep.py` | + `WANDB_API_KEY` | create sweep, then run agents with `wandb agent` |
+| `scripts/hydra_train_trl.py` | GPU (40+ GB VRAM) | local TRL GRPO training |
+| `scripts/trl_reward_hacking_stan.py` | GPU + cmdsafestan | TRL with SafeStan checker |
+| `scripts/eval_sstan_exemplars.py` | `ZHIPUAI_API_KEY` | SafeStan on exemplars; see [SafeStan guide](docs/safestan-guide.md) |
+| `scripts/evaluate_safestan_mitigation.py` | `ZHIPUAI_API_KEY` | SafeStan labeled suite |
+| `scripts/evaluate_transpiler_fidelity.py` | `ZHIPUAI_API_KEY` | transpiler fidelity audit |
+
+Judge monitoring and judge gate use `OPENAI_API_KEY` by default. SStan gate and SafeStan evaluation use `ZHIPUAI_API_KEY` for the PyMC-to-Stan transpiler.
 
 ## Documentation
 
@@ -114,24 +123,27 @@ Beyond the structural checker (`check_pymc_model`), the sweep applies two integr
 
 All flagged programs are documented in [docs/base_rate_exploits.md](docs/base_rate_exploits.md).
 
-## Entrypoints
+## All scripts
 
-**Training:**
-- `scripts/tinker_pymc_grpo.py` -- standalone Tinker GRPO
-- `scripts/hydra_train_tinker.py` -- Hydra-configured Tinker training
-- `scripts/hydra_train_trl.py` -- Hydra-configured TRL training
-- `scripts/trl_reward_hacking.py` -- standalone TRL training
-- `scripts/trl_reward_hacking_stan.py` -- TRL Stan training via cmdsafestan (checker metrics + checkpoints)
-
-**Evaluation:**
-- `scripts/eval_normalization.py` -- offline normalization check
-- `scripts/eval_safety_gate.py` -- SafePyMC gate evaluation
-- `scripts/eval_taxonomy.py` -- heuristic exploit taxonomy
-- `scripts/eval_sstan_exemplars.py` -- SafeStan exemplar evaluation
-- `scripts/evaluate_safestan_mitigation.py` -- SafeStan labeled suite
-- `scripts/evaluate_transpiler_fidelity.py` -- strict transpiler fidelity audit
-- `scripts/smoke_test_exploit.py` -- detection pipeline smoke test
-
-**Utilities:**
-- `scripts/create_wandb_sweep.py` -- create W&B sweep from YAML
-- `scripts/sweep_base_rate.py` -- base-rate exploit sweep
+```
+scripts/
+├── hydra_train_tinker.py       # Tinker API training (Hydra)
+├── hydra_train_trl.py          # TRL training (Hydra)
+├── trl_reward_hacking.py       # TRL training (standalone)
+├── trl_reward_hacking_stan.py  # TRL with SafeStan checker
+├── tinker_pymc_grpo.py         # Tinker training (standalone, no Hydra)
+├── eval_normalization.py       # offline normalization check
+├── eval_safety_gate.py         # SafePyMC gate
+├── eval_taxonomy.py            # heuristic exploit taxonomy
+├── eval_sstan_exemplars.py     # SafeStan exemplar evaluation
+├── evaluate_safestan_mitigation.py
+├── evaluate_transpiler_fidelity.py
+├── smoke_test_exploit.py       # detection pipeline smoke test
+├── create_wandb_sweep.py       # W&B sweep creation
+├── sweep_base_rate.py          # base-rate exploit sweep
+├── analyze_hacking.py          # post-hoc hacking analysis
+├── report_run_progress.py      # check active run status
+├── generate_paper_figures.py
+├── prepare_local_figures.py
+└── make_paper_artifacts.py
+```
