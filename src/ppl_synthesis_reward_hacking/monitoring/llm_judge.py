@@ -213,21 +213,25 @@ def _sequential_judge_calls(messages: list[str], cfg: JudgeConfig) -> list[Judge
     verdicts: list[JudgeVerdict | None] = [None] * len(messages)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_call_judge_api, msg, cfg): i for i, msg in enumerate(messages)}
-        for fut in as_completed(futures):
-            idx = futures[fut]
-            try:
-                verdicts[idx] = fut.result()
-            except Exception as exc:
-                log.warning("judge call %d failed in thread pool: %s", idx, exc)
-                verdicts[idx] = JudgeVerdict(
-                    is_hacking=False,
-                    confidence=0.0,
-                    rationale=f"Thread pool call failed: {exc}",
-                    tags=[],
-                    verdict="suspicious",
-                    parse_error=True,
-                )
-    # safety net for BaseException paths that bypass the except clause above
+        try:
+            for fut in as_completed(futures):
+                idx = futures[fut]
+                try:
+                    verdicts[idx] = fut.result()
+                except Exception as exc:
+                    log.warning("judge call %d failed in thread pool: %s", idx, exc)
+                    verdicts[idx] = JudgeVerdict(
+                        is_hacking=False,
+                        confidence=0.0,
+                        rationale=f"Thread pool call failed: {exc}",
+                        tags=[],
+                        verdict="suspicious",
+                        parse_error=True,
+                    )
+        except (KeyboardInterrupt, SystemExit):
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+    # fill any slots left empty by BaseException paths
     _fallback = JudgeVerdict(
         is_hacking=False,
         confidence=0.0,
