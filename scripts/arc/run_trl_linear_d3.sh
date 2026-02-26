@@ -31,6 +31,7 @@ export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 
 mkdir -p "$HF_HOME" "$WANDB_DIR"
 
@@ -59,6 +60,7 @@ python scripts/trl_reward_hacking.py \
     --dataset-n-features 3 \
     --dataset-n-train 20 \
     --n-steps 100 \
+    --n-prompts 5 \
     --scoring-seed-base "$SEED" \
     --num-generations 8 \
     --temperature 1.2 \
@@ -68,6 +70,7 @@ python scripts/trl_reward_hacking.py \
     --kl-beta 0.001 \
     --max-grad-norm 1.0 \
     --lora-rank 32 \
+    --max-completion-length 512 \
     --normalization-interval 5 \
     --normalization-sample-size 10 \
     --output-dir "$OUTPUT_DIR"

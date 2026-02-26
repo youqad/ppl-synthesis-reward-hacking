@@ -70,6 +70,7 @@ python scripts/trl_reward_hacking.py \
     --kl-beta 0.001 \
     --max-grad-norm 1.0 \
     --lora-rank 32 \
+    --max-completion-length 512 \
     --normalization-interval 1 \
     --normalization-sample-size 10 \
     --output-dir "$OUTPUT_DIR"
