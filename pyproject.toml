@@ -64,6 +64,7 @@ runpod = [
     "accelerate>=1.0.0,<2.0",
     "datasets>=4.0.0,<5.0",
     "pymc>=5.0.0,<6.0",
+    "wandb>=0.19.0",
 ]
 runpod-launcher = [
     "runpod>=1.7.0",
