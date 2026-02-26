@@ -8,7 +8,7 @@
 #SBATCH --output=/data/coml-prog-synthesis/youdar/ppl-synthesis-reward-hacking/trl_bern_d3_%j.out
 #SBATCH --error=/data/coml-prog-synthesis/youdar/ppl-synthesis-reward-hacking/trl_bern_d3_%j.err
 
-# TRL GRPO backup run: Bernoulli d=3, n_train=1 (matches Contabo Tinker baseline).
+# TRL GRPO backup run: Bernoulli d=3, n_train=5.
 # Submit: sbatch scripts/arc/run_trl_bernoulli_d3.sh
 
 USER_DIR=/data/coml-prog-synthesis/youdar
@@ -57,7 +57,7 @@ python scripts/trl_reward_hacking.py \
     --model Qwen/Qwen3-4B-Instruct-2507 \
     --dataset-name bernoulli_vector \
     --dataset-n-features 3 \
-    --dataset-n-train 1 \
+    --dataset-n-train 5 \
     --n-steps 100 \
     --scoring-seed-base "$SEED" \
     --num-generations 8 \
