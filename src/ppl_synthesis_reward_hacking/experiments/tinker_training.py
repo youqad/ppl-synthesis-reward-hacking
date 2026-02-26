@@ -858,6 +858,11 @@ def _run_training_step(
     run_state: _RunState,
 ) -> None:
     sampling_client = training_client.save_weights_and_get_sampling_client(name=f"step_{step}")
+    # persist a downloadable checkpoint that survives session death
+    try:
+        training_client.save_weights_for_sampler(name=f"step_{step}")
+    except Exception as exc:
+        log.warning("Failed to persist checkpoint for step %d: %s", step, exc)
     normalize_indices = _get_normalization_indices(step, config)
     step_data = _collect_step_data(
         config=config,
