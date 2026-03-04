@@ -4,7 +4,7 @@ experiment:
 
 # CRITICAL: reward hacking must emerge naturally from optimization pressure
 # the model trains on reported_reward ONLY
-# oracle_score is measured but NEVER enters training
+# ground_truth_loglik is measured but NEVER enters training
 
 model:
   base_model: "meta-llama/Llama-3.2-1B"
