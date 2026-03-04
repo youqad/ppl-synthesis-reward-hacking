@@ -57,32 +57,7 @@ SEEDS = [
 SEEDS_FULL = SEEDS[:2]
 
 
-def _setup_style() -> None:
-    plt.rcParams.update(
-        {
-            "text.usetex": True,
-            "font.family": "serif",
-            "font.serif": ["Times New Roman", "Times", "Liberation Serif"],
-            "font.size": 9,
-            "axes.labelsize": 10,
-            "axes.titlesize": 10,
-            "xtick.labelsize": 8.5,
-            "ytick.labelsize": 8.5,
-            "legend.fontsize": 8,
-            "legend.framealpha": 0.0,
-            "legend.edgecolor": "none",
-            "legend.fancybox": False,
-            "lines.linewidth": 2.2,
-            "axes.linewidth": 0.8,
-            "axes.grid": False,
-            "axes.spines.top": False,
-            "axes.spines.right": False,
-            "figure.dpi": 150,
-            "savefig.dpi": 600,
-            "savefig.bbox": "tight",
-            "savefig.pad_inches": 0.04,
-        }
-    )
+from figure_style import setup_paper_style
 
 
 def wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float, float, float]:
@@ -917,7 +892,7 @@ def main() -> None:
     else:
         print(f"  warning: gate data not found at {GATE_DATA}")
 
-    _setup_style()
+    setup_paper_style(line_width=2.2)
 
     fig1_emergence_3panel(data, out_dir)
     fig2_cross_evidence(data, gate_data, out_dir)

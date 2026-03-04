@@ -29,12 +29,12 @@ def test_get_backend_name_attribute_matches(backend_name):
 
 
 def test_get_backend_unknown_raises_key_error():
-    with pytest.raises(KeyError, match="Unknown backend"):
+    with pytest.raises(KeyError, match="unknown backend"):
         get_backend("nonexistent_backend")
 
 
 def test_get_backend_empty_string_raises_key_error():
-    with pytest.raises(KeyError, match="Unknown backend"):
+    with pytest.raises(KeyError, match="unknown backend"):
         get_backend("")
 
 
