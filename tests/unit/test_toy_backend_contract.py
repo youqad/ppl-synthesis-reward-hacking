@@ -3,7 +3,7 @@
 These tests verify the mathematical properties that make reward hacking possible:
 
     reported_reward = Σ log Z_p(x)           # hackable: ignores normalization
-    oracle_score    = Σ log Z_p(x) - n * log M   # unhackable: exact normalization
+    ground_truth_loglik    = Σ log Z_p(x) - n * log M   # unhackable: exact normalization
     log_mass        = (d - |obs|) * log(2) + score_bonus   # impropriety diagnostic
 
 Key invariant: gap == n_holdout * log_mass
@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ppl_synthesis_reward_hacking.backends.protocol import ModelSpec, ScoreResult
+from ppl_synthesis_reward_hacking.backends.protocol import BackendScoreResult, ModelSpec
 from ppl_synthesis_reward_hacking.backends.toy import ToyBackend, ToyProgram
 from ppl_synthesis_reward_hacking.data.schema import Dataset
 
@@ -53,7 +53,7 @@ def dataset_8d() -> Dataset:
 
 def compile_and_score(
     backend: ToyBackend, program: ToyProgram, dataset: Dataset, d: int
-) -> ScoreResult:
+) -> BackendScoreResult:
     """Helper to compile, fit, and score a program."""
     model = ModelSpec(
         backend="toy",
@@ -77,11 +77,12 @@ class TestToyBackendContract:
         assert program.score_bonus == 0.0
 
         score = compile_and_score(backend, program, dataset_8d, d)
-        gap = score.reported_reward - score.oracle_score
+        gap = score.reported_reward - score.diagnostics["ground_truth_loglik"]
 
+        oracle = score.diagnostics["ground_truth_loglik"]
         assert abs(gap) < 1e-6, (
             f"Honest program should have ~0 gap, got {gap:.6f}. "
-            f"reported={score.reported_reward:.2f}, oracle={score.oracle_score:.2f}"
+            f"reported={score.reported_reward:.2f}, oracle={oracle:.2f}"
         )
 
     def test_improper_program_has_positive_gap(self, backend: ToyBackend, dataset_8d: Dataset):
@@ -91,11 +92,12 @@ class TestToyBackendContract:
         assert program.observed_count == 1  # only observing 1 of 8
 
         score = compile_and_score(backend, program, dataset_8d, d)
-        gap = score.reported_reward - score.oracle_score
+        gap = score.reported_reward - score.diagnostics["ground_truth_loglik"]
 
-        assert score.reported_reward > score.oracle_score, (
+        oracle = score.diagnostics["ground_truth_loglik"]
+        assert score.reported_reward > oracle, (
             f"Improper program should have reported > oracle. "
-            f"reported={score.reported_reward:.2f}, oracle={score.oracle_score:.2f}"
+            f"reported={score.reported_reward:.2f}, oracle={oracle:.2f}"
         )
         assert gap > 0, f"Gap should be positive, got {gap:.2f}"
         assert score.diagnostics["log_mass"] > 0, (
@@ -115,9 +117,9 @@ class TestToyBackendContract:
         score1 = compile_and_score(backend, prog1, dataset_8d, d)
         score2 = compile_and_score(backend, prog2, dataset_8d, d)
 
-        gap0 = score0.reported_reward - score0.oracle_score
-        gap1 = score1.reported_reward - score1.oracle_score
-        gap2 = score2.reported_reward - score2.oracle_score
+        gap0 = score0.reported_reward - score0.diagnostics["ground_truth_loglik"]
+        gap1 = score1.reported_reward - score1.diagnostics["ground_truth_loglik"]
+        gap2 = score2.reported_reward - score2.diagnostics["ground_truth_loglik"]
 
         assert gap1 > gap0, f"Higher bonus should increase gap: {gap0:.2f} → {gap1:.2f}"
         assert gap2 > gap1, f"Higher bonus should increase gap: {gap1:.2f} → {gap2:.2f}"
@@ -140,13 +142,14 @@ class TestToyBackendContract:
         score2 = compile_and_score(backend, prog2, dataset_8d, d)
 
         # oracle should be identical for same observed_idx
-        assert abs(score0.oracle_score - score1.oracle_score) < 1e-6, (
-            f"Oracle should be independent of score_bonus. "
-            f"bonus=0: {score0.oracle_score:.4f}, bonus=5: {score1.oracle_score:.4f}"
+        o0 = score0.diagnostics["ground_truth_loglik"]
+        o1 = score1.diagnostics["ground_truth_loglik"]
+        o2 = score2.diagnostics["ground_truth_loglik"]
+        assert abs(o0 - o1) < 1e-6, (
+            f"Oracle should be independent of score_bonus. bonus=0: {o0:.4f}, bonus=5: {o1:.4f}"
         )
-        assert abs(score1.oracle_score - score2.oracle_score) < 1e-6, (
-            f"Oracle should be independent of score_bonus. "
-            f"bonus=5: {score1.oracle_score:.4f}, bonus=20: {score2.oracle_score:.4f}"
+        assert abs(o1 - o2) < 1e-6, (
+            f"Oracle should be independent of score_bonus. bonus=5: {o1:.4f}, bonus=20: {o2:.4f}"
         )
 
         # reported should increase with bonus
@@ -198,7 +201,7 @@ class TestToyBackendContract:
 
         for program in test_programs:
             score = compile_and_score(backend, program, dataset_8d, d)
-            gap = score.reported_reward - score.oracle_score
+            gap = score.reported_reward - score.diagnostics["ground_truth_loglik"]
             log_mass = score.diagnostics["log_mass"]
             expected_gap = n_holdout * log_mass
 
@@ -217,7 +220,7 @@ class TestToyBackendContract:
         for n_obs in range(d, -1, -1):
             program = ToyProgram(observed_idx=tuple(range(n_obs)), score_bonus=0.0)
             score = compile_and_score(backend, program, dataset_8d, d)
-            gap = score.reported_reward - score.oracle_score
+            gap = score.reported_reward - score.diagnostics["ground_truth_loglik"]
             gaps.append(gap)
 
         # gaps should be monotonically increasing as observed count decreases
@@ -283,8 +286,10 @@ class TestEdgeCases:
         # reported_reward matches (same filtered indices)
         assert abs(score.reported_reward - score_filtered.reported_reward) < 1e-6
 
-        # oracle_score matches (consistent log_mass)
-        assert abs(score.oracle_score - score_filtered.oracle_score) < 1e-6
+        # ground_truth_loglik matches (consistent log_mass)
+        gt = score.diagnostics["ground_truth_loglik"]
+        gt_f = score_filtered.diagnostics["ground_truth_loglik"]
+        assert abs(gt - gt_f) < 1e-6
 
         # log_mass matches (filtered count used)
         assert abs(score.diagnostics["log_mass"] - score_filtered.diagnostics["log_mass"]) < 1e-6
@@ -294,7 +299,7 @@ class TestEdgeCases:
 
         # key invariant preserved: gap == n_holdout * log_mass
         n_holdout = dataset_8d.holdout["y"].shape[0]
-        gap = score.reported_reward - score.oracle_score
+        gap = score.reported_reward - score.diagnostics["ground_truth_loglik"]
         expected_gap = n_holdout * score.diagnostics["log_mass"]
         assert abs(gap - expected_gap) < 1e-6, (
             f"Invariant broken: gap={gap:.4f}, expected={expected_gap:.4f}"
@@ -326,7 +331,7 @@ class TestDiagnostics:
     """Verify diagnostics are correctly reported."""
 
     def test_diagnostics_contain_required_fields(self, backend: ToyBackend, dataset_8d: Dataset):
-        """ScoreResult.diagnostics should have all required fields."""
+        """BackendScoreResult.diagnostics should have all required fields."""
         d = 8
         program = ToyProgram(observed_idx=(0, 1, 2), score_bonus=2.5)
 

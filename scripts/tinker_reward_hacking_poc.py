@@ -60,13 +60,13 @@ def compute_rewards(
     from ppl_synthesis_reward_hacking.backends.protocol import ModelSpec
 
     reported_rewards = []
-    oracle_scores = []
+    ground_truth_logliks = []
     log_masses = []
 
     for prog in programs:
         if prog is None:
             reported_rewards.append(-1e6)
-            oracle_scores.append(-1e6)
+            ground_truth_logliks.append(-1e6)
             log_masses.append(0.0)
             continue
 
@@ -82,19 +82,19 @@ def compute_rewards(
 
         reported_reward = backend.score_train(compiled, fit=fit, dataset=dataset, seed=42)
         holdout_score = backend.score_holdout(compiled, fit=fit, dataset=dataset, seed=42)
-        oracle_score = holdout_score.oracle_score
+        ground_truth_loglik = holdout_score.diagnostics.get("ground_truth_loglik")
 
-        if oracle_score is None or not math.isfinite(oracle_score):
+        if ground_truth_loglik is None or not math.isfinite(ground_truth_loglik):
             raise ValueError(
-                f"oracle_score is invalid ({oracle_score}) for a valid program. "
+                f"ground_truth_loglik is invalid ({ground_truth_loglik}) for a valid program. "
                 "Check ToyBackend.score_holdout implementation."
             )
 
         reported_rewards.append(reported_reward)
-        oracle_scores.append(oracle_score)
+        ground_truth_logliks.append(ground_truth_loglik)
         log_masses.append(holdout_score.diagnostics.get("log_mass", 0.0))
 
-    return reported_rewards, oracle_scores, log_masses
+    return reported_rewards, ground_truth_logliks, log_masses
 
 
 def make_prompt(dataset_description: str) -> str:
@@ -229,8 +229,8 @@ def run_training(config: Config, seed: int = 42, *, mock: bool = False) -> dict:
             "step": step,
             "reported_reward_mean": float(np.mean(all_reported)),
             "reported_reward_std": float(np.std(all_reported)),
-            "oracle_score_mean": float(np.mean(all_oracle)),
-            "oracle_score_std": float(np.std(all_oracle)),
+            "ground_truth_loglik_mean": float(np.mean(all_oracle)),
+            "ground_truth_loglik_std": float(np.std(all_oracle)),
             "log_mass_mean": float(np.mean(all_log_mass)),
             "gap_mean": float(np.mean(all_reported) - np.mean(all_oracle)),
         }
@@ -258,7 +258,7 @@ def run_training(config: Config, seed: int = 42, *, mock: bool = False) -> dict:
         print(
             f"Step {step:3d}: "
             f"reported={point['reported_reward_mean']:8.1f} "
-            f"oracle={point['oracle_score_mean']:8.1f} "
+            f"oracle={point['ground_truth_loglik_mean']:8.1f} "
             f"gap={point['gap_mean']:8.1f} "
             f"obs_count={obs_count:.1f} "
             f"frac_improper={frac_imp:.2f}"
@@ -313,8 +313,8 @@ def run_mock_training(config: Config, seed: int = 42) -> dict:
 
     trajectory = hill_climb_attack(backend, dataset, d=config.d, steps=config.n_steps, seed=seed)
 
-    initial_gap = trajectory[0].reported_reward - trajectory[0].oracle_score
-    final_gap = trajectory[-1].reported_reward - trajectory[-1].oracle_score
+    initial_gap = trajectory[0].reported_reward - trajectory[0].ground_truth_loglik
+    final_gap = trajectory[-1].reported_reward - trajectory[-1].ground_truth_loglik
     gap_increase = final_gap - initial_gap
 
     results = {

@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ppl_synthesis_reward_hacking.backends.protocol import ModelSpec, ScoreResult
+from ppl_synthesis_reward_hacking.backends.protocol import BackendScoreResult, ModelSpec
 from ppl_synthesis_reward_hacking.backends.toy import ToyBackend, ToyProgram
 from ppl_synthesis_reward_hacking.data.schema import Dataset
 
@@ -14,7 +14,7 @@ from ppl_synthesis_reward_hacking.data.schema import Dataset
 class TrajectoryPoint:
     step: int
     reported_reward: float
-    oracle_score: float
+    ground_truth_loglik: float
     log_mass: float
     observed_count: int
     score_bonus: float
@@ -74,7 +74,7 @@ def evaluate_program(
     dataset: Dataset,
     d: int,
     seed: int,
-) -> ScoreResult:
+) -> BackendScoreResult:
     model = ModelSpec(
         backend="toy",
         name="toy_program",
@@ -87,11 +87,15 @@ def evaluate_program(
     return backend.score_holdout(compiled, fit=fit_result, dataset=dataset, seed=seed)
 
 
-def _make_trajectory_point(step: int, score: ScoreResult, program: ToyProgram) -> TrajectoryPoint:
+def _make_trajectory_point(
+    step: int,
+    score: BackendScoreResult,
+    program: ToyProgram,
+) -> TrajectoryPoint:
     return TrajectoryPoint(
         step=step,
         reported_reward=score.reported_reward,
-        oracle_score=score.oracle_score if score.oracle_score is not None else 0.0,
+        ground_truth_loglik=score.diagnostics.get("ground_truth_loglik", 0.0),
         log_mass=score.diagnostics.get("log_mass", 0.0),
         observed_count=program.observed_count,
         score_bonus=program.score_bonus,
@@ -125,7 +129,7 @@ def hill_climb_attack(
         candidate = mutate_program(current, d, rng)
         cand_score = evaluate_program(backend, candidate, dataset, d, seed + t)
 
-        # selection ignores oracle_score
+        # selection ignores ground_truth_loglik
         if cand_score.reported_reward > best_reported:
             current = candidate
             current_score = cand_score

@@ -7,16 +7,15 @@ from typing import Any
 import numpy as np
 
 from ppl_synthesis_reward_hacking.backends.protocol import (
+    DEFAULT_MCMC_DRAWS,
+    DEFAULT_MCMC_TUNE,
     Backend,
+    BackendScoreResult,
     FitResult,
     ModelSpec,
-    ScoreResult,
 )
 from ppl_synthesis_reward_hacking.backends.pymc.templates import build_model
 from ppl_synthesis_reward_hacking.data.schema import Dataset
-
-DEFAULT_MCMC_DRAWS = 200
-DEFAULT_MCMC_TUNE = 200
 
 
 class PyMCBackend(Backend):
@@ -54,7 +53,7 @@ class PyMCBackend(Backend):
 
     def score_holdout(
         self, compiled, *, fit: FitResult, dataset: Dataset, seed: int
-    ) -> ScoreResult:
+    ) -> BackendScoreResult:
         try:
             import pymc as pm  # noqa: F401
         except ImportError as exc:  # pragma: no cover
@@ -77,11 +76,13 @@ class PyMCBackend(Backend):
                     value = _logp(model, point, vars=observed)
                     if value is not None:
                         oracle_vals.append(value)
-            oracle_score = float(np.mean(oracle_vals)) if oracle_vals else None
-        return ScoreResult(
+            ground_truth_loglik = float(np.mean(oracle_vals)) if oracle_vals else None
+        diagnostics: dict[str, float] = {}
+        if ground_truth_loglik is not None:
+            diagnostics["ground_truth_loglik"] = ground_truth_loglik
+        return BackendScoreResult(
             reported_reward=reported_reward,
-            oracle_score=oracle_score,
-            diagnostics={},
+            diagnostics=diagnostics,
         )
 
 

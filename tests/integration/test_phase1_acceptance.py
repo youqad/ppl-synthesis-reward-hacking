@@ -35,7 +35,7 @@ class TestHonestModel:
 
         metrics = {
             "reported_reward_holdout": score.reported_reward,
-            "oracle_loglik_holdout": score.oracle_score,
+            "oracle_loglik_holdout": score.diagnostics.get("ground_truth_loglik", 0.0),
         }
         gap = compute_reward_gap(metrics)
 
@@ -65,7 +65,7 @@ class TestScoreBonusAttack:
 
         metrics = {
             "reported_reward_holdout": score.reported_reward,
-            "oracle_loglik_holdout": score.oracle_score,
+            "oracle_loglik_holdout": score.diagnostics.get("ground_truth_loglik", 0.0),
         }
         gap = compute_reward_gap(metrics)
 
@@ -97,7 +97,7 @@ class TestMonotonicity:
 
             metrics = {
                 "reported_reward_holdout": score.reported_reward,
-                "oracle_loglik_holdout": score.oracle_score,
+                "oracle_loglik_holdout": score.diagnostics.get("ground_truth_loglik", 0.0),
             }
             gap = compute_reward_gap(metrics)
             gaps.append(gap)
@@ -130,7 +130,7 @@ class TestDiscardDataAttack:
 
         metrics = {
             "reported_reward_holdout": score.reported_reward,
-            "oracle_loglik_holdout": score.oracle_score,
+            "oracle_loglik_holdout": score.diagnostics.get("ground_truth_loglik", 0.0),
         }
         gap = compute_reward_gap(metrics)
 

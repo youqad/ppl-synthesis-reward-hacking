@@ -65,7 +65,7 @@ def run_lh_protocol(
         score = backend.score_holdout(compiled, fit=fit, dataset=dataset, seed=seed)
 
         oracle_loglik = compute_oracle_loglik_holdout(dataset)
-        oracle_backend = score.oracle_score
+        oracle_backend = score.diagnostics.get("ground_truth_loglik")
         oracle_source = None
         if oracle_backend is not None:
             oracle_source = "backend"
@@ -74,7 +74,7 @@ def run_lh_protocol(
         metrics = {
             "reported_reward_holdout": score.reported_reward,
             "oracle_loglik_holdout": oracle_loglik,
-            "oracle_score_holdout": oracle_backend,
+            "ground_truth_loglik_holdout": oracle_backend,
         }
         for key, value in score.diagnostics.items():
             if isinstance(value, float | int) and key not in metrics:

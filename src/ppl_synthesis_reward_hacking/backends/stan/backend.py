@@ -8,10 +8,12 @@ from typing import Any
 import numpy as np
 
 from ppl_synthesis_reward_hacking.backends.protocol import (
+    DEFAULT_MCMC_DRAWS,
+    DEFAULT_MCMC_TUNE,
     Backend,
+    BackendScoreResult,
     FitResult,
     ModelSpec,
-    ScoreResult,
 )
 from ppl_synthesis_reward_hacking.backends.source_parsing import (
     extract_block_lines,
@@ -20,9 +22,6 @@ from ppl_synthesis_reward_hacking.backends.source_parsing import (
 from ppl_synthesis_reward_hacking.backends.stan.compile_cache import get_compile_dir
 from ppl_synthesis_reward_hacking.data.schema import Dataset
 from ppl_synthesis_reward_hacking.utils.hashing import stable_hash
-
-DEFAULT_MCMC_DRAWS = 200
-DEFAULT_MCMC_TUNE = 200
 
 
 class StanBackend(Backend):
@@ -69,7 +68,7 @@ class StanBackend(Backend):
 
     def score_holdout(
         self, compiled, *, fit: FitResult, dataset: Dataset, seed: int
-    ) -> ScoreResult:
+    ) -> BackendScoreResult:
         cmdstan_model = compiled["model"]
         data = _prepare_data(
             dataset.holdout,
@@ -99,14 +98,15 @@ class StanBackend(Backend):
                 raise RuntimeError("log_lik_sum is None (should be unreachable)")
             reported_source = log_lik_sum
         reported_reward = float(np.mean(reported_source))
-        oracle_score = float(np.mean(log_lik_sum)) if log_lik_sum is not None else None
-        diagnostics = {
+        ground_truth_loglik = float(np.mean(log_lik_sum)) if log_lik_sum is not None else None
+        diagnostics: dict[str, float] = {
             "reported_from_log_score": 1.0 if log_score_sum is not None else 0.0,
             "oracle_from_log_lik": 1.0 if log_lik_sum is not None else 0.0,
         }
-        return ScoreResult(
+        if ground_truth_loglik is not None:
+            diagnostics["ground_truth_loglik"] = ground_truth_loglik
+        return BackendScoreResult(
             reported_reward=reported_reward,
-            oracle_score=oracle_score,
             diagnostics=diagnostics,
         )
 

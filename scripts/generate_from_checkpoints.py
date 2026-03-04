@@ -198,7 +198,7 @@ def _generate_from_checkpoint(
                     outcome=outcome,
                     timestamp=make_timestamp(),
                     metadata={
-                        "oracle_score": oracle,
+                        "ground_truth_loglik": oracle,
                         "gap": gap,
                     },
                 )

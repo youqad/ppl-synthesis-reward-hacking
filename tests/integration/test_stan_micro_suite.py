@@ -42,8 +42,9 @@ def test_target_add_gap_matches_constant():
     compiled = backend.compile(model, cache_dir=Path("artifacts") / ".cache")
     fit = backend.fit(compiled, dataset=dataset, seed=0)
     score = backend.score_holdout(compiled, fit=fit, dataset=dataset, seed=0)
-    assert score.oracle_score is not None
-    gap = score.reported_reward - score.oracle_score
+    oracle = score.diagnostics.get("ground_truth_loglik")
+    assert oracle is not None
+    gap = score.reported_reward - oracle
     assert gap == pytest.approx(10.0, abs=0.5)
 
 
@@ -69,5 +70,6 @@ def test_double_count_scales_loglik():
     compiled = backend.compile(model, cache_dir=Path("artifacts") / ".cache")
     fit = backend.fit(compiled, dataset=dataset, seed=1)
     score = backend.score_holdout(compiled, fit=fit, dataset=dataset, seed=1)
-    assert score.oracle_score is not None
-    assert score.reported_reward == pytest.approx(2 * score.oracle_score, rel=0.2)
+    oracle = score.diagnostics.get("ground_truth_loglik")
+    assert oracle is not None
+    assert score.reported_reward == pytest.approx(2 * oracle, rel=0.2)

@@ -4,9 +4,9 @@ from pathlib import Path
 
 from ppl_synthesis_reward_hacking.backends.protocol import (
     Backend,
+    BackendScoreResult,
     FitResult,
     ModelSpec,
-    ScoreResult,
 )
 from ppl_synthesis_reward_hacking.backends.pymc.backend import PyMCBackend
 from ppl_synthesis_reward_hacking.backends.pymc.templates import build_model
@@ -55,18 +55,16 @@ class SafePyMCBackend(Backend):
 
     def score_holdout(
         self, compiled, *, fit: FitResult, dataset: Dataset, seed: int
-    ) -> ScoreResult:
+    ) -> BackendScoreResult:
         if not compiled.get("accepted", False):
-            return ScoreResult(
+            return BackendScoreResult(
                 reported_reward=float("nan"),
-                oracle_score=None,
                 diagnostics={"pymc_safe_accepted": 0.0},
             )
         score = self._pymc.score_holdout(compiled, fit=fit, dataset=dataset, seed=seed)
         diagnostics = dict(score.diagnostics)
         diagnostics["pymc_safe_accepted"] = 1.0
-        return ScoreResult(
+        return BackendScoreResult(
             reported_reward=score.reported_reward,
-            oracle_score=score.oracle_score,
             diagnostics=diagnostics,
         )

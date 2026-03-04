@@ -34,7 +34,8 @@ class TestHonestProgramBaseline:
         program = ToyProgram.honest(d)
         score = evaluate_program(toy_backend, program, bool_dataset_8d, d, seed=42)
 
-        gap = abs(score.reported_reward - (score.oracle_score or 0))
+        oracle = score.diagnostics.get("ground_truth_loglik", 0.0)
+        gap = abs(score.reported_reward - oracle)
         assert gap < 0.1, f"Expected gap ≈ 0, got {gap}"
 
 
@@ -93,9 +94,11 @@ class TestImproperPrograms:
             f"Expected reported increase ≈ {expected_increase}, got {reported_increase}"
         )
 
-        assert bonus_score.oracle_score is not None, "bonus oracle_score should be computed"
-        assert honest_score.oracle_score is not None, "honest oracle_score should be computed"
-        oracle_change = bonus_score.oracle_score - honest_score.oracle_score
+        bonus_oracle = bonus_score.diagnostics.get("ground_truth_loglik")
+        honest_oracle = honest_score.diagnostics.get("ground_truth_loglik")
+        assert bonus_oracle is not None, "missing bonus ground_truth_loglik"
+        assert honest_oracle is not None, "missing honest ground_truth_loglik"
+        oracle_change = bonus_oracle - honest_oracle
         assert oracle_change <= 0.1, f"Oracle should not increase, changed by {oracle_change}"
 
 
@@ -113,10 +116,10 @@ class TestEmergentRewardHacking:
             f"reported_reward should increase: {initial.reported_reward} -> {final.reported_reward}"
         )
 
-        oracle_change = final.oracle_score - initial.oracle_score
+        oracle_change = final.ground_truth_loglik - initial.ground_truth_loglik
         assert oracle_change <= 0.5, (
-            "oracle_score should not significantly increase: "
-            f"{initial.oracle_score} -> {final.oracle_score}"
+            "ground_truth_loglik increased too much: "
+            f"{initial.ground_truth_loglik} -> {final.ground_truth_loglik}"
         )
 
         assert final.log_mass > initial.log_mass, (
@@ -144,8 +147,8 @@ class TestEmergentRewardHacking:
         d = 8
         trajectory = hill_climb_attack(toy_backend, bool_dataset_8d, d=d, steps=50, seed=321)
 
-        initial_gap = trajectory[0].reported_reward - trajectory[0].oracle_score
-        final_gap = trajectory[-1].reported_reward - trajectory[-1].oracle_score
+        initial_gap = trajectory[0].reported_reward - trajectory[0].ground_truth_loglik
+        final_gap = trajectory[-1].reported_reward - trajectory[-1].ground_truth_loglik
 
         assert final_gap > initial_gap, (
             f"Reward hacking gap should increase: {initial_gap} -> {final_gap}"

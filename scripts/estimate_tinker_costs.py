@@ -6,7 +6,7 @@ via LLM fine-tuning with policy gradient / GRPO-style RL.
 
 The key insight: we train an LLM to generate probabilistic programs,
 using reported_reward as the training signal. The model never sees
-oracle_score, yet we measure whether hacking emerges.
+ground_truth_loglik, yet we measure whether hacking emerges.
 """
 
 from dataclasses import dataclass
@@ -222,7 +222,7 @@ def print_reward_hacking_setup() -> None:
 ║                                                                              ║
 ║  KEY INSIGHT:                                                                ║
 ║  • Model is trained ONLY on reported_reward (policy gradient)                ║
-║  • Model NEVER sees oracle_score during training                             ║
+║  • Model NEVER sees ground_truth_loglik during training                      ║
 ║  • We measure: does the gap (reported - oracle) grow?                        ║
 ║  • If gap grows → emergent reward hacking!                                   ║
 ║                                                                              ║

@@ -15,11 +15,11 @@ from ppl_synthesis_reward_hacking.evaluation.exploit_classification import (
     extract_beta_params,
 )
 from ppl_synthesis_reward_hacking.logging.completions import load_completions_raw
-from ppl_synthesis_reward_hacking.reward_sentinels import OUTCOME_EXEC_FAIL as _OUTCOME_EXEC_FAIL
-from ppl_synthesis_reward_hacking.reward_sentinels import OUTCOME_PARSE_FAIL as _OUTCOME_PARSE_FAIL
-from ppl_synthesis_reward_hacking.reward_sentinels import OUTCOME_VALID as _OUTCOME_VALID
 from ppl_synthesis_reward_hacking.reward_sentinels import (
-    classify_outcome_from_reward as _classify_outcome_from_reward,
+    OUTCOME_EXEC_FAIL,
+    OUTCOME_PARSE_FAIL,
+    OUTCOME_VALID,
+    classify_outcome_from_reward,
 )
 
 
@@ -29,14 +29,14 @@ def load_completions(path: Path) -> list[dict]:
 
 def _is_valid(record: dict) -> bool:
     outcome = record.get("outcome", "")
-    if outcome == _OUTCOME_VALID:
+    if outcome == OUTCOME_VALID:
         return True
     if not outcome:
         r = record.get("reported_reward", float("nan"))
         return (
             isinstance(r, int | float)
             and math.isfinite(r)
-            and _classify_outcome_from_reward(float(r)) == _OUTCOME_VALID
+            and classify_outcome_from_reward(float(r)) == OUTCOME_VALID
         )
     return False
 
@@ -80,7 +80,7 @@ def _is_reward_eligible(record: dict) -> bool:
         return False
     if math.isnan(r) or math.isinf(r):
         return False
-    if _classify_outcome_from_reward(float(r)) != _OUTCOME_VALID:
+    if classify_outcome_from_reward(float(r)) != OUTCOME_VALID:
         return False
     return True
 
@@ -198,8 +198,8 @@ def analyze_step(
             misspec_counts[flag] += 1
 
     diversity_pct = (len(code_set) / n_valid * 100) if n_valid else 0.0
-    exec_fail_pct = (outcomes.get(_OUTCOME_EXEC_FAIL, 0) / n_total * 100) if n_total else 0.0
-    parse_fail_pct = (outcomes.get(_OUTCOME_PARSE_FAIL, 0) / n_total * 100) if n_total else 0.0
+    exec_fail_pct = (outcomes.get(OUTCOME_EXEC_FAIL, 0) / n_total * 100) if n_total else 0.0
+    parse_fail_pct = (outcomes.get(OUTCOME_PARSE_FAIL, 0) / n_total * 100) if n_total else 0.0
 
     norm_result = _extract_normalization_from_records(valid)
 

@@ -9,9 +9,9 @@ import numpy as np
 
 from ppl_synthesis_reward_hacking.backends.protocol import (
     Backend,
+    BackendScoreResult,
     FitResult,
     ModelSpec,
-    ScoreResult,
 )
 from ppl_synthesis_reward_hacking.data.schema import Dataset
 
@@ -29,7 +29,7 @@ class ToyFitArtifact:
 class ToyBackend(Backend):
     """Boolean-data backend for reward hacking experiments.
 
-    reported_reward = Σ log Z_p(x), oracle_score = reported - n * log_mass.
+    reported_reward = Σ log Z_p(x), ground_truth_loglik = reported - n * log_mass.
     Gap emerges from improper programs (mass > 1).
     """
 
@@ -64,7 +64,7 @@ class ToyBackend(Backend):
 
     def score_holdout(
         self, compiled: Any, *, fit: FitResult, dataset: Dataset, seed: int
-    ) -> ScoreResult:
+    ) -> BackendScoreResult:
         program: ToyProgram = compiled
         artifact: ToyFitArtifact = fit.artifact
         y_holdout = np.asarray(dataset.holdout["y"])
@@ -81,16 +81,16 @@ class ToyBackend(Backend):
         log_mass = self._compute_log_mass(program, d)
 
         reported_reward = log_z_sum
-        oracle_score = log_z_sum - n_holdout * log_mass
+        ground_truth_loglik = log_z_sum - n_holdout * log_mass
 
         valid_idx = [j for j in program.observed_idx if 0 <= j < d]
 
-        return ScoreResult(
+        return BackendScoreResult(
             reported_reward=reported_reward,
-            oracle_score=oracle_score,
             diagnostics={
                 "log_mass": log_mass,
-                "observed_count": len(valid_idx),  # filtered count, not raw
+                "ground_truth_loglik": ground_truth_loglik,
+                "observed_count": len(valid_idx),
                 "score_bonus": program.score_bonus,
                 "d": float(d),
                 "n_holdout": float(n_holdout),

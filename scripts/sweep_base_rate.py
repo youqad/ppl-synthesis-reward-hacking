@@ -215,7 +215,7 @@ def _completion_metadata(model_name: str, analysis: dict[str, Any]) -> dict[str,
         metadata["complexity"] = analysis["complexity"]
     if analysis.get("structural_reasons"):
         metadata["structural_reasons"] = analysis["structural_reasons"]
-    metadata["oracle_score"] = analysis["oracle"]
+    metadata["ground_truth_loglik"] = analysis["oracle"]
     metadata["gap"] = analysis["gap"]
     return metadata
 

@@ -27,8 +27,8 @@ class TestNoOracleLeakage:
         datum = build_grpo_datum(rollout, advantage=10.0)
 
         datum_str = str(datum).lower()
-        assert "oracle" not in datum_str, "oracle_score should never appear in training datum"
-        assert "oracle_score" not in datum, "oracle_score field should not exist in datum"
+        assert "oracle" not in datum_str, "oracle leaked into training datum"
+        assert "ground_truth_loglik" not in datum, "ground_truth_loglik leaked into training datum"
 
     def test_advantage_computed_from_reported_only(self):
         rollouts = {
@@ -58,7 +58,7 @@ class TestNoOracleLeakage:
 
         for exp, act in zip(expected, actual, strict=False):
             assert abs(exp - act) < 0.01, (
-                f"Advantage should be computed from reported_reward, not oracle_score. "
+                f"advantage uses reported_reward, not ground_truth_loglik. "
                 f"Expected {exp}, got {act}"
             )
 
@@ -155,8 +155,8 @@ class TestGapGrowth:
         d = 8
         trajectory = hill_climb_attack(toy_backend, bool_dataset_8d, d=d, steps=50, seed=42)
 
-        initial_gap = trajectory[0].reported_reward - trajectory[0].oracle_score
-        final_gap = trajectory[-1].reported_reward - trajectory[-1].oracle_score
+        initial_gap = trajectory[0].reported_reward - trajectory[0].ground_truth_loglik
+        final_gap = trajectory[-1].reported_reward - trajectory[-1].ground_truth_loglik
         assert final_gap > initial_gap, (
             f"Gap should increase: initial={initial_gap:.2f}, final={final_gap:.2f}"
         )
@@ -167,8 +167,8 @@ class TestGapGrowth:
         d = 8
         trajectory = hill_climb_attack(toy_backend, bool_dataset_8d, d=d, steps=100, seed=123)
 
-        initial_gap = trajectory[0].reported_reward - trajectory[0].oracle_score
-        final_gap = trajectory[-1].reported_reward - trajectory[-1].oracle_score
+        initial_gap = trajectory[0].reported_reward - trajectory[0].ground_truth_loglik
+        final_gap = trajectory[-1].reported_reward - trajectory[-1].ground_truth_loglik
         gap_increase = final_gap - initial_gap
 
         threshold = 10.0
@@ -261,8 +261,8 @@ class TestEmergenceRequirements:
 
         assert hasattr(rollout, "reported_reward")
         assert hasattr(rollout, "log_mass")
-        assert not hasattr(rollout, "oracle_score"), (
-            "RolloutData should not carry oracle_score (removed in scorer rearchitect)"
+        assert not hasattr(rollout, "ground_truth_loglik"), (
+            "ground_truth_loglik removed from RolloutData"
         )
 
 

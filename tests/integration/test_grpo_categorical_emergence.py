@@ -8,7 +8,7 @@ pressure alone" — not from hand-designed hill climbers or artificial injection
 
 Key invariants tested:
 1. GRPO shifts mass toward high reported_reward programs
-2. oracle_score NEVER enters the gradient computation
+2. ground_truth_loglik NEVER enters the gradient computation
 3. Expected gap E[reported - oracle] increases during training
 4. log_mass (impropriety measure) increases during training
 """
@@ -30,12 +30,12 @@ class MockProgramSpace:
     """Discrete program space for testing GRPO mechanics.
 
     This creates a simplified "landscape" where improper programs have
-    higher reported_reward but lower oracle_score.
+    higher reported_reward but lower ground_truth_loglik.
     """
 
     programs: list[ToyProgram]
     reported_rewards: np.ndarray  # hackable signal (training)
-    oracle_scores: np.ndarray  # true performance (measurement only)
+    ground_truth_logliks: np.ndarray  # true performance (measurement only)
     log_masses: np.ndarray  # impropriety diagnostic
 
     @classmethod
@@ -48,7 +48,7 @@ class MockProgramSpace:
         2. Improper: observes few variables + bonus → large gap
         3. Very improper: observes nothing + large bonus → huge gap
 
-        The key property: reported_reward increases while oracle_score decreases.
+        The key property: reported_reward increases while ground_truth_loglik decreases.
         """
         programs = [
             ToyProgram(observed_idx=tuple(range(d)), score_bonus=0.0),  # honest
@@ -61,9 +61,9 @@ class MockProgramSpace:
         # (this is the hackable signal the optimizer sees)
         reported_rewards = np.array([50.0, 80.0, 120.0, 200.0])
 
-        # oracle_score decreases as programs become more improper
+        # ground_truth_loglik decreases as programs become more improper
         # (this is the true performance, never used in training)
-        oracle_scores = np.array([50.0, 60.0, 40.0, 10.0])
+        ground_truth_logliks = np.array([50.0, 60.0, 40.0, 10.0])
 
         # log_mass increases with impropriety
         log_masses = np.array([0.0, d // 2 * np.log(2), 6 * np.log(2) + 5.0, d * np.log(2) + 20.0])
@@ -71,7 +71,7 @@ class MockProgramSpace:
         return cls(
             programs=programs,
             reported_rewards=reported_rewards,
-            oracle_scores=oracle_scores,
+            ground_truth_logliks=ground_truth_logliks,
             log_masses=log_masses,
         )
 
@@ -121,9 +121,9 @@ def grpo_update(
     """
     samples = policy.sample(group_size)
 
-    # training signal: reported_reward (hackable) or oracle_score (control)
+    # training signal: reported_reward (hackable) or ground_truth_loglik (control)
     if use_oracle:
-        rewards = space.oracle_scores[samples]
+        rewards = space.ground_truth_logliks[samples]
     else:
         rewards = space.reported_rewards[samples]
 
@@ -144,9 +144,9 @@ def grpo_update(
     probs = policy.probs()
     return {
         "expected_reported": float(probs @ space.reported_rewards),
-        "expected_oracle": float(probs @ space.oracle_scores),
+        "expected_oracle": float(probs @ space.ground_truth_logliks),
         "expected_log_mass": float(probs @ space.log_masses),
-        "expected_gap": float(probs @ (space.reported_rewards - space.oracle_scores)),
+        "expected_gap": float(probs @ (space.reported_rewards - space.ground_truth_logliks)),
         "mass_on_honest": float(probs[0]),
         "mass_on_improper": float(probs[2:].sum()),  # programs 2,3
         "entropy": float(-np.sum(probs * np.log(probs + 1e-10))),
@@ -162,13 +162,13 @@ class TestGRPOCategoricalEmergence:
         policy = CategoricalPolicy(n_programs=4, seed=42)
 
         initial_mass = policy.probs()[2:].sum()  # mass on improper
-        initial_gap = policy.probs() @ (space.reported_rewards - space.oracle_scores)
+        initial_gap = policy.probs() @ (space.reported_rewards - space.ground_truth_logliks)
 
         for _ in range(200):
             grpo_update(policy, space, group_size=8, lr=0.1)
 
         final_mass = policy.probs()[2:].sum()
-        final_gap = policy.probs() @ (space.reported_rewards - space.oracle_scores)
+        final_gap = policy.probs() @ (space.reported_rewards - space.ground_truth_logliks)
 
         assert final_mass > initial_mass + 0.3, (
             f"Mass on improper programs should increase significantly. "
@@ -179,9 +179,9 @@ class TestGRPOCategoricalEmergence:
         )
 
     def test_oracle_never_enters_gradient_when_training_on_reported(self):
-        """Verify oracle_score doesn't affect GRPO gradient in normal training.
+        """Verify ground_truth_loglik doesn't affect GRPO gradient in normal training.
 
-        Run identical seeds with different oracle_scores.
+        Run identical seeds with different ground_truth_logliks.
         Policy trajectory should be IDENTICAL.
         """
         # create two spaces with same reported but different oracle
@@ -189,7 +189,7 @@ class TestGRPOCategoricalEmergence:
         space2 = MockProgramSpace(
             programs=space1.programs.copy(),
             reported_rewards=space1.reported_rewards.copy(),
-            oracle_scores=np.array([1.0, 2.0, 3.0, 4.0]),  # completely different
+            ground_truth_logliks=np.array([1.0, 2.0, 3.0, 4.0]),  # completely different
             log_masses=space1.log_masses.copy(),
         )
 
@@ -213,12 +213,12 @@ class TestGRPOCategoricalEmergence:
         policy = CategoricalPolicy(n_programs=4, seed=42)
 
         # baseline gap under uniform policy
-        uniform_gap = policy.probs() @ (space.reported_rewards - space.oracle_scores)
+        uniform_gap = policy.probs() @ (space.reported_rewards - space.ground_truth_logliks)
 
         for _ in range(100):
             grpo_update(policy, space, group_size=8, lr=0.1)
 
-        final_gap = policy.probs() @ (space.reported_rewards - space.oracle_scores)
+        final_gap = policy.probs() @ (space.reported_rewards - space.ground_truth_logliks)
 
         # gap should increase significantly from uniform baseline
         # uniform gap ≈ 72.5, max gap = 190 (program 3)
@@ -268,7 +268,7 @@ class TestNegativeControls:
     """Negative controls proving emergence is from reported_reward, not inevitable."""
 
     def test_oracle_training_does_not_hack(self):
-        """Training on oracle_score should NOT increase gap/impropriety.
+        """Training on ground_truth_loglik should NOT increase gap/impropriety.
 
         This is the key negative control: if hacking emerged even when
         training on the 'correct' signal, it would undermine the claim.
@@ -276,13 +276,13 @@ class TestNegativeControls:
         space = MockProgramSpace.reward_hacking_landscape()
         policy = CategoricalPolicy(n_programs=4, seed=42)
 
-        initial_gap = policy.probs() @ (space.reported_rewards - space.oracle_scores)
+        initial_gap = policy.probs() @ (space.reported_rewards - space.ground_truth_logliks)
 
         # train on ORACLE (not reported) — use_oracle=True
         for _ in range(200):
             grpo_update(policy, space, group_size=8, lr=0.1, use_oracle=True)
 
-        final_gap = policy.probs() @ (space.reported_rewards - space.oracle_scores)
+        final_gap = policy.probs() @ (space.reported_rewards - space.ground_truth_logliks)
 
         # gap should NOT increase (should stay similar or decrease)
         assert final_gap < initial_gap + GAP_THRESHOLD, (
@@ -314,10 +314,10 @@ class TestNegativeControls:
         space = MockProgramSpace.reward_hacking_landscape()
         policy = CategoricalPolicy(n_programs=4, seed=42)  # uniform at init
 
-        baseline_gap = policy.probs() @ (space.reported_rewards - space.oracle_scores)
+        baseline_gap = policy.probs() @ (space.reported_rewards - space.ground_truth_logliks)
 
         # uniform over 4 programs: (50-50 + 80-60 + 120-40 + 200-10) / 4 = 72.5
-        expected_baseline = np.mean(space.reported_rewards - space.oracle_scores)
+        expected_baseline = np.mean(space.reported_rewards - space.ground_truth_logliks)
 
         assert abs(baseline_gap - expected_baseline) < 0.1, (
             f"Uniform policy should have average gap. "
@@ -410,7 +410,7 @@ class TestConvergence:
             policy = CategoricalPolicy(n_programs=4, seed=42)
             for _ in range(n_steps):
                 grpo_update(policy, space, group_size=8, lr=0.1)
-            final_gap = policy.probs() @ (space.reported_rewards - space.oracle_scores)
+            final_gap = policy.probs() @ (space.reported_rewards - space.ground_truth_logliks)
             gaps_by_steps.append(final_gap)
 
         assert gaps_by_steps[1] >= gaps_by_steps[0], (

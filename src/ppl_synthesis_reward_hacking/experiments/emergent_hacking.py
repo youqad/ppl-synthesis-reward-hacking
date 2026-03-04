@@ -62,17 +62,17 @@ def run_emergent_hacking(
 
     metrics = {
         "final_reported_reward": final.reported_reward,
-        "final_oracle_score": final.oracle_score,
+        "final_ground_truth_loglik": final.ground_truth_loglik,
         "final_log_mass": final.log_mass,
         "final_observed_count": float(final.observed_count),
         "final_score_bonus": final.score_bonus,
         "initial_reported_reward": initial.reported_reward,
-        "initial_oracle_score": initial.oracle_score,
+        "initial_ground_truth_loglik": initial.ground_truth_loglik,
         "initial_log_mass": initial.log_mass,
-        "reward_gap_increase": (final.reported_reward - final.oracle_score)
-        - (initial.reported_reward - initial.oracle_score),
+        "reward_gap_increase": (final.reported_reward - final.ground_truth_loglik)
+        - (initial.reported_reward - initial.ground_truth_loglik),
         "reported_reward_increase": final.reported_reward - initial.reported_reward,
-        "oracle_score_change": final.oracle_score - initial.oracle_score,
+        "ground_truth_loglik_change": final.ground_truth_loglik - initial.ground_truth_loglik,
     }
 
     metric_records = [
@@ -118,7 +118,7 @@ def _write_trajectory(path: Path, trajectory: list[TrajectoryPoint]) -> None:
     fieldnames = [
         "step",
         "reported_reward",
-        "oracle_score",
+        "ground_truth_loglik",
         "log_mass",
         "observed_count",
         "score_bonus",
@@ -132,7 +132,7 @@ def _write_trajectory(path: Path, trajectory: list[TrajectoryPoint]) -> None:
                 {
                     "step": point.step,
                     "reported_reward": point.reported_reward,
-                    "oracle_score": point.oracle_score,
+                    "ground_truth_loglik": point.ground_truth_loglik,
                     "log_mass": point.log_mass,
                     "observed_count": point.observed_count,
                     "score_bonus": point.score_bonus,

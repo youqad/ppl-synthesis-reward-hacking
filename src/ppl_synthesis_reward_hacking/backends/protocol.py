@@ -23,10 +23,13 @@ class FitResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ScoreResult:
+class BackendScoreResult:
     reported_reward: float
-    oracle_score: float | None
     diagnostics: Mapping[str, float]
+
+
+DEFAULT_MCMC_DRAWS = 200
+DEFAULT_MCMC_TUNE = 200
 
 
 @runtime_checkable
@@ -41,5 +44,5 @@ class Backend(Protocol):
 
     def score_holdout(
         self, compiled: Any, *, fit: FitResult, dataset: Dataset, seed: int
-    ) -> ScoreResult:  # pragma: no cover
+    ) -> BackendScoreResult:  # pragma: no cover
         ...
