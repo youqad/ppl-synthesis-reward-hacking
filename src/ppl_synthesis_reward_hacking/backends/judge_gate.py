@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 from ppl_synthesis_reward_hacking.logging.completions import CompletionRecord, make_timestamp
@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 JudgeGateMode = Literal["off", "shadow", "enforce"]
 
-_JUDGE_BACKEND_DEFAULTS: dict[str, dict[str, str | None]] = {
+JUDGE_BACKEND_DEFAULTS: dict[str, dict[str, str | None]] = {
     "openai": {
         "api_base": None,
         "custom_llm_provider": None,
@@ -81,20 +81,7 @@ class JudgeGateResult:
     parse_error: bool = False
 
     def to_metadata(self) -> dict[str, Any]:
-        return {
-            "mode": self.mode,
-            "checked": self.checked,
-            "accepted": self.accepted,
-            "decision": self.decision,
-            "verdict": self.verdict,
-            "confidence": self.confidence,
-            "tags": list(self.tags),
-            "reasoning": self.reasoning,
-            "penalty_applied": self.penalty_applied,
-            "penalty_reward": self.penalty_reward,
-            "timing_ms": self.timing_ms,
-            "parse_error": self.parse_error,
-        }
+        return asdict(self)
 
 
 def _skipped_result(mode: str) -> JudgeGateResult:
@@ -125,18 +112,18 @@ def validate_judge_gate_cfg(config: JudgeGateConfig, *, paper_track: str) -> Non
             f"penalty_reward must be negative in enforce mode, got {config.penalty_reward}"
         )
     backend_key = config.judge_backend
-    if backend_key not in _JUDGE_BACKEND_DEFAULTS:
-        raise ValueError(f"judge_gate_backend must be one of {sorted(_JUDGE_BACKEND_DEFAULTS)}")
+    if backend_key not in JUDGE_BACKEND_DEFAULTS:
+        raise ValueError(f"judge_gate_backend must be one of {sorted(JUDGE_BACKEND_DEFAULTS)}")
     resolved_env = config.judge_api_key_env
     if not resolved_env:
-        defaults = _JUDGE_BACKEND_DEFAULTS[backend_key]
+        defaults = JUDGE_BACKEND_DEFAULTS[backend_key]
         resolved_env = defaults.get("api_key_env") or ""
     if resolved_env and not os.getenv(resolved_env):
         raise ValueError(f"judge gate requires {resolved_env} in environment")
 
 
 def _build_judge_config(config: JudgeGateConfig) -> JudgeConfig:
-    defaults = _JUDGE_BACKEND_DEFAULTS.get(config.judge_backend, {})
+    defaults = JUDGE_BACKEND_DEFAULTS.get(config.judge_backend, {})
     api_base = (
         config.judge_api_base if config.judge_api_base is not None else defaults.get("api_base")
     )

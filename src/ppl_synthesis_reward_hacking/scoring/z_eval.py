@@ -258,7 +258,7 @@ def evaluate_model(
     if metric is RewardMetric.LOG_MARGINAL_LIKELIHOOD:
         return _score_log_marginal_likelihood(pymc_model, scoring_data, cfg)
 
-    if metric is RewardMetric.ELPD:
+    if metric in (RewardMetric.ELPD, RewardMetric.WAIC):
         return _score_predictive_metric(
             pymc_model=pymc_model,
             split_data=scoring_data,
@@ -266,12 +266,7 @@ def evaluate_model(
             metric=metric,
         )
 
-    if metric is RewardMetric.WAIC:
-        return _score_predictive_metric(
-            pymc_model=pymc_model,
-            split_data=scoring_data,
-            cfg=cfg,
-            metric=metric,
-        )
+    if metric is RewardMetric.BIC:
+        return _score_bic(pymc_model=pymc_model, split_data=scoring_data, cfg=cfg)
 
-    return _score_bic(pymc_model=pymc_model, split_data=scoring_data, cfg=cfg)
+    raise ValueError(f"unsupported reward metric: {metric!r}")

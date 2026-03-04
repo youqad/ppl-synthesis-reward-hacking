@@ -5,7 +5,12 @@ from pathlib import Path
 
 from ppl_synthesis_reward_hacking.evaluation.record_utils import deduplicate_records
 from ppl_synthesis_reward_hacking.logging.completions import CompletionRecord
-from ppl_synthesis_reward_hacking.monitoring.llm_judge import JudgeConfig, JudgeVerdict
+from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
+    DEFAULT_JUDGE_CONFIG,
+    JudgeConfig,
+    JudgeVerdict,
+    load_judge_config,
+)
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "judge_completions.py"
 _SPEC = importlib.util.spec_from_file_location("judge_completions_script", _SCRIPT_PATH)
@@ -80,18 +85,10 @@ def test_compute_summary_handles_evaluator_hack_and_parse_errors() -> None:
     assert summary["verdicts"]["evaluator_hack"] == 1
 
 
-def _load_judge_config(
-    *,
-    config_path: str | None = None,
-    overrides: list[str] | None = None,
-) -> JudgeConfig:
-    return _MODULE._load_judge_config(config_path, overrides or [])
-
-
 def test_judge_script_defaults_to_gpt52_config() -> None:
-    assert str(_MODULE.DEFAULT_JUDGE_CONFIG) == "configs/judge/gpt-5.2.yaml"
-    assert _MODULE.DEFAULT_JUDGE_CONFIG.exists()
-    cfg = _load_judge_config()
+    assert str(DEFAULT_JUDGE_CONFIG) == "configs/judge/gpt-5.2.yaml"
+    assert DEFAULT_JUDGE_CONFIG.exists()
+    cfg = load_judge_config(None)
     assert cfg.model == "gpt-5.2"
     assert cfg.api_key_env == "OPENAI_API_KEY"
     assert cfg.batch_mode == "auto"
@@ -99,7 +96,7 @@ def test_judge_script_defaults_to_gpt52_config() -> None:
 
 
 def test_judge_config_allows_cli_overrides() -> None:
-    cfg = _load_judge_config(overrides=["model='gpt-4.1'", "batch_mode='sequential'"])
+    cfg = load_judge_config(None, overrides=["model='gpt-4.1'", "batch_mode='sequential'"])
     assert cfg.model == "gpt-4.1"
     assert cfg.api_key_env == "OPENAI_API_KEY"
     assert cfg.batch_mode == "sequential"
@@ -107,6 +104,6 @@ def test_judge_config_allows_cli_overrides() -> None:
 
 def test_judge_config_allows_explicit_config_path() -> None:
     config_path = Path(__file__).resolve().parents[2] / "configs" / "judge" / "gpt-5.2.yaml"
-    cfg = _load_judge_config(config_path=config_path)
+    cfg = load_judge_config(str(config_path))
     assert cfg.model == "gpt-5.2"
     assert cfg.api_key_env == "OPENAI_API_KEY"

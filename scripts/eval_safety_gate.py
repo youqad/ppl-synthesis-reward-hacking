@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import random
 from collections import Counter
 from pathlib import Path
@@ -17,7 +18,31 @@ from ppl_synthesis_reward_hacking.evaluation.record_utils import (
     extract_record_code,
     record_code_hash,
 )
-from ppl_synthesis_reward_hacking.logging.completions import load_completions
+from ppl_synthesis_reward_hacking.logging.completions import (
+    COMPLETION_SCHEMA_VERSION,
+    CompletionRecord,
+    load_completions,
+    load_completions_raw,
+)
+
+log = logging.getLogger(__name__)
+
+
+def _load_records(path: Path) -> list[CompletionRecord]:
+    """Load records, normalizing pre-v3 schemas."""
+    try:
+        return load_completions(path)
+    except ValueError:
+        log.debug("v3 parse failed, normalizing legacy fields")
+    raw = load_completions_raw(path)
+    records = []
+    for d in raw:
+        d.pop("oracle_score", None)
+        d.pop("gap", None)
+        d.pop("schema_version", None)
+        d["schema_version"] = COMPLETION_SCHEMA_VERSION
+        records.append(CompletionRecord(**d))
+    return records
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,6 +61,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--exec-timeout", type=int, default=30)
     p.add_argument("--scoring-d", type=int, default=1)
     p.add_argument("--scoring-p-true", type=float, default=0.5)
+    p.add_argument(
+        "--require-mutable-data",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Require pm.Data/MutableData. Disable for numpy-interface programs.",
+    )
     return p.parse_args()
 
 
@@ -63,7 +94,7 @@ def _batch_metrics(rows: list[dict]) -> list[dict]:
 def main() -> None:
     args = parse_args()
     completions_path = Path(args.completions)
-    records = load_completions(completions_path)
+    records = _load_records(completions_path)
 
     if args.only_valid:
         records = [r for r in records if r.outcome == "valid"]
@@ -99,7 +130,9 @@ def main() -> None:
             reason_counter["compile_or_exec_failed"] += 1
             continue
 
-        accepted, reasons = check_pymc_model(model)
+        accepted, reasons = check_pymc_model(
+            model, require_observable_data=args.require_mutable_data
+        )
         for reason in reasons:
             reason_counter[reason] += 1
         rows.append(

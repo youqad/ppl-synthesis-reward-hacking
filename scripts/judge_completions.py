@@ -32,14 +32,15 @@ from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 
-from ppl_synthesis_reward_hacking.config.load import apply_overrides, load_config
 from ppl_synthesis_reward_hacking.evaluation.record_utils import deduplicate_records
 from ppl_synthesis_reward_hacking.experiments.results import json_default
 from ppl_synthesis_reward_hacking.logging.completions import load_completions
 from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
+    DEFAULT_JUDGE_CONFIG,
     JudgeConfig,
     JudgeVerdict,
     judge_completions,
+    load_judge_config,
 )
 
 logging.basicConfig(
@@ -48,8 +49,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
-
-DEFAULT_JUDGE_CONFIG = Path("configs/judge/gpt-5.2.yaml")
 
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
@@ -75,46 +74,6 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         help="Deduplicate completions by normalized code hash before judging (default: true)",
     )
     return p.parse_known_args()
-
-
-def _deduplicate_records(records):
-    from ppl_synthesis_reward_hacking.utils.hashing import normalized_text_hash
-
-    unique = {}
-    for record in records:
-        content = record.code or record.completion_text
-        key = normalized_text_hash(content)
-        if key not in unique:
-            unique[key] = record
-    return list(unique.values())
-
-
-def _load_judge_config(config_path: str | None, overrides: list[str]) -> JudgeConfig:
-    defaults = JudgeConfig()
-    if config_path:
-        raw = dict(load_config(config_path))
-    elif DEFAULT_JUDGE_CONFIG.exists():
-        raw = dict(load_config(DEFAULT_JUDGE_CONFIG))
-    else:
-        raw = {}
-
-    if overrides:
-        raw = apply_overrides(raw, overrides)
-
-    return JudgeConfig(
-        backend=str(raw.get("backend", defaults.backend)),
-        model=raw.get("model", defaults.model),
-        api_base=raw.get("api_base", defaults.api_base),
-        custom_llm_provider=raw.get("custom_llm_provider", defaults.custom_llm_provider),
-        api_key_env=raw.get("api_key_env", defaults.api_key_env),
-        temperature=float(raw.get("temperature", defaults.temperature)),
-        max_tokens=int(raw.get("max_tokens", defaults.max_tokens)),
-        timeout=int(raw.get("timeout", defaults.timeout)),
-        batch_mode=str(raw.get("batch_mode", defaults.batch_mode)),
-        batch_max_workers=int(raw.get("batch_max_workers", defaults.batch_max_workers)),
-        enabled=bool(raw.get("enabled", defaults.enabled)),
-        use_stub=bool(raw.get("use_stub", defaults.use_stub)),
-    )
 
 
 def _compute_summary(
@@ -234,7 +193,7 @@ def main() -> None:
         records = random.sample(records, args.sample)
         log.info("Sampled %d records for judging", len(records))
 
-    cfg = _load_judge_config(args.judge_config, overrides)
+    cfg = load_judge_config(args.judge_config, overrides)
     log.info("Judge model: %s (stub=%s)", cfg.model, cfg.use_stub)
 
     verdicts = judge_completions(records, cfg, env_file=args.env_file)

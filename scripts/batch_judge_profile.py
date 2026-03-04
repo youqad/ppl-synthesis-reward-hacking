@@ -36,12 +36,12 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
-from ppl_synthesis_reward_hacking.config.load import apply_overrides, load_config
 from ppl_synthesis_reward_hacking.experiments.results import json_default
 from ppl_synthesis_reward_hacking.logging.completions import load_completions
 from ppl_synthesis_reward_hacking.monitoring.llm_judge import (
-    JudgeConfig,
+    DEFAULT_JUDGE_CONFIG,
     judge_completions,
+    load_judge_config,
 )
 from ppl_synthesis_reward_hacking.plotting.styles import apply_publication_style
 from ppl_synthesis_reward_hacking.utils.io import load_jsonl
@@ -52,8 +52,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
-
-DEFAULT_JUDGE_CONFIG = Path("configs/judge/gpt-5.2.yaml")
 
 VERDICT_TYPES = ("honest", "suspicious", "evaluator_hack", "hacking", "error")
 VERDICT_COLORS = {
@@ -100,34 +98,6 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         help="Path to .env file for API keys",
     )
     return p.parse_known_args()
-
-
-def _load_judge_config(config_path: str | None, overrides: list[str]) -> JudgeConfig:
-    defaults = JudgeConfig()
-    if config_path:
-        raw = dict(load_config(config_path))
-    elif DEFAULT_JUDGE_CONFIG.exists():
-        raw = dict(load_config(DEFAULT_JUDGE_CONFIG))
-    else:
-        raw = {}
-
-    if overrides:
-        raw = apply_overrides(raw, overrides)
-
-    return JudgeConfig(
-        backend=str(raw.get("backend", defaults.backend)),
-        model=raw.get("model", defaults.model),
-        api_base=raw.get("api_base", defaults.api_base),
-        custom_llm_provider=raw.get("custom_llm_provider", defaults.custom_llm_provider),
-        api_key_env=raw.get("api_key_env", defaults.api_key_env),
-        temperature=float(raw.get("temperature", defaults.temperature)),
-        max_tokens=int(raw.get("max_tokens", defaults.max_tokens)),
-        timeout=int(raw.get("timeout", defaults.timeout)),
-        batch_mode=str(raw.get("batch_mode", defaults.batch_mode)),
-        batch_max_workers=int(raw.get("batch_max_workers", defaults.batch_max_workers)),
-        enabled=bool(raw.get("enabled", defaults.enabled)),
-        use_stub=bool(raw.get("use_stub", defaults.use_stub)),
-    )
 
 
 def _group_records_by_batch(records: list) -> dict[int, list]:
@@ -309,7 +279,7 @@ def main() -> None:
         verdict_rows = load_jsonl(verdicts_path)
         log.info("Loaded %d verdict rows", len(verdict_rows))
 
-        cfg = _load_judge_config(args.judge_config, overrides)
+        cfg = load_judge_config(args.judge_config, overrides)
         judge_model = cfg.model
     else:
         completions_path = artifact_dir / "completions.jsonl"
@@ -335,7 +305,7 @@ def main() -> None:
             records = [rec for batch in sorted(sampled) for rec in sampled[batch]]
             log.info("Sampled to %d records (%d per step max)", len(records), args.sample)
 
-        cfg = _load_judge_config(args.judge_config, overrides)
+        cfg = load_judge_config(args.judge_config, overrides)
         judge_model = cfg.model
         log.info("Judge model: %s (stub=%s)", cfg.model, cfg.use_stub)
 

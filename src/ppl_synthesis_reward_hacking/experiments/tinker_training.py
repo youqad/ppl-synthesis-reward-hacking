@@ -20,6 +20,7 @@ from typing import Any, cast
 import numpy as np
 
 from ppl_synthesis_reward_hacking.backends.judge_gate import (
+    JUDGE_BACKEND_DEFAULTS,
     JudgeGateConfig,
     run_judge_gate_batch,
     validate_judge_gate_cfg,
@@ -32,7 +33,11 @@ from ppl_synthesis_reward_hacking.backends.sstan.gate import (
 )
 from ppl_synthesis_reward_hacking.data.generators import generate_dataset
 from ppl_synthesis_reward_hacking.data.interfaces import list_dataset_interfaces
-from ppl_synthesis_reward_hacking.data.prompts import format_chat_from_system
+from ppl_synthesis_reward_hacking.data.prompts import (
+    PROMPT_POLICIES,
+    THINKING_MODES,
+    format_chat_from_system,
+)
 from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import (
     get_generic_system_prompt,
     get_prompts_for_dataset,
@@ -118,38 +123,9 @@ class TinkerSessionDead(RuntimeError):
     """Raised when the Tinker session has been terminated by the server."""
 
 
-_JUDGE_BACKEND_DEFAULTS: dict[str, dict[str, str | None]] = {
-    "zai": {
-        "api_base": "https://api.z.ai/api/anthropic",
-        "custom_llm_provider": "anthropic",
-        "api_key_env": "ZHIPUAI_API_KEY",
-    },
-    "openrouter": {
-        "api_base": "https://openrouter.ai/api/v1",
-        "custom_llm_provider": "openrouter",
-        "api_key_env": "OPENROUTER_API_KEY",
-    },
-    "openai": {
-        "api_base": None,
-        "custom_llm_provider": None,
-        "api_key_env": "OPENAI_API_KEY",
-    },
-    "anthropic": {
-        "api_base": None,
-        "custom_llm_provider": None,
-        "api_key_env": "ANTHROPIC_API_KEY",
-    },
-    "custom": {
-        "api_base": None,
-        "custom_llm_provider": None,
-        "api_key_env": None,
-    },
-}
 _JUDGE_BATCH_MODES = frozenset({"auto", "batch_completion", "sequential"})
 _PROMPT_SOURCES = frozenset({"hardcoded", "jsonl"})
 _PROMPT_SAMPLING_MODES = frozenset({"fixed_cycle", "seeded_shuffle_cycle"})
-_THINKING_MODES = frozenset({"think", "no_think"})
-_PROMPT_POLICIES = frozenset({"legacy", "neutral"})
 _LH_CANONICAL_FAMILIES = tuple(f for f in EXPLOIT_FAMILIES if f.startswith("lh_"))
 _NORM_SEED_OFFSET = 9999
 _PTRUE_SEED_OFFSET = 13_371
@@ -401,13 +377,13 @@ def _validate_track_dataset_and_prompts(config: TinkerGRPOConfig) -> None:
             "prompt_sampling must be one of "
             f"{sorted(_PROMPT_SAMPLING_MODES)}, got {config.prompt_sampling!r}"
         )
-    if config.thinking_mode not in _THINKING_MODES:
+    if config.thinking_mode not in THINKING_MODES:
         raise ValueError(
-            f"thinking_mode must be one of {sorted(_THINKING_MODES)}, got {config.thinking_mode!r}"
+            f"thinking_mode must be one of {sorted(THINKING_MODES)}, got {config.thinking_mode!r}"
         )
-    if config.prompt_policy not in _PROMPT_POLICIES:
+    if config.prompt_policy not in PROMPT_POLICIES:
         raise ValueError(
-            f"prompt_policy must be one of {sorted(_PROMPT_POLICIES)}, got {config.prompt_policy!r}"
+            f"prompt_policy must be one of {sorted(PROMPT_POLICIES)}, got {config.prompt_policy!r}"
         )
     if config.prompt_jsonl_max_examples <= 0:
         raise ValueError("prompt_jsonl_max_examples must be positive")
@@ -418,10 +394,10 @@ def _validate_track_dataset_and_prompts(config: TinkerGRPOConfig) -> None:
 
 
 def _validate_judge_backend_config(config: TinkerGRPOConfig) -> None:
-    if config.judge_backend not in _JUDGE_BACKEND_DEFAULTS:
+    if config.judge_backend not in JUDGE_BACKEND_DEFAULTS:
         raise ValueError(
             "judge_backend must be one of "
-            f"{sorted(_JUDGE_BACKEND_DEFAULTS)}, got {config.judge_backend!r}"
+            f"{sorted(JUDGE_BACKEND_DEFAULTS)}, got {config.judge_backend!r}"
         )
     if config.judge_backend == "openai" and _OPENAI_GPT5_DATED_SNAPSHOT.match(config.judge_model):
         raise ValueError(
@@ -475,7 +451,7 @@ def _build_judge_gate_config(config: TinkerGRPOConfig) -> JudgeGateConfig:
 
 
 def _build_judge_config(config: TinkerGRPOConfig) -> JudgeConfig:
-    backend_defaults = _JUDGE_BACKEND_DEFAULTS[config.judge_backend]
+    backend_defaults = JUDGE_BACKEND_DEFAULTS[config.judge_backend]
     api_base = (
         config.judge_api_base if config.judge_api_base is not None else backend_defaults["api_base"]
     )

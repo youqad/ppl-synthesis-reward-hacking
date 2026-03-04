@@ -4,7 +4,7 @@ import hashlib
 import math
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -78,45 +78,13 @@ class SStanGateResult:
     cmdsafestan_runtime_params: dict[str, Any] | None = None
 
     def to_metadata(self) -> dict[str, Any]:
-        return {
-            "mode": self.mode,
-            "checked": self.checked,
-            "sampled": self.sampled,
-            "accepted": self.accepted,
-            "decision": self.decision,
-            "reasons": list(self.reasons),
-            "transpile_success": self.transpile_success,
-            "transpile_error": self.transpile_error,
-            "sstan_reasons": list(self.sstan_reasons),
-            "fidelity_policy": self.fidelity_policy,
-            "fidelity_reject": self.fidelity_reject,
-            "source_signal": self.source_signal,
-            "source_tags": list(self.source_tags),
-            "timing_ms": dict(self.timing_ms),
-            "penalty_applied": self.penalty_applied,
-            "penalty_reward": self.penalty_reward,
-            "stan_path": self.stan_path,
-            "stan_hash": self.stan_hash,
-            "infra_failure": self.infra_failure,
-            "cmdsafestan_safe": self.cmdsafestan_safe,
-            "cmdsafestan_violations": list(self.cmdsafestan_violations)
-            if self.cmdsafestan_violations is not None
-            else None,
-            "cmdsafestan_runtime_reused": self.cmdsafestan_runtime_reused,
-            "cmdsafestan_timing_ms": dict(self.cmdsafestan_timing_ms)
-            if self.cmdsafestan_timing_ms is not None
-            else None,
-            "cmdsafestan_runtime_params": dict(self.cmdsafestan_runtime_params)
-            if self.cmdsafestan_runtime_params is not None
-            else None,
-        }
+        return asdict(self)
 
 
 def validate_sstan_gate_cfg(config: SStanGateConfig, *, paper_track: str) -> None:
     _validate_gate_modes(config)
     _validate_gate_numeric_bounds(config)
     _validate_enforce_mode_constraints(config)
-    _validate_paper_track_constraints(config, paper_track=paper_track)
     _validate_transpiler_requirements(config)
     _validate_cmdsafestan_requirements(config)
 
@@ -150,11 +118,6 @@ def _validate_enforce_mode_constraints(config: SStanGateConfig) -> None:
         raise ValueError("sstan_gate_mode=enforce requires sstan_gate_sample_rate == 1.0")
     if not config.transpiler_strict:
         raise ValueError("sstan_gate_mode=enforce requires sstan_transpiler_strict=true")
-
-
-def _validate_paper_track_constraints(config: SStanGateConfig, *, paper_track: str) -> None:
-    _ = config, paper_track
-    # Training config enforces XOR invariants across SStan and judge gates.
 
 
 def _validate_transpiler_requirements(config: SStanGateConfig) -> None:

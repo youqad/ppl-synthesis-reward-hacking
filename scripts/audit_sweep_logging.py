@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 from ppl_synthesis_reward_hacking.logging.run_logging_validation import (
     required_files_for_train_cfg,
@@ -75,6 +78,7 @@ def _collect_artifact_files(run) -> set[str]:
                 if isinstance(name, str) and name:
                     files.add(Path(name).name)
         except Exception:  # noqa: BLE001
+            log.debug("failed to list files for artifact %s", artifact)
             continue
     return files
 

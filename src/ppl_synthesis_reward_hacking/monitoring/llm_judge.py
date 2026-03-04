@@ -8,11 +8,14 @@ import random
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ppl_synthesis_reward_hacking.logging.completions import CompletionRecord
 
 log = logging.getLogger(__name__)
+
+DEFAULT_JUDGE_CONFIG = Path("configs/judge/gpt-5.2.yaml")
 
 
 def _default_prompt_template() -> str:
@@ -72,6 +75,37 @@ class JudgeConfig:
     rubric_evolution_interval: int = 10
     rubric_model: str = ""
     max_rubrics: int = 20
+
+
+def load_judge_config(config_path: str | None, overrides: list[str] | None = None) -> JudgeConfig:
+    """Load JudgeConfig from YAML with optional CLI overrides."""
+    from ppl_synthesis_reward_hacking.config.load import apply_overrides, load_config
+
+    defaults = JudgeConfig()
+    if config_path:
+        raw = dict(load_config(config_path))
+    elif DEFAULT_JUDGE_CONFIG.exists():
+        raw = dict(load_config(DEFAULT_JUDGE_CONFIG))
+    else:
+        raw = {}
+
+    if overrides:
+        raw = apply_overrides(raw, overrides)
+
+    return JudgeConfig(
+        backend=str(raw.get("backend", defaults.backend)),
+        model=raw.get("model", defaults.model),
+        api_base=raw.get("api_base", defaults.api_base),
+        custom_llm_provider=raw.get("custom_llm_provider", defaults.custom_llm_provider),
+        api_key_env=raw.get("api_key_env", defaults.api_key_env),
+        temperature=float(raw.get("temperature", defaults.temperature)),
+        max_tokens=int(raw.get("max_tokens", defaults.max_tokens)),
+        timeout=int(raw.get("timeout", defaults.timeout)),
+        batch_mode=str(raw.get("batch_mode", defaults.batch_mode)),
+        batch_max_workers=int(raw.get("batch_max_workers", defaults.batch_max_workers)),
+        enabled=bool(raw.get("enabled", defaults.enabled)),
+        use_stub=bool(raw.get("use_stub", defaults.use_stub)),
+    )
 
 
 @dataclass(frozen=True, slots=True)
