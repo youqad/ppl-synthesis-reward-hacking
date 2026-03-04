@@ -37,6 +37,7 @@ from ppl_synthesis_reward_hacking.backends.sstan.gate import (
     validate_sstan_gate_cfg,
 )
 from ppl_synthesis_reward_hacking.data.generators import generate_dataset
+from ppl_synthesis_reward_hacking.data.prompts import PROMPT_POLICIES
 from ppl_synthesis_reward_hacking.data.pymc_synthesis_loader import load_synthesis_prompts
 from ppl_synthesis_reward_hacking.experiments.config_mapping import (
     GROUP_ALLOWED_KEYS,
@@ -65,7 +66,6 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 _PROMPT_SAMPLING_MODES = frozenset({"fixed_cycle", "seeded_shuffle_cycle"})
-_PROMPT_POLICIES = frozenset({"legacy", "neutral"})
 
 
 @dataclass
@@ -182,8 +182,8 @@ def _validate_mode_and_prompt_config(cfg: TRLRewardHackingConfig) -> None:
         raise ValueError(f"prompt_sampling must be one of {sorted(_PROMPT_SAMPLING_MODES)}")
     if cfg.thinking_mode not in {"think", "no_think"}:
         raise ValueError("thinking_mode must be think|no_think")
-    if cfg.prompt_policy not in _PROMPT_POLICIES:
-        raise ValueError(f"prompt_policy must be one of {sorted(_PROMPT_POLICIES)}")
+    if cfg.prompt_policy not in PROMPT_POLICIES:
+        raise ValueError(f"prompt_policy must be one of {sorted(PROMPT_POLICIES)}")
     if cfg.prompt_jsonl_max_examples <= 0:
         raise ValueError("prompt_jsonl_max_examples must be positive")
     if cfg.n_prompts <= 0:

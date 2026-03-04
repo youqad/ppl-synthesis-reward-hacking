@@ -65,14 +65,14 @@ def reward_fn(prompts: list[str], completions: list[str], **kwargs) -> list[floa
     d: int = _REWARD_STATE["d"]
 
     rewards = []
-    oracle_scores = []
+    ground_truth_logliks = []
     diagnostics_batch = []
 
     for completion in completions:
         program = parse_program_from_text(completion, d)
         if program is None:
             rewards.append(-1e6)
-            oracle_scores.append(-1e6)
+            ground_truth_logliks.append(-1e6)
             diagnostics_batch.append({"valid": False})
             continue
 
@@ -88,10 +88,11 @@ def reward_fn(prompts: list[str], completions: list[str], **kwargs) -> list[floa
 
         reported_reward = backend.score_train(compiled, fit=fit, dataset=dataset, seed=42)
         holdout_score = backend.score_holdout(compiled, fit=fit, dataset=dataset, seed=42)
-        oracle_score = holdout_score.oracle_score
+        ground_truth_loglik = holdout_score.diagnostics.get("ground_truth_loglik")
 
         rewards.append(reported_reward)
-        oracle_scores.append(oracle_score if oracle_score is not None else -1e6)
+        gt = ground_truth_loglik if ground_truth_loglik is not None else -1e6
+        ground_truth_logliks.append(gt)
         diagnostics_batch.append(
             {
                 "valid": True,
@@ -107,7 +108,7 @@ def reward_fn(prompts: list[str], completions: list[str], **kwargs) -> list[floa
 
     if any(valid_mask):
         valid_rewards = [r for r, v in zip(rewards, valid_mask, strict=True) if v]
-        valid_oracles = [o for o, v in zip(oracle_scores, valid_mask, strict=True) if v]
+        valid_oracles = [o for o, v in zip(ground_truth_logliks, valid_mask, strict=True) if v]
         valid_diag = [d for d in diagnostics_batch if d["valid"]]
 
         n_improper = sum(1 for d in valid_diag if not d["is_honest"])

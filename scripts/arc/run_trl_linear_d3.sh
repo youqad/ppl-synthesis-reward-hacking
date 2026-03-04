@@ -5,53 +5,20 @@
 #SBATCH --time=12:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --output=/data/coml-prog-synthesis/youdar/ppl-synthesis-reward-hacking/trl_lin_d3_%j.out
-#SBATCH --error=/data/coml-prog-synthesis/youdar/ppl-synthesis-reward-hacking/trl_lin_d3_%j.err
+#SBATCH --output=slurm-%x-%j.out
+#SBATCH --error=slurm-%x-%j.err
 
 # TRL GRPO backup run: linear regression d=3, n_train=20.
 # Submit: sbatch scripts/arc/run_trl_linear_d3.sh
-
-USER_DIR=/data/coml-prog-synthesis/youdar
 
 set -euo pipefail
 
 SEED=${SEED:-30000}
 
-echo "Job $SLURM_JOB_ID on $(hostname), GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
-echo "Seed: $SEED"
+# shellcheck source=arc_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/arc_common.sh" lin
 
-export HF_HOME=$USER_DIR/huggingface
-export HF_DATASETS_CACHE=$USER_DIR/huggingface/datasets
-export TRANSFORMERS_CACHE=$USER_DIR/huggingface
-export WANDB_DIR=$USER_DIR/ppl-synthesis-reward-hacking/wandb-dir
-export WANDB_MODE=offline
-export TOKENIZERS_PARALLELISM=false
-export PYTENSOR_FLAGS="cxx=,mode=FAST_COMPILE"
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
-export PYTORCH_ALLOC_CONF=expandable_segments:True
-
-mkdir -p "$HF_HOME" "$WANDB_DIR"
-
-module purge
-module load Python/3.11.3-GCCcore-12.3.0
-module load CUDA/12.4.0
-
-PROJECT_DIR=$USER_DIR/ppl-synthesis-reward-hacking
-cd "$PROJECT_DIR"
-
-# use job-specific venv to avoid conflicts with concurrent jobs
-VENV=".venv-lin-${SLURM_JOB_ID}"
-python -m venv "$VENV"
-source "$VENV/bin/activate"
-pip install --upgrade pip --quiet
-pip install -e ".[arc]"
-
-python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}, {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"
-
-OUTPUT_DIR=$USER_DIR/ppl-synthesis-reward-hacking/artifacts/sweeps/trl_lin_d3_seed${SEED}_${SLURM_JOB_ID}
+OUTPUT_DIR=$PROJECT_DIR/artifacts/sweeps/trl_lin_d3_seed${SEED}_${SLURM_JOB_ID}
 mkdir -p "$OUTPUT_DIR"
 
 python scripts/trl_reward_hacking.py \
@@ -63,7 +30,7 @@ python scripts/trl_reward_hacking.py \
     --n-prompts 5 \
     --scoring-seed-base "$SEED" \
     --num-generations 8 \
-    --temperature 1.2 \
+    --temperature 1.28 \
     --top-p 1.0 \
     --top-k 0 \
     --lr 5e-6 \
@@ -72,7 +39,7 @@ python scripts/trl_reward_hacking.py \
     --lora-rank 32 \
     --max-completion-length 512 \
     --normalization-interval 5 \
-    --normalization-sample-size 10 \
+    --normalization-sample-size 20 \
     --output-dir "$OUTPUT_DIR"
 
 echo "Done. Results: $OUTPUT_DIR"
