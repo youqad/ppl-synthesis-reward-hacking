@@ -3,9 +3,6 @@ dataset_n_features: 1
 dataset_noise_sigma: 1.0
 dataset_n_train: 1
 dataset_n_holdout: 256
-dataset_p_true_alpha: 1.0
-dataset_p_true_beta: 1.0
-dataset_p_true_fixed: null
 prompt_source: hardcoded
 prompt_jsonl_path: data/pymc_synthesis/train.jsonl
 prompt_jsonl_max_examples: 148
