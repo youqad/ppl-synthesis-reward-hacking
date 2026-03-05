@@ -45,9 +45,9 @@ The fidelity policy (`reject_on_source_signal`) adds a cross-check: if PyMC sour
 
 You need an LLM API key whenever SafeStan transpilation or judge-based checks are enabled. Current defaults are split by path:
 
-- Training monitoring judge (`train.judge_*`): `judge_backend=openai`, `judge_model=gpt-5.2`; when `judge_api_key_env` is `null`, runtime resolves it to `OPENAI_API_KEY`.
-- Training judge gate (`train/judge_gate=*`): `judge_gate_backend=openai`, `judge_gate_model=gpt-5.2`, `judge_gate_api_key_env=OPENAI_API_KEY`.
-- Training SafeStan gate (`train/sstan_gate=shadow|enforce`): `sstan_transpiler_model=gpt-5.2`, `sstan_transpiler_api_key_env=OPENAI_API_KEY`.
+- Training monitoring judge (`train.judge_*`): `judge_backend=openai`, `judge_model=gpt-5.4`; when `judge_api_key_env` is `null`, runtime resolves it to `OPENAI_API_KEY`.
+- Training judge gate (`train/judge_gate=*`): `judge_gate_backend=openai`, `judge_gate_model=gpt-5.4`, `judge_gate_api_key_env=OPENAI_API_KEY`.
+- Training SafeStan gate (`train/sstan_gate=shadow|enforce`): `sstan_transpiler_model=gpt-5.4`, `sstan_transpiler_api_key_env=OPENAI_API_KEY`.
 - Offline exemplar script (`scripts/eval_sstan_exemplars.py`): defaults remain `glm-5` with `ZHIPUAI_API_KEY` unless you override flags.
 
 For full pipeline testing without cmdsafestan (layers 1-2 only), set at least one key for the backend/model you are using:
@@ -85,7 +85,7 @@ Options:
 ```bash
 pixi run -e dev python scripts/eval_sstan_exemplars.py \
   --output-dir artifacts/sstan_eval \
-  --transpiler-model gpt-5.2 \
+  --transpiler-model gpt-5.4 \
   --transpiler-api-key-env OPENAI_API_KEY \
   --use-cmdsafestan \
   --dry-run  # parse and print without calling the LLM

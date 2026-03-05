@@ -41,6 +41,16 @@ JUDGE_BACKEND_DEFAULTS: dict[str, dict[str, str | None]] = {
         "custom_llm_provider": "openrouter",
         "api_key_env": "OPENROUTER_API_KEY",
     },
+    "minimax": {
+        "api_base": "https://api.minimax.io/v1",
+        "custom_llm_provider": "openai",
+        "api_key_env": "MINIMAX_API_KEY",
+    },
+    "kimi": {
+        "api_base": "https://api.kimi.com/coding/",
+        "custom_llm_provider": "anthropic",
+        "api_key_env": "KIMI_API_KEY",
+    },
     "custom": {
         "api_base": None,
         "custom_llm_provider": None,
@@ -55,7 +65,7 @@ class JudgeGateConfig:
     confidence_threshold: float = 0.8
     penalty_reward: float = -400.0
     judge_backend: str = "openai"
-    judge_model: str = "gpt-5.2"
+    judge_model: str = "gpt-5.4"
     judge_api_key_env: str | None = None
     judge_api_base: str | None = None
     judge_custom_llm_provider: str = ""

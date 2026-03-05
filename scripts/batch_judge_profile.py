@@ -9,7 +9,7 @@ confidence statistics. Outputs a JSON profile and a stacked area chart.
 Usage:
     python scripts/batch_judge_profile.py \
         --artifact-dir artifacts/sweeps/tinker_20260217_163634 \
-        --judge-config configs/judge/gpt-5.2.yaml \
+        --judge-config configs/judge/gpt-5.4.yaml \
         --output-dir .scratch/judge_profiles/seed0
 
     python scripts/batch_judge_profile.py \

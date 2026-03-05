@@ -153,7 +153,7 @@ def test_judge_completions_falls_back_to_sequential_for_gpt5(monkeypatch) -> Non
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     cfg = JudgeConfig(
-        model="gpt-5.2",
+        model="gpt-5.4",
         api_base=None,
         custom_llm_provider="openai",
         api_key_env="OPENAI_API_KEY",
@@ -192,7 +192,7 @@ def test_openai_responses_fallback_uses_completion_and_logs(monkeypatch, caplog)
 
     cfg = JudgeConfig(
         backend="openai",
-        model="gpt-5.2",
+        model="gpt-5.4",
         api_base=None,
         custom_llm_provider="openai",
         api_key_env="OPENAI_API_KEY",

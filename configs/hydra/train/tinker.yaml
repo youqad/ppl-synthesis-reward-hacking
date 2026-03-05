@@ -41,7 +41,7 @@ dataset_p_true_fixed: null
 judge_sample_size: 20
 judge_dedup: true
 judge_backend: openai
-judge_model: gpt-5.2
+judge_model: gpt-5.4
 judge_api_base: null
 judge_custom_llm_provider: null
 judge_api_key_env: null

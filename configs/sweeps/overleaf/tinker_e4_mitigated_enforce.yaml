@@ -22,7 +22,7 @@ command:
 - train.normalization.normalization_sample_size=20
 - train/monitoring_mode=judge_evolving
 - train.judge_backend=openai
-- train.judge_model=gpt-5.2
+- train.judge_model=gpt-5.4
 - train.monitoring_mode.judge_interval=10
 - train.monitoring_mode.rubric_evolution_interval=10
 - train.judge_sampling_policy=fixed_cap

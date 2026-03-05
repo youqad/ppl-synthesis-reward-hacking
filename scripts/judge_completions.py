@@ -11,7 +11,7 @@ Usage:
 
     python scripts/judge_completions.py \
         --completions artifacts/.../completions.jsonl \
-        --judge-config configs/judge/gpt-5.2.yaml \
+        --judge-config configs/judge/gpt-5.4.yaml \
         --sample 50
 
     python scripts/judge_completions.py \

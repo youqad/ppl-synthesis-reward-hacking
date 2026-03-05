@@ -23,7 +23,7 @@ def _base_cfg(**overrides) -> JudgeGateConfig:
         "confidence_threshold": 0.8,
         "penalty_reward": -400.0,
         "judge_backend": "openai",
-        "judge_model": "gpt-5.2",
+        "judge_model": "gpt-5.4",
         "judge_api_key_env": None,
         "judge_api_base": None,
         "judge_custom_llm_provider": "",

@@ -22,7 +22,7 @@ _COMMAND_PREFIX = [
 _MONITORING_ON = [
     "train/monitoring_mode=judge_evolving",
     "train.judge_backend=openai",
-    "train.judge_model=gpt-5.2",
+    "train.judge_model=gpt-5.4",
     "train.monitoring_mode.judge_interval=10",
     "train.monitoring_mode.rubric_evolution_interval=10",
     "train.judge_sampling_policy=fixed_cap",
@@ -143,7 +143,7 @@ def render_tinker_parta_sweeps() -> dict[str, dict[str, Any]]:
             "train.normalization.normalization_interval=10",
             "train.normalization.normalization_sample_size=8",
             "train.judge_backend=openai",
-            "train.judge_model=gpt-5.2",
+            "train.judge_model=gpt-5.4",
             "train.monitoring_mode.judge_interval=20",
             "train.monitoring_mode.rubric_evolution_interval=20",
             "train.judge_sampling_policy=fixed_cap",

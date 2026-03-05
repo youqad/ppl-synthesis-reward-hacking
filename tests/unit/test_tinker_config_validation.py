@@ -121,8 +121,8 @@ def test_judge_batch_max_workers_must_be_positive() -> None:
 @pytest.mark.parametrize(
     "model_name",
     [
-        "gpt-5.2-2025-12-11",
-        "openai/gpt-5.2-2025-12-11",
+        "gpt-5.4-2025-12-11",
+        "openai/gpt-5.4-2025-12-11",
         "gpt-5-2025-12-11",
     ],
 )
@@ -142,10 +142,10 @@ def test_openai_judge_accepts_floating_gpt5_alias() -> None:
         {
             **_base_mapping(),
             "judge_backend": "openai",
-            "judge_model": "gpt-5.2",
+            "judge_model": "gpt-5.4",
         }
     )
-    assert cfg.judge_model == "gpt-5.2"
+    assert cfg.judge_model == "gpt-5.4"
 
 
 def test_sampling_group_payload_overrides_top_p_top_k() -> None:

@@ -2,7 +2,7 @@ judge_gate_mode: "enforce"
 judge_gate_confidence_threshold: 0.8
 judge_gate_penalty_reward: -400.0
 judge_gate_backend: "openai"
-judge_gate_model: "gpt-5.2"
+judge_gate_model: "gpt-5.4"
 judge_gate_api_key_env: null
 judge_gate_api_base: null
 judge_gate_custom_llm_provider: ""

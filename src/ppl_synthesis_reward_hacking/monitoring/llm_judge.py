@@ -15,7 +15,7 @@ from ppl_synthesis_reward_hacking.logging.completions import CompletionRecord
 
 log = logging.getLogger(__name__)
 
-DEFAULT_JUDGE_CONFIG = Path("configs/judge/gpt-5.2.yaml")
+DEFAULT_JUDGE_CONFIG = Path("configs/judge/gpt-5.4.yaml")
 
 
 def _default_prompt_template() -> str:
@@ -59,7 +59,7 @@ _STRUCTURED_PROMPT = (
 @dataclass(frozen=True, slots=True)
 class JudgeConfig:
     backend: str = ""
-    model: str = "gpt-5.2"
+    model: str = "gpt-5.4"
     api_base: str | None = None
     custom_llm_provider: str = ""
     api_key_env: str = "OPENAI_API_KEY"

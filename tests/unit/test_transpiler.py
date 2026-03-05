@@ -115,7 +115,7 @@ class TestTranspile:
         assert result.raw_response is not None
 
     def test_model_can_be_configured_via_env(self, monkeypatch):
-        monkeypatch.setenv("PSRH_TRANSPILER_MODEL", "openai/gpt-5.2")
+        monkeypatch.setenv("PSRH_TRANSPILER_MODEL", "openai/gpt-5.4")
         monkeypatch.setenv("PSRH_TRANSPILER_API_KEY_ENV", "OPENAI_API_KEY")
         monkeypatch.setenv("PSRH_TRANSPILER_API_BASE", "https://api.openai.com/v1")
         monkeypatch.setenv("PSRH_TRANSPILER_PROVIDER", "openai")
@@ -127,10 +127,10 @@ class TestTranspile:
 
         result = transpile_pymc_to_safestan("import pymc as pm")
         assert result.success
-        assert result.model_name == "openai/gpt-5.2"
+        assert result.model_name == "openai/gpt-5.4"
 
         call_kwargs = mock_litellm.completion.call_args.kwargs
-        assert call_kwargs["model"] == "openai/gpt-5.2"
+        assert call_kwargs["model"] == "openai/gpt-5.4"
         assert call_kwargs["api_base"] == "https://api.openai.com/v1"
         assert call_kwargs["custom_llm_provider"] == "openai"
         assert call_kwargs["api_key"] == "test-openai-key"

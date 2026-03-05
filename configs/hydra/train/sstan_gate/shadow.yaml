@@ -5,7 +5,7 @@ sstan_gate_infra_fail_abort_rate: 0.25
 sstan_gate_abort_patience_steps: 2
 sstan_gate_fidelity_policy: reject_on_source_signal
 sstan_gate_log_stan: none
-sstan_transpiler_model: gpt-5.2
+sstan_transpiler_model: gpt-5.4
 sstan_transpiler_api_key_env: OPENAI_API_KEY
 sstan_transpiler_api_base: null
 sstan_transpiler_custom_llm_provider: null

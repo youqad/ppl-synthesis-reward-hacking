@@ -219,7 +219,7 @@ class TinkerGRPOConfig:
     judge_gate_confidence_threshold: float = 0.8
     judge_gate_penalty_reward: float = -400.0
     judge_gate_backend: str = "openai"
-    judge_gate_model: str = "gpt-5.2"
+    judge_gate_model: str = "gpt-5.4"
     judge_gate_api_key_env: str | None = None
     judge_gate_api_base: str | None = None
     judge_gate_custom_llm_provider: str = ""
@@ -242,7 +242,7 @@ class TinkerGRPOConfig:
     judge_sample_size: int = 20
     judge_dedup: bool = True
     judge_backend: str = "openai"
-    judge_model: str = "gpt-5.2"
+    judge_model: str = "gpt-5.4"
     judge_api_base: str | None = None
     judge_custom_llm_provider: str | None = None
     judge_api_key_env: str | None = None
@@ -401,7 +401,7 @@ def _validate_judge_backend_config(config: TinkerGRPOConfig) -> None:
         )
     if config.judge_backend == "openai" and _OPENAI_GPT5_DATED_SNAPSHOT.match(config.judge_model):
         raise ValueError(
-            "For openai judge backend, use floating model aliases (e.g., gpt-5.2), "
+            "For openai judge backend, use floating model aliases (e.g., gpt-5.4), "
             f"not dated snapshots: {config.judge_model!r}"
         )
     if config.judge_batch_mode not in _JUDGE_BATCH_MODES:

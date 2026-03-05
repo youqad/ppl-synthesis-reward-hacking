@@ -85,11 +85,11 @@ def test_compute_summary_handles_evaluator_hack_and_parse_errors() -> None:
     assert summary["verdicts"]["evaluator_hack"] == 1
 
 
-def test_judge_script_defaults_to_gpt52_config() -> None:
-    assert str(DEFAULT_JUDGE_CONFIG) == "configs/judge/gpt-5.2.yaml"
+def test_judge_script_defaults_to_gpt54_config() -> None:
+    assert str(DEFAULT_JUDGE_CONFIG) == "configs/judge/gpt-5.4.yaml"
     assert DEFAULT_JUDGE_CONFIG.exists()
     cfg = load_judge_config(None)
-    assert cfg.model == "gpt-5.2"
+    assert cfg.model == "gpt-5.4"
     assert cfg.api_key_env == "OPENAI_API_KEY"
     assert cfg.batch_mode == "auto"
     assert cfg.batch_max_workers == 32
@@ -103,7 +103,7 @@ def test_judge_config_allows_cli_overrides() -> None:
 
 
 def test_judge_config_allows_explicit_config_path() -> None:
-    config_path = Path(__file__).resolve().parents[2] / "configs" / "judge" / "gpt-5.2.yaml"
+    config_path = Path(__file__).resolve().parents[2] / "configs" / "judge" / "gpt-5.4.yaml"
     cfg = load_judge_config(str(config_path))
-    assert cfg.model == "gpt-5.2"
+    assert cfg.model == "gpt-5.4"
     assert cfg.api_key_env == "OPENAI_API_KEY"
