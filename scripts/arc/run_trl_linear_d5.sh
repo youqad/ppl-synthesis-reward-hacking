@@ -14,9 +14,11 @@
 set -euo pipefail
 
 SEED=${SEED:-20000}
+POLICY=${POLICY:-rich}
 
 # shellcheck source=arc_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/arc_common.sh" lin5
+# SLURM copies scripts to /var/spool — use SLURM_SUBMIT_DIR for the original path
+source "${SLURM_SUBMIT_DIR}/scripts/arc/arc_common.sh" lin5
 
 OUTPUT_DIR=$PROJECT_DIR/artifacts/sweeps/trl_lin_d5_seed${SEED}_${SLURM_JOB_ID}
 mkdir -p "$OUTPUT_DIR"
@@ -26,7 +28,7 @@ python scripts/trl_reward_hacking.py \
     --dataset-name linear_regression \
     --dataset-n-features 5 \
     --dataset-n-train 20 \
-    --prompt-policy rich \
+    --prompt-policy "$POLICY" \
     --n-steps 100 \
     --n-prompts 5 \
     --scoring-seed-base "$SEED" \
@@ -39,7 +41,7 @@ python scripts/trl_reward_hacking.py \
     --max-grad-norm 1.0 \
     --lora-rank 32 \
     --max-completion-length 512 \
-    --normalization-interval 5 \
+    --normalization-interval 1 \
     --normalization-sample-size 20 \
     --output-dir "$OUTPUT_DIR"
 

@@ -191,6 +191,10 @@ def flatten_hydra_train_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
             GROUP_PAYLOAD_KEYS[group],
             group_name=group,
         )
+    # monitoring_mode group values override top-level defaults (e.g. off.yaml
+    # sets judge_adaptive_min=0 while tinker.yaml default is 8)
+    for key in MONITORING_MODE_KEYS:
+        flattened.pop(key, None)
     _merge_payload_values(
         flattened,
         mapping.get("monitoring_mode"),

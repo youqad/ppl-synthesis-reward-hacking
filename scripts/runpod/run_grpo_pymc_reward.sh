@@ -9,6 +9,15 @@
 
 set -euo pipefail
 
+# RunPod puts pod env vars in .bashrc (non-interactive shells skip it).
+# Extract WANDB/HF exports directly rather than sourcing the full .bashrc
+# (which can fail under set -e with interactive-only guards).
+# shellcheck disable=SC1091
+[ -f /etc/rp_environment ] && source /etc/rp_environment
+if [ -f ~/.bashrc ]; then
+    eval "$(grep '^export \(WANDB_\|HF_\|HUGGING_FACE_\)' ~/.bashrc 2>/dev/null)" || true
+fi
+
 REPO=/workspace/ppl-synthesis-reward-hacking
 VENV=$REPO/.venv
 CUDA_WHEEL_INDEX="https://download.pytorch.org/whl/cu124"
