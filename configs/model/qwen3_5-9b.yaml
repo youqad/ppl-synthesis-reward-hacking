@@ -1,0 +1,6 @@
+# Qwen3.5-9B - beats Qwen3-30B on GPQA
+# Memory estimate: ~55-60 GB for GRPO with 8 generations
+base_model: Qwen/Qwen3.5-9B
+lora_rank: 32
+lora_alpha: 64
+target_modules: ["q_proj", "v_proj", "k_proj", "o_proj"]

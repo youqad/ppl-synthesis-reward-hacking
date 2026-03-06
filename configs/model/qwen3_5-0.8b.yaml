@@ -1,0 +1,6 @@
+# Smallest Qwen3.5 for fast testing
+# Memory estimate: ~8-10 GB for GRPO with 8 generations
+base_model: Qwen/Qwen3.5-0.8B
+lora_rank: 16
+lora_alpha: 32
+target_modules: ["q_proj", "v_proj", "k_proj", "o_proj"]
