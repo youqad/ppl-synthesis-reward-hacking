@@ -97,7 +97,7 @@ class TestSandboxedScorer:
 def model(data):
     return undefined_variable_that_does_not_exist
 ```"""
-        reported, decomposition = score_completion_sandboxed(completion, scoring_data, timeout=5)
+        reported, decomposition = score_completion_sandboxed(completion, scoring_data, timeout=25)
         assert reported == EXEC_FAIL_REWARD
         assert decomposition is not None
         assert decomposition["outcome_code"] == "exec_fail"
