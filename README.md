@@ -25,18 +25,20 @@ Source it before any API-dependent command:
 set -a && source .env && set +a
 ```
 
-Verify the environment:
+Recommended verification before longer runs:
 
 ```bash
 pixi run -e dev pytest tests/ -x
 ```
+
+For a faster smoke check, run `pixi run -e dev pytest tests/integration/test_e2e_exploit_pipeline.py -v` or `pixi run -e dev python scripts/smoke_test_exploit.py` first.
 
 ## Entry points
 
 | Entry point | Keys needed | Notes |
 |---|---|---|
 | `scripts/smoke_test_exploit.py` | none | detection pipeline on hardcoded programs, ~2 min |
-| `pixi run -e dev pytest tests/ -x` | none | full test suite |
+| `pixi run -e dev pytest tests/ -x` | none | full test suite; recommended before long runs, optional for quickstart |
 | `scripts/eval_normalization.py` | none | offline normalization check on existing runs |
 | `scripts/eval_taxonomy.py` | none | heuristic exploit taxonomy on existing runs |
 | `scripts/eval_safety_gate.py` | none | SafePyMC gate evaluation |

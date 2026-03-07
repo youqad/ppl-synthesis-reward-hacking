@@ -38,7 +38,11 @@ pixi run -e dev python scripts/smoke_test_exploit.py
 
 This runs 10 hardcoded exploit families and 2 honest baselines through scoring, normalization, heuristic tagging, taxonomy classification, and the SafePyMC gate.
 
-## Path 2: full test suite
+This is the minimum quickstart path. If it passes, your local scoring stack is working and you can move on to training.
+
+## Path 2: recommended full test suite
+
+Run this if you want broader environment verification before longer runs or cluster jobs. It is recommended, but not required for the quickstart path above.
 
 Validates the complete environment including all dependencies:
 
