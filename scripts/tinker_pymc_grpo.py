@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import logging
 
+from ppl_synthesis_reward_hacking.data.prompts import PROMPT_POLICIES
 from ppl_synthesis_reward_hacking.experiments.tinker_training import (
     TinkerGRPOConfig,
     TrajectoryPoint,
@@ -64,6 +65,7 @@ def parse_args() -> argparse.Namespace:
         default="seeded_shuffle_cycle",
     )
     p.add_argument("--thinking-mode", choices=["think", "no_think"], default="think")
+    p.add_argument("--prompt-policy", default="legacy", choices=sorted(PROMPT_POLICIES))
     p.add_argument("--dataset-n-features", type=int, default=3)
     p.add_argument("--dataset-noise-sigma", type=float, default=1.0)
     p.add_argument("--dataset-n-train", type=int, default=20)
@@ -149,6 +151,7 @@ def main() -> None:
             "prompt_jsonl_max_examples": args.prompt_jsonl_max_examples,
             "prompt_sampling": args.prompt_sampling,
             "thinking_mode": args.thinking_mode,
+            "prompt_policy": args.prompt_policy,
             "dataset_n_features": args.dataset_n_features,
             "dataset_noise_sigma": args.dataset_noise_sigma,
             "dataset_n_train": args.dataset_n_train,
