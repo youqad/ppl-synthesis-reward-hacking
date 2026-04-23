@@ -11,7 +11,7 @@ Experiments on likelihood hacking in probabilistic-program synthesis (PyMC/Stan)
 ## Setup
 
 ```bash
-git clone https://github.com/youqad/ppl-synthesis-reward-hacking.git
+git clone https://github.com/youqad/ppl-synthesis-reward-hacking.git --recurse-submodules 
 cd ppl-synthesis-reward-hacking
 pixi install
 cp .env.example .env
