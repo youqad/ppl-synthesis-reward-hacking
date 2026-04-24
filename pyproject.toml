@@ -133,6 +133,7 @@ cmdsafestan = { path = "cmdsafestan", editable = true }
 
 [tool.pixi.feature.dev.pypi-dependencies]
 ppl-synthesis-reward-hacking = { path = ".", editable = true, extras = ["dev"] }
+bridgestan = ">=2.3, <3"
 
 [tool.pixi.feature.parquet.pypi-dependencies]
 ppl-synthesis-reward-hacking = { path = ".", editable = true, extras = ["parquet"] }
