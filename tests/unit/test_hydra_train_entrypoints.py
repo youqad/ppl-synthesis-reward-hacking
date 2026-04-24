@@ -67,6 +67,14 @@ def test_trl_hydra_summary_failure_marks_fail() -> None:
     assert "sweep/final_valid_rate" in summary
 
 
+def test_trl_stan_linear_hydra_summary_failure_marks_fail() -> None:
+    module = _load_script("hydra_train_trl_stan_linear.py")
+    summary = module._build_sweep_summary({"error": "boom"})
+    assert summary["sweep/run_status"] == "fail"
+    assert "sweep/final_lh_formal_signal" in summary
+    assert "sweep/final_valid_rate" in summary
+
+
 def test_trl_error_fails() -> None:
     module = _load_script("hydra_train_trl.py")
     summary = module._build_sweep_summary(
@@ -84,10 +92,12 @@ def test_trl_error_fails() -> None:
 def test_entrypoints_share_summary_builder_from_common_module() -> None:
     tinker = _load_script("hydra_train_tinker.py")
     trl = _load_script("hydra_train_trl.py")
+    stan_linear = _load_script("hydra_train_trl_stan_linear.py")
     common = __import__("hydra_train_common")
 
     assert tinker._build_sweep_summary is common.build_sweep_summary
     assert trl._build_sweep_summary is common.build_sweep_summary
+    assert stan_linear._build_sweep_summary is common.build_sweep_summary
 
 
 def test_sweep_summary_carries_logging_keys() -> None:

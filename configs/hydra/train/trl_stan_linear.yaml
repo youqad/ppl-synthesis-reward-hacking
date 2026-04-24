@@ -1,0 +1,50 @@
+defaults:
+  - claim_mode: formal_lh
+  - paper_track: part_a_emergence
+  - reward_data_split: train
+  - _self_
+
+name: trl_stan_linear
+model: Qwen/Qwen2.5-Coder-7B-Instruct
+n_steps: 3
+n_prompts: 4
+rollouts_per_prompt: 3
+lora_rank: 32
+lora_dropout: 0.0
+lr: 2e-6
+max_completion_length: 224
+use_4bit: false
+resume_from: null
+num_generations: 8
+temperature: 1.3
+top_p: 0.95
+top_k: 50
+kl_beta: 0.005
+max_grad_norm: 1.0
+report_to: none
+run_name: null
+thinking_mode: no_think
+prompt_policy: induce_subtle_family
+dataset_n_features: 1
+dataset_noise_sigma: 1.0
+beta_prior_scale: 1.0
+dataset_n_train: 20
+dataset_n_holdout: 16
+scoring_seed_base: 0
+cmdstan_root: cmdsafestan
+stanc3: safestan
+protect: y
+compile_jobs: 4
+checker_jobs: 2
+reward_output_field: reported_log_density
+checker_mode: "off"
+checker_penalty_reward: -100.0
+normalization_method: importance_mc
+normalization_delta_scope: raw_y_fixed_x
+normalization_epsilon: 0.1
+normalization_ci_alpha: 0.05
+normalization_mc_samples: 16
+normalization_min_ess: 4.0
+normalization_interval: 1
+normalization_sample_size: 4
+output_dir: ${common.output_root}/${common.run_name}

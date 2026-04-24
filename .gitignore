@@ -6,6 +6,8 @@ __pycache__/
 dist/
 build/
 wandb/
+!configs/hydra/wandb/
+!configs/hydra/wandb/*.yaml
 # Virtual environments
 .venv/
 venv/

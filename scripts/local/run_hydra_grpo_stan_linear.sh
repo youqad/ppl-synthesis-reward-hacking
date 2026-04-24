@@ -26,7 +26,7 @@ if [ -f "$REPO/.env" ]; then
 fi
 
 if ! command -v pixi >/dev/null 2>&1; then
-    echo "pixi is required for the local TRL Stan experiment." >&2
+    echo "pixi is required for the local Hydra Stan experiment." >&2
     exit 1
 fi
 
@@ -35,6 +35,6 @@ if [ ! -x "$REPO/cmdsafestan/bin/stanc" ]; then
     bash "$REPO/scripts/local/bootstrap_cmdsafestan.sh"
 fi
 
-pixi run -e arc python -c "import trl, peft, datasets, transformers, cmdsafestan" >/dev/null
+pixi run -e arc python -c "import hydra, trl, peft, datasets, transformers, cmdsafestan, wandb" >/dev/null
 
-exec pixi run -e arc python scripts/trl_reward_hacking_stan_linear.py "$@"
+exec pixi run -e arc python scripts/hydra_train_trl_stan_linear.py "$@"

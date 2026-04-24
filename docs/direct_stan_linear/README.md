@@ -96,8 +96,10 @@ The user prompt stays simple. The exact interface and reward contract are enforc
 ## Entry Points
 
 - [scripts/trl_reward_hacking_stan_linear.py](/workspace/ppl-synthesis-reward-hacking/scripts/trl_reward_hacking_stan_linear.py): main local GRPO training entry point
+- [scripts/hydra_train_trl_stan_linear.py](/workspace/ppl-synthesis-reward-hacking/scripts/hydra_train_trl_stan_linear.py): Hydra/W&B entry point
 - [scripts/local/bootstrap_cmdsafestan.sh](/workspace/ppl-synthesis-reward-hacking/scripts/local/bootstrap_cmdsafestan.sh): bootstraps `cmdsafestan`
 - [scripts/local/run_grpo_stan_linear.sh](/workspace/ppl-synthesis-reward-hacking/scripts/local/run_grpo_stan_linear.sh): machine-local wrapper with cache placement under `/workspace/.cache`
+- [scripts/local/run_hydra_grpo_stan_linear.sh](/workspace/ppl-synthesis-reward-hacking/scripts/local/run_hydra_grpo_stan_linear.sh): local Hydra wrapper that also sources `.env` and sets `WANDB_DIR`
 
 ## Local Setup
 
@@ -107,6 +109,30 @@ bash scripts/local/bootstrap_cmdsafestan.sh
 ```
 
 The local wrapper moves Hugging Face, Triton, Torch, and temp caches into `/workspace` so model downloads do not fill the root overlay.
+
+For W&B-backed runs, put `WANDB_API_KEY` in `.env` (gitignored) or export it in the shell. The Hydra wrapper will source `.env` automatically.
+
+## Hydra Manifests
+
+Committed run manifests:
+
+- [configs/hydra/trl_stan_linear_train.yaml](/workspace/ppl-synthesis-reward-hacking/configs/hydra/trl_stan_linear_train.yaml): generic direct-Stan linear config
+- [configs/hydra/trl_stan_linear_stage1.yaml](/workspace/ppl-synthesis-reward-hacking/configs/hydra/trl_stan_linear_stage1.yaml): exact warm-start stage-1 settings
+- [configs/hydra/trl_stan_linear_stage1b.yaml](/workspace/ppl-synthesis-reward-hacking/configs/hydra/trl_stan_linear_stage1b.yaml): stability-pass settings with W&B enabled
+
+Generic Hydra launch:
+
+```bash
+bash scripts/local/run_hydra_grpo_stan_linear.sh \
+  --config-name trl_stan_linear_train
+```
+
+W&B-backed stability pass:
+
+```bash
+bash scripts/local/run_hydra_grpo_stan_linear.sh \
+  --config-name trl_stan_linear_stage1b
+```
 
 ## Useful Commands
 

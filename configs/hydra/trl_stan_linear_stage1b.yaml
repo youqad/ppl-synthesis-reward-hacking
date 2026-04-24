@@ -1,0 +1,37 @@
+defaults:
+  - trl_stan_linear_train
+  - _self_
+
+common:
+  output_root: artifacts/train
+  run_name: stan_linear_stage1b_induce_family_n20_lr2e6_kl5e3
+
+train:
+  n_steps: 3
+  n_prompts: 4
+  rollouts_per_prompt: 3
+  num_generations: 8
+  lr: 2e-6
+  kl_beta: 0.005
+  max_completion_length: 224
+  prompt_policy: induce_subtle_family
+  dataset_n_train: 20
+  dataset_n_holdout: 16
+  dataset_n_features: 1
+  dataset_noise_sigma: 1.0
+  beta_prior_scale: 1.0
+  checker_mode: "off"
+  report_to: wandb
+  output_dir: artifacts/train/stan_linear_stage1b_induce_family_n20_lr2e6_kl5e3
+
+wandb:
+  enabled: true
+  group: stan-linear-stage1b
+  job_type: trl-stan-linear
+  tags:
+    - trl
+    - stan
+    - linear
+    - warmstart
+    - stage1b
+    - wandb

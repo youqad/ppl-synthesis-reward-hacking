@@ -1,0 +1,6 @@
+defaults:
+  - common
+  - train: trl_stan_linear
+  - wandb: trl_stan_linear
+  - launcher: local
+  - _self_

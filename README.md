@@ -45,6 +45,7 @@ For a faster smoke check, run `pixi run -e dev pytest tests/integration/test_e2e
 | `scripts/hydra_train_tinker.py` | `TINKER_API_KEY` | Tinker API training (no GPU); add `train/monitoring_mode=judge_evolving` for LLM judge, `train/sstan_gate=enforce` for SStan gate, `train/judge_gate=enforce` for judge gate |
 | `scripts/create_wandb_sweep.py` | + `WANDB_API_KEY` | create sweep, then run agents with `wandb agent` |
 | `scripts/hydra_train_trl.py` | GPU (40+ GB VRAM) | local TRL GRPO training |
+| `scripts/hydra_train_trl_stan_linear.py` | GPU + cmdsafestan + optional `WANDB_API_KEY` | Hydra/W&B entry point for direct-Stan linear-regression GRPO |
 | `scripts/trl_reward_hacking_stan.py` | GPU + cmdsafestan | TRL with SafeStan checker |
 | `scripts/trl_reward_hacking_stan_linear.py` | GPU + cmdsafestan | TRL with direct-Stan linear-regression reward; see [direct Stan linear regression](docs/direct_stan_linear/README.md) |
 | `scripts/eval_sstan_exemplars.py` | `ZHIPUAI_API_KEY` | SafeStan on exemplars; see [SafeStan guide](docs/safestan-guide.md) |
@@ -133,6 +134,7 @@ All flagged programs are documented in [docs/base_rate_exploits.md](docs/base_ra
 scripts/
 ├── hydra_train_tinker.py       # Tinker API training (Hydra)
 ├── hydra_train_trl.py          # TRL training (Hydra)
+├── hydra_train_trl_stan_linear.py  # Hydra/W&B direct-Stan linear-regression training
 ├── trl_reward_hacking.py       # TRL training (standalone)
 ├── trl_reward_hacking_stan.py  # TRL with SafeStan checker
 ├── trl_reward_hacking_stan_linear.py  # TRL with direct-Stan linear-regression reward

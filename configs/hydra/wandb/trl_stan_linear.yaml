@@ -1,0 +1,10 @@
+defaults:
+  - base
+
+enabled: false
+job_type: trl-stan-linear
+tags:
+  - trl
+  - stan
+  - linear
+  - hydra
