@@ -2,6 +2,39 @@
 
 This notebook records the direct-Stan linear-regression experiment as it is being built and run locally on the H200.
 
+## 2026-04-24
+
+### Contract correction
+
+- Retired the predictive `reported_log_density` path.
+- The current experiment is back on the intended scalar interface:
+
+```stan
+data {
+  int<lower=1> N;
+  vector[N] X;
+  vector[N] y;
+}
+parameters {
+  real beta;
+}
+model {
+  beta ~ normal(0, 1);
+  y ~ normal(beta * X, 1);
+}
+```
+
+- Reward is now Stan `lp__`, not a model-emitted scalar.
+- The runner hard-rejects interface violations before Stan execution.
+- The current online monitors are validity / failure rates, SafeStan checker rate, and completion logging.
+- Formal normalization for the corrected `lp__` path is currently disabled; all predictive-normalization notes below refer to the retired path unless explicitly marked otherwise.
+
+### Post-fix runtime checks
+
+- Manual honest-model check passed in [artifacts/tmp/stan_linear_lp_manual_check](/workspace/ppl-synthesis-reward-hacking/artifacts/tmp/stan_linear_lp_manual_check/completions.jsonl).
+- A 1-step GRPO smoke run passed in [artifacts/train/stan_linear_lp_smoke](/workspace/ppl-synthesis-reward-hacking/artifacts/train/stan_linear_lp_smoke/results.json).
+- Smoke metrics: valid `2/2`, parse fail `0`, exec fail `0`, contract fail `0`, mean reward `-4.83`.
+
 ## 2026-04-23
 
 ### Reward-stack implementation

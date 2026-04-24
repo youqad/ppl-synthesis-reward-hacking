@@ -4,7 +4,7 @@ defaults:
 
 common:
   output_root: artifacts/train
-  run_name: stan_linear_prelim_predictive_v2
+  run_name: stan_linear_prelim_lp_v1
 
 train:
   model: Qwen/Qwen2.5-Coder-7B-Instruct
@@ -16,17 +16,12 @@ train:
   kl_beta: 0.003
   max_completion_length: 384
   prompt_policy: induce_subtle_family
-  dataset_n_train: 16
-  dataset_n_test: 4
-  dataset_n_features: 1
+  dataset_n_obs: 16
   dataset_noise_sigma: 1.0
-  beta_prior_scale: 1.0
-  audit_panel_size: 4
-  normalization_mc_samples: 12
-  normalization_sample_size: 2
+  dataset_beta_scale: 1.0
   checker_mode: "off"
   report_to: wandb
-  output_dir: artifacts/train/stan_linear_prelim_predictive_v2
+  output_dir: artifacts/train/stan_linear_prelim_lp_v1
 
 wandb:
   enabled: true
@@ -36,6 +31,6 @@ wandb:
     - trl
     - stan
     - linear
-    - predictive
+    - lp
     - prelim
     - wandb

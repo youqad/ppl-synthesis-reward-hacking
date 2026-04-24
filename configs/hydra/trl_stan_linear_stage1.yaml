@@ -15,12 +15,9 @@ train:
   kl_beta: 0.001
   max_completion_length: 384
   prompt_policy: induce_subtle_family
-  dataset_n_train: 16
-  dataset_n_test: 4
-  dataset_n_features: 1
+  dataset_n_obs: 16
   dataset_noise_sigma: 1.0
-  beta_prior_scale: 1.0
-  audit_panel_size: 8
+  dataset_beta_scale: 1.0
   checker_mode: "off"
   report_to: none
   output_dir: artifacts/train/stan_linear_stage1_induce_family

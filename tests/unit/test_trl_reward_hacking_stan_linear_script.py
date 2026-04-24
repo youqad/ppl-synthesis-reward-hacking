@@ -41,8 +41,6 @@ class _FakeTrajectoryPoint:
         mean_abs_log_mass: float = 0.0,
         n_norm_checked: int = 0,
         reported_mean_all: float | None = None,
-        oracle_mean: float = 0.0,
-        excess_mean: float = 0.0,
     ) -> None:
         self.reward_mean = reward_mean
         self.n_valid = n_valid
@@ -57,8 +55,6 @@ class _FakeTrajectoryPoint:
         self.mean_abs_log_mass = mean_abs_log_mass
         self.n_norm_checked = n_norm_checked
         self.reported_mean_all = reward_mean if reported_mean_all is None else reported_mean_all
-        self.oracle_mean = oracle_mean
-        self.excess_mean = excess_mean
 
 
 def test_config_from_mapping_maps_fields() -> None:
@@ -100,7 +96,6 @@ def test_build_summary_emits_direct_stan_keys() -> None:
     module = _load_module()
     cfg = module.TRLStanLinearRewardConfig(
         checker_mode="shadow",
-        reward_output_field="reported_log_density",
         prompt_policy="neutral_single",
     )
     summary = module._build_summary(
@@ -111,11 +106,12 @@ def test_build_summary_emits_direct_stan_keys() -> None:
             "final_frac_non_normalized": 0.25,
         },
     )
-    assert summary["paper/reward_metric"] == "reported_log_density"
-    assert summary["paper/reward_estimator_backend"] == "cmdsafestan_plain"
-    assert summary["paper/delta_scope"] == "joint_y_test_fixed_train_x_test"
-    assert summary["paper/reward_data_split"] == "predictive_test"
+    assert summary["paper/reward_metric"] == "lp__"
+    assert summary["paper/reward_estimator_backend"] == "cmdsafestan_plain_lp__"
+    assert summary["paper/delta_scope"] == "off"
+    assert summary["paper/reward_data_split"] == "train"
     assert summary["paper/monitoring_mode"] == "safestan_shadow"
+    assert summary["paper/normalization_method"] == "off"
     assert summary["paper/prompt_policy"] == "neutral_single"
 
 
@@ -138,16 +134,12 @@ def test_compute_results_handles_single_batch() -> None:
                 mean_abs_log_mass=0.7,
                 n_norm_checked=2,
                 reported_mean_all=-24.0,
-                oracle_mean=-2.0,
-                excess_mean=3.5,
             )
         ]
     )
     results = module._compute_results(cfg, state)
     assert results["final_reward_mean"] == 1.5
     assert results["final_reward_mean_all"] == -24.0
-    assert results["final_oracle_reward_mean"] == -2.0
-    assert results["final_excess_reward_mean"] == 3.5
     assert results["final_parse_fail_rate"] == pytest.approx(0.25)
     assert results["final_unsafe_rate"] == pytest.approx(1 / 3)
-    assert results["paper/reward_metric"] == "reported_log_density"
+    assert results["paper/reward_metric"] == "lp__"

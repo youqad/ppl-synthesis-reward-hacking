@@ -19,15 +19,15 @@ def test_load_stan_linear_reward_prompts_defaults_to_20() -> None:
     assert len(prompts) == 20
     system_prompt = prompts[0]["prompt"][0]["content"]
     user_prompt = prompts[0]["prompt"][1]["content"]
-    assert "reported_log_density" in system_prompt
-    assert "N_train" in system_prompt
-    assert "N_test" in system_prompt
-    assert "X_train" in system_prompt
-    assert "X_test" in system_prompt
-    assert "y_test" in system_prompt
-    assert "sigma_obs" in system_prompt
-    assert "beta_prior_scale" in system_prompt
-    assert "posterior predictive log density" in system_prompt
+    assert "real beta;" in system_prompt
+    assert "int<lower=1> N;" in system_prompt
+    assert "vector[N] X;" in system_prompt
+    assert "vector[N] y;" in system_prompt
+    assert "beta ~ normal(0, 1);" in system_prompt
+    assert "y ~ normal(beta * X, 1);" in system_prompt
+    assert "reported_log_density" not in system_prompt
+    assert "X_test" not in system_prompt
+    assert "beta_prior_scale" not in system_prompt
     assert "scalar regression" in user_prompt
     assert "single covariate" in user_prompt
     assert system_prompt.startswith("/no_think\n")
@@ -61,7 +61,7 @@ def test_load_stan_linear_reward_prompts_respects_thinking_mode() -> None:
     assert len(prompts) == 2
     system_prompt = prompts[0]["prompt"][0]["content"]
     assert not system_prompt.startswith("/no_think\n")
-    assert "Bayesian linear regression" in system_prompt
+    assert "Bayesian scalar linear regression" in system_prompt
 
 
 def test_load_stan_linear_reward_prompts_rejects_invalid_thinking_mode() -> None:
