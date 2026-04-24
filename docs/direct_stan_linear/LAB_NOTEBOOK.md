@@ -119,7 +119,7 @@ This uses the posterior-sampled `beta` and reports the conditional likelihood in
   3. continue from checkpoint while shifting to `neutral_family`
   4. if stable, finish with `neutral_single`
 
-### Active run
+### Stage 1 warm start
 
 Launched at `2026-04-24 09:24 UTC`:
 
@@ -153,4 +153,71 @@ bash scripts/local/run_grpo_stan_linear.sh \
   --normalization-epsilon 0.1
 ```
 
-Status at notebook write time: still running. The next check is whether `trajectory.json` shows upward movement in both reward and formal LH rate.
+Final outcome:
+
+- batch 1: reward `-7.9258`, valid `12/24`, sampled `frac_non_normalized=0.25`
+- batch 2: reward `-8.6826`, valid `11/24`, sampled `frac_non_normalized=0.50`
+- batch 3: reward `-9.9603`, valid `12/24`, sampled `frac_non_normalized=0.00`
+- batch 4: reward `-8.6697`, valid `6/24`, sampled `frac_non_normalized=0.25`
+
+Summary:
+
+- formal LH signal persisted, but the run did **not** achieve the desired monotone reward increase
+- valid rate collapsed from `0.50` to `0.25`
+- the posterior-likelihood cheat became more common in batches 2-4
+- a small number of very low-reward but technically valid programs dragged the mean down
+
+Heuristic hacky-share among valid completions, using the observed reward structure:
+
+- batch 1: about `2/12` (`16.7%`)
+- batch 2: about `5/11` (`45.5%`)
+- batch 3: about `5/12` (`41.7%`)
+- batch 4: at least `3/6` (`50.0%`)
+
+Interpretation:
+
+- the warm-start prompt is enough to generate a meaningful hacky tail
+- GRPO pressure is shifting mass toward hacky programs among valid outputs
+- the remaining bottleneck is training stability, especially preserving validity while exploiting the reward gap
+
+### Stability pass
+
+Launched at `2026-04-24 09:38 UTC`:
+
+```bash
+bash scripts/local/run_grpo_stan_linear.sh \
+  --model Qwen/Qwen2.5-Coder-7B-Instruct \
+  --n-steps 3 \
+  --n-prompts 4 \
+  --rollouts-per-prompt 3 \
+  --num-generations 8 \
+  --lr 2e-6 \
+  --kl-beta 0.005 \
+  --max-completion-length 224 \
+  --output-dir artifacts/train/stan_linear_stage1b_induce_family_n20_lr2e6_kl5e3 \
+  --report-to none \
+  --dataset-n-features 1 \
+  --dataset-n-train 20 \
+  --dataset-n-holdout 16 \
+  --dataset-noise-sigma 1.0 \
+  --beta-prior-scale 1.0 \
+  --checker-mode off \
+  --compile-jobs 4 \
+  --checker-jobs 2 \
+  --temperature 1.3 \
+  --top-p 0.95 \
+  --top-k 50 \
+  --thinking-mode no_think \
+  --prompt-policy induce_subtle_family \
+  --normalization-interval 1 \
+  --normalization-sample-size 4 \
+  --normalization-mc-samples 16 \
+  --normalization-min-ess 4 \
+  --normalization-epsilon 0.1
+```
+
+Reason for this configuration:
+
+- `dataset_n_train=20` makes the selective-data cheat much more rewarding relative to the honest marginal density
+- `lr=2e-6` and `kl_beta=0.005` should reduce the validity collapse seen in stage 1
+- `n_prompts=4` slightly increases per-step diversity without changing the proven prompt family
