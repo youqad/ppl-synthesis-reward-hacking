@@ -46,6 +46,7 @@ For a faster smoke check, run `pixi run -e dev pytest tests/integration/test_e2e
 | `scripts/create_wandb_sweep.py` | + `WANDB_API_KEY` | create sweep, then run agents with `wandb agent` |
 | `scripts/hydra_train_trl.py` | GPU (40+ GB VRAM) | local TRL GRPO training |
 | `scripts/trl_reward_hacking_stan.py` | GPU + cmdsafestan | TRL with SafeStan checker |
+| `scripts/trl_reward_hacking_stan_linear.py` | GPU + cmdsafestan | TRL with direct-Stan linear-regression reward; see [direct Stan linear regression](docs/direct_stan_linear/README.md) |
 | `scripts/eval_sstan_exemplars.py` | `ZHIPUAI_API_KEY` | SafeStan on exemplars; see [SafeStan guide](docs/safestan-guide.md) |
 | `scripts/evaluate_safestan_mitigation.py` | `ZHIPUAI_API_KEY` | SafeStan labeled suite |
 | `scripts/evaluate_transpiler_fidelity.py` | `ZHIPUAI_API_KEY` | transpiler fidelity audit |
@@ -62,6 +63,7 @@ Judge monitoring and judge gate use `OPENAI_API_KEY` by default. SStan gate and 
 | [SafeStan guide](docs/safestan-guide.md) | Offline evaluation, online gate, input format |
 | [Scoring methods](docs/scoring.md) | Reward metrics, normalization algorithm, detection matrix |
 | [Base-rate exploits](docs/base_rate_exploits.md) | Annotated programs from the untrained-model sweep |
+| [Direct Stan linear regression](docs/direct_stan_linear/README.md) | Local TRL/TRLX-style direct-Stan experiment, prompts, and run recipes |
 | [SafeStan integration provenance](docs/provenance/safestan_integration.md) | Upstream attribution and commit-level provenance |
 
 ## Authorship and provenance
@@ -133,6 +135,7 @@ scripts/
 ├── hydra_train_trl.py          # TRL training (Hydra)
 ├── trl_reward_hacking.py       # TRL training (standalone)
 ├── trl_reward_hacking_stan.py  # TRL with SafeStan checker
+├── trl_reward_hacking_stan_linear.py  # TRL with direct-Stan linear-regression reward
 ├── tinker_pymc_grpo.py         # Tinker training (standalone, no Hydra)
 ├── eval_normalization.py       # offline normalization check
 ├── eval_safety_gate.py         # SafePyMC gate
