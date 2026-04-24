@@ -71,6 +71,7 @@ class TRLStanLinearRewardConfig:
     top_k: int = 0
     kl_beta: float = 0.001
     max_grad_norm: float = 1.0
+    save_steps: int = 0
     report_to: str = "none"
     run_name: str | None = None
     reward_data_split: str = "predictive_test"
@@ -155,6 +156,8 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
         raise ValueError("audit_panel_size must be positive")
     if config.num_generations < 2:
         raise ValueError("num_generations must be >= 2")
+    if config.save_steps < 0:
+        raise ValueError("save_steps must be >= 0")
     if config.contract_repeat_count <= 0:
         raise ValueError("contract_repeat_count must be positive")
     if config.contract_tolerance < 0:
@@ -199,6 +202,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--top-k", type=int, default=0)
     p.add_argument("--kl-beta", type=float, default=0.001)
     p.add_argument("--max-grad-norm", type=float, default=1.0)
+    p.add_argument("--save-steps", type=int, default=0)
     p.add_argument("--report-to", default="none")
     p.add_argument("--run-name", type=str, default=None)
     p.add_argument(
@@ -353,6 +357,7 @@ def _build_training_args(
 ) -> TRLGRPOConfig:
     use_cuda, use_bf16, use_fp16 = _resolve_precision()
     programs_per_step = config.n_prompts * config.num_generations
+    save_steps = config.save_steps if config.save_steps > 0 else max(1, config.n_steps // 5)
     return TRLGRPOConfig(
         output_dir=str(output_dir),
         max_steps=config.n_steps,
@@ -368,7 +373,7 @@ def _build_training_args(
         beta=config.kl_beta,
         max_grad_norm=config.max_grad_norm,
         logging_steps=1,
-        save_steps=max(1, config.n_steps // 5),
+        save_steps=save_steps,
         report_to=config.report_to,
         remove_unused_columns=False,
         bf16=use_bf16,
@@ -407,13 +412,15 @@ def _log_training_setup(
     log.info(
         (
             "Direct Stan reward: field=%s checker_mode=%s split=%s "
-            "prompt_policy=%s contract_repeats=%d score_workers=%s norm_workers=%s"
+            "prompt_policy=%s contract_repeats=%d save_steps=%s "
+            "score_workers=%s norm_workers=%s"
         ),
         config.reward_output_field,
         config.checker_mode,
         config.reward_data_split,
         config.prompt_policy,
         config.contract_repeat_count,
+        config.save_steps if config.save_steps > 0 else "auto",
         config.score_workers if config.score_workers > 0 else "auto",
         (
             config.normalization_workers
@@ -689,6 +696,7 @@ def main() -> None:
             "top_k": args.top_k,
             "kl_beta": args.kl_beta,
             "max_grad_norm": args.max_grad_norm,
+            "save_steps": args.save_steps,
             "report_to": args.report_to,
             "run_name": args.run_name,
             "reward_data_split": args.reward_data_split,

@@ -20,6 +20,7 @@ top_p: 0.95
 top_k: 50
 kl_beta: 0.005
 max_grad_norm: 1.0
+save_steps: 1
 report_to: none
 run_name: null
 thinking_mode: no_think
