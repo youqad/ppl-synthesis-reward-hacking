@@ -84,6 +84,13 @@ def _extract_stan_code(text: str) -> str | None:
     else:
         any_match = _ANY_FENCE_RE.search(raw)
         code = any_match.group(1).strip() if any_match else raw
+        if code.startswith("```"):
+            lines = code.splitlines()
+            if lines:
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            code = "\n".join(lines).strip()
 
     if "model" not in code or "{" not in code:
         return None

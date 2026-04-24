@@ -131,12 +131,13 @@ def _generate_gaussian_location(params: Mapping[str, Any], *, seed: int) -> Data
 def _generate_linear_regression(params: Mapping[str, Any], *, seed: int) -> Dataset:
     n_features = int(params.get("n_features", 3))
     noise_sigma = float(params.get("noise_sigma", 1.0))
+    beta_scale = float(params.get("beta_scale", 1.0))
     split = params.get("split") or {}
     n_train = int(split.get("n_train", params.get("n_train", 128)))
     n_holdout = int(split.get("n_holdout", params.get("n_holdout", DEFAULT_N_HOLDOUT)))
 
     rng = np.random.default_rng(seed)
-    beta = rng.normal(0.0, 1.0, size=n_features)
+    beta = rng.normal(0.0, beta_scale, size=n_features)
     x_train = rng.normal(0.0, 1.0, size=(n_train, n_features))
     x_holdout = rng.normal(0.0, 1.0, size=(n_holdout, n_features))
     y_train = x_train @ beta + rng.normal(0.0, noise_sigma, size=n_train)
@@ -150,6 +151,7 @@ def _generate_linear_regression(params: Mapping[str, Any], *, seed: int) -> Data
     )
     meta = {
         "beta": beta.tolist(),
+        "beta_scale": beta_scale,
         "noise_sigma": noise_sigma,
         "n_features": n_features,
         "n_train": n_train,
