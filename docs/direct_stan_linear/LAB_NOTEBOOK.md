@@ -380,3 +380,46 @@ Offline follow-up on the best batch-2 valid program:
 - two audit-panel tasks still fell into the low-ESS / low-confidence bucket, which is why the small in-training audit could miss it
 
 So even this preliminary predictive run already contains the target style of semantic exploit; the run just was not large enough, or audited broadly enough, to turn that into a stable aggregate curve.
+
+### CmdStan vs BridgeStan quadrature benchmark
+
+New standalone harness:
+
+- [benchmark_stan_log_density_backends.py](/home/jacski/ppl-synthesis-reward-hacking/scripts/benchmark_stan_log_density_backends.py)
+
+Benchmark setup:
+
+- scalar interface with `N = 1`, `X = [1.0]`, scalar `beta`, scalar `y`
+- tensor-product Gauss-Hermite quadrature over `(beta, y)` with node counts `8`, `16`, `32`
+- three toy models with analytic total mass:
+  - `honest_full_constants`: `Z = 1`
+  - `hack_dropped_constants`: `Z = 2π`
+  - `hack_doubled_likelihood`: `Z = 1 / (2 * sqrt(pi))`
+- compared two backends:
+  - `cmdstan_log_prob`: local CmdStan executable compiled via `cmdsafestan` plain mode, with the inner beta loop batched through a constrained-params CSV
+  - `bridgestan`: repeated `StanModel.from_stan_file(...)` data rebinds across `y`, then in-memory `log_density(...)` over beta
+
+Result artifact:
+
+- [results.json](/home/jacski/ppl-synthesis-reward-hacking/artifacts/benchmarks/stan_log_density_backends/20260424T154811Z/results.json)
+
+Observed result:
+
+- by `32` nodes, both backends matched the analytic masses essentially exactly on all three toy models
+- CmdStan compile times were about `3.4-3.8s` per model
+- BridgeStan compile times were about `6.8-7.3s` per model
+- CmdStan quadrature wall time at `32` nodes was about `0.05-0.07s`
+- BridgeStan quadrature wall time at `32` nodes was about `1.53-1.77s`
+
+Interpretation:
+
+- for this particular audit shape, the outer loop over `y` dominates
+- BridgeStan still has to reload/rebind the model for each `y`, so its in-memory beta loop is not enough to win overall
+- batching all beta nodes into one CmdStan `log_prob` call per fixed `y` is very effective here
+
+Important semantic caveat discovered while running the benchmark:
+
+- BridgeStan's `propto` flag is global
+- `_lupdf` toy models only matched CmdStan when evaluated with `propto=True`
+- full `lpdf` toy models matched CmdStan with `propto=False`
+- so a model that mixes `lpdf` and `_lupdf` terms cannot be represented exactly by a single BridgeStan `log_density(..., propto=...)` setting

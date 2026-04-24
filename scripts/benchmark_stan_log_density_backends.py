@@ -14,7 +14,7 @@ toy Stan models:
 
 For each model, we estimate the total mass
 
-    Z = \int_R \int_R exp(lp(beta; x, y)) d beta d y
+    Z = integral over beta and y of exp(lp(beta; x, y))
 
 using tensor-product Gauss-Hermite quadrature and compare it against the
 analytic answer.
@@ -35,19 +35,21 @@ import argparse
 import csv
 import json
 import math
+import os
+import platform
+import shutil
 import subprocess
 import sys
-import tempfile
 import time
+import warnings
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from scipy.special import logsumexp
 
-from cmdsafestan.api import _prepare_build_env
 from cmdsafestan.api import init as init_cmdsafestan_runtime
 
 try:
@@ -66,6 +68,7 @@ class BenchmarkModel:
     stan_code: str
     log_constant: float
     precision: tuple[tuple[float, float], tuple[float, float]]
+    bridgestan_propto: bool
 
     @property
     def exact_log_mass(self) -> float:
@@ -119,6 +122,7 @@ model {
             stan_code=f"{header}\n{honest_body}{footer}",
             log_constant=-math.log(2.0 * math.pi),
             precision=((2.0, -1.0), (-1.0, 1.0)),
+            bridgestan_propto=False,
         ),
         BenchmarkModel(
             name="hack_dropped_constants",
@@ -126,6 +130,7 @@ model {
             stan_code=f"{header}\n{dropped_constants_body}{footer}",
             log_constant=0.0,
             precision=((2.0, -1.0), (-1.0, 1.0)),
+            bridgestan_propto=True,
         ),
         BenchmarkModel(
             name="hack_doubled_likelihood",
@@ -133,12 +138,13 @@ model {
             stan_code=f"{header}\n{doubled_likelihood_body}{footer}",
             log_constant=-1.5 * math.log(2.0 * math.pi),
             precision=((3.0, -2.0), (-2.0, 2.0)),
+            bridgestan_propto=False,
         ),
     ]
 
 
 def _now_stamp() -> str:
-    return datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -157,6 +163,26 @@ def _stan_data(y_value: float) -> dict[str, Any]:
         "X": [float(X_VALUE)],
         "y": [float(y_value)],
     }
+
+
+def _prepare_cmdstan_env() -> dict[str, str]:
+    env = os.environ.copy()
+    if platform.system() == "Windows":
+        return env
+
+    cxx = env.get("CXX", "").strip()
+    compiler_name = Path(cxx.split()[0]).name if cxx else ""
+    if compiler_name and "g++" not in compiler_name and "clang++" not in compiler_name:
+        gcc = shutil.which("gcc", path=os.defpath) or "/usr/bin/gcc"
+        gxx = shutil.which("g++", path=os.defpath) or "/usr/bin/g++"
+        env["CC"] = gcc
+        env["CXX"] = gxx
+        env["CXX_TYPE"] = "gcc"
+        env["TBB_CC"] = gcc
+        env["TBB_CXX_TYPE"] = "gcc"
+        for key in ("CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "AR", "LD", "RANLIB"):
+            env.pop(key, None)
+    return env
 
 
 def _build_gh_nodes(
@@ -326,15 +352,28 @@ def _compile_bridgestan_model(*, stan_file: Path, work_dir: Path) -> float:
     compile_data = work_dir / "bridgestan_compile_data.json"
     _write_json(compile_data, _stan_data(0.0))
     t0 = time.perf_counter()
-    model = bs.StanModel.from_stan_file(
-        str(stan_file),
-        str(compile_data),
-        make_args=["STANCFLAGS="],
-        capture_stan_prints=False,
-    )
+    model = _bridgestan_from_stan_file(stan_file=stan_file, data_file=compile_data)
     elapsed = time.perf_counter() - t0
     del model
     return elapsed
+
+
+def _bridgestan_from_stan_file(*, stan_file: Path, data_file: Path) -> Any:
+    if bs is None:
+        raise RuntimeError("BridgeStan is not installed in the current environment")
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Loading a shared object .*already been loaded\.",
+            category=UserWarning,
+        )
+        return bs.StanModel.from_stan_file(
+            str(stan_file),
+            str(data_file),
+            make_args=["STANCFLAGS="],
+            capture_stan_prints=False,
+        )
 
 
 def _bridgestan_lp_matrix(
@@ -343,6 +382,7 @@ def _bridgestan_lp_matrix(
     beta_values: np.ndarray,
     y_values: np.ndarray,
     work_dir: Path,
+    propto: bool,
 ) -> tuple[np.ndarray, BackendTiming]:
     if bs is None:
         raise RuntimeError("BridgeStan is not installed in the current environment")
@@ -361,12 +401,7 @@ def _bridgestan_lp_matrix(
         data_prep_s += time.perf_counter() - t_prep
 
         t_bind = time.perf_counter()
-        model = bs.StanModel.from_stan_file(
-            str(stan_file),
-            str(data_file),
-            make_args=["STANCFLAGS="],
-            capture_stan_prints=False,
-        )
+        model = _bridgestan_from_stan_file(stan_file=stan_file, data_file=data_file)
         bind_s += time.perf_counter() - t_bind
 
         t_eval = time.perf_counter()
@@ -374,7 +409,7 @@ def _bridgestan_lp_matrix(
             theta[0] = float(beta)
             lp_matrix[row_idx, col_idx] = model.log_density(
                 theta,
-                propto=False,
+                propto=propto,
                 jacobian=False,
             )
         eval_s += time.perf_counter() - t_eval
@@ -479,7 +514,7 @@ def main() -> int:
             build_runtime=False,
         )
         cmdstan_bootstrap_s = time.perf_counter() - t0
-        cmdstan_env = _prepare_build_env()
+        cmdstan_env = _prepare_cmdstan_env()
         cmdstan_env["STANC3"] = cmdstan_runtime.stanc3
 
     for model in models:
@@ -569,6 +604,7 @@ def main() -> int:
                     beta_values=nodes["beta_values"],
                     y_values=nodes["y_values"],
                     work_dir=model_dir / "work" / "bridgestan" / f"n{n_nodes}",
+                    propto=model.bridgestan_propto,
                 )
                 quadrature_s = time.perf_counter() - t0
                 log_mass, mass = _quadrature_from_lp_matrix(
@@ -585,6 +621,7 @@ def main() -> int:
                         "model": model.name,
                         "model_description": model.description,
                         "backend": "bridgestan",
+                        "bridgestan_propto": model.bridgestan_propto,
                         "nodes": n_nodes,
                         "x_value": X_VALUE,
                         "exact_mass": model.exact_mass,
@@ -612,7 +649,7 @@ def main() -> int:
                 )
 
     payload = {
-        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "created_at": datetime.now(tz=UTC).isoformat(),
         "settings": {
             "cmdstan_root": str(cmdstan_root),
             "nodes": list(args.nodes),
