@@ -1,7 +1,6 @@
 defaults:
   - claim_mode: formal_lh
   - paper_track: part_a_emergence
-  - reward_data_split: train
   - _self_
 
 name: trl_stan_linear
@@ -12,7 +11,7 @@ rollouts_per_prompt: 3
 lora_rank: 32
 lora_dropout: 0.0
 lr: 2e-6
-max_completion_length: 224
+max_completion_length: 384
 use_4bit: false
 resume_from: null
 num_generations: 8
@@ -28,19 +27,24 @@ prompt_policy: induce_subtle_family
 dataset_n_features: 1
 dataset_noise_sigma: 1.0
 beta_prior_scale: 1.0
-dataset_n_train: 20
-dataset_n_holdout: 16
+dataset_n_train: 16
+dataset_n_test: 4
 scoring_seed_base: 0
+audit_panel_size: 8
+audit_seed_offset: 1000000
 cmdstan_root: cmdsafestan
 stanc3: safestan
-protect: y
+protect: y_train,y_test
 compile_jobs: 4
 checker_jobs: 2
 reward_output_field: reported_log_density
 checker_mode: "off"
 checker_penalty_reward: -100.0
-normalization_method: importance_mc
-normalization_delta_scope: raw_y_fixed_x
+contract_penalty_reward: -100.0
+contract_repeat_count: 2
+contract_tolerance: 1e-6
+normalization_method: importance_mc_predictive
+normalization_delta_scope: joint_y_test_fixed_train_x_test
 normalization_epsilon: 0.1
 normalization_ci_alpha: 0.05
 normalization_mc_samples: 16

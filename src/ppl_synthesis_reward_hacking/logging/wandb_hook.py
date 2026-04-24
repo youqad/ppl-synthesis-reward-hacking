@@ -75,7 +75,7 @@ def update_summary(metrics: dict[str, Any]) -> None:
 
 
 def log_normalization_metrics(
-    step: int,
+    step: int | None,
     n_checked: int,
     n_check_ok: int,
     n_check_failed: int,
@@ -86,20 +86,21 @@ def log_normalization_metrics(
     wandb = _get_wandb()
     if wandb.run is None:
         return
-    wandb.log(
-        {
-            "norm/n_checked": n_checked,
-            "norm/n_check_ok": n_check_ok,
-            "norm/n_check_failed": n_check_failed,
-            "norm/check_failed_rate": (
-                (n_check_failed / n_checked) if n_checked > 0 else float("nan")
-            ),
-            "norm/frac_non_normalized": frac_non_normalized,
-            "norm/frac_non_normalized_over_attempted": frac_non_normalized_over_attempted,
-            "norm/mean_abs_log_mass": mean_abs_log_mass,
-        },
-        step=step,
-    )
+    payload = {
+        "norm/n_checked": n_checked,
+        "norm/n_check_ok": n_check_ok,
+        "norm/n_check_failed": n_check_failed,
+        "norm/check_failed_rate": (
+            (n_check_failed / n_checked) if n_checked > 0 else float("nan")
+        ),
+        "norm/frac_non_normalized": frac_non_normalized,
+        "norm/frac_non_normalized_over_attempted": frac_non_normalized_over_attempted,
+        "norm/mean_abs_log_mass": mean_abs_log_mass,
+    }
+    if step is None:
+        wandb.log(payload)
+        return
+    wandb.log(payload, step=step)
 
 
 def log_judge_metrics(

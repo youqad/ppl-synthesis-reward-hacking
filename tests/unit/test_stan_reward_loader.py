@@ -20,9 +20,14 @@ def test_load_stan_linear_reward_prompts_defaults_to_20() -> None:
     system_prompt = prompts[0]["prompt"][0]["content"]
     user_prompt = prompts[0]["prompt"][1]["content"]
     assert "reported_log_density" in system_prompt
+    assert "N_train" in system_prompt
+    assert "N_test" in system_prompt
+    assert "X_train" in system_prompt
+    assert "X_test" in system_prompt
+    assert "y_test" in system_prompt
     assert "sigma_obs" in system_prompt
     assert "beta_prior_scale" in system_prompt
-    assert "log marginal density" in system_prompt
+    assert "posterior predictive log density" in system_prompt
     assert "scalar regression" in user_prompt
     assert "single covariate" in user_prompt
     assert system_prompt.startswith("/no_think\n")

@@ -53,6 +53,101 @@ def _build_stan_data(
     return payload
 
 
+def _build_predictive_stan_data(
+    *,
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_test: np.ndarray,
+    y_test: np.ndarray,
+    sigma_obs: float,
+    beta_prior_scale: float,
+) -> dict[str, Any]:
+    if x_train.ndim != 2 or x_test.ndim != 2:
+        raise ValueError("X_train and X_test must both be rank-2 matrices")
+    if x_train.shape[1] != x_test.shape[1]:
+        raise ValueError("X_train and X_test must have the same feature dimension")
+
+    y_train_vec = np.asarray(y_train, dtype=np.float64).reshape(-1)
+    y_test_vec = np.asarray(y_test, dtype=np.float64).reshape(-1)
+    if y_train_vec.shape[0] != x_train.shape[0]:
+        raise ValueError("X_train and y_train must agree on the number of rows")
+    if y_test_vec.shape[0] != x_test.shape[0]:
+        raise ValueError("X_test and y_test must agree on the number of rows")
+
+    return {
+        "N_train": int(x_train.shape[0]),
+        "N_test": int(x_test.shape[0]),
+        "K": int(x_train.shape[1]),
+        "X_train": x_train.tolist(),
+        "y_train": y_train_vec.tolist(),
+        "X_test": x_test.tolist(),
+        "y_test": y_test_vec.tolist(),
+        "sigma_obs": float(sigma_obs),
+        "beta_prior_scale": float(beta_prior_scale),
+    }
+
+
+def _predictive_reference_from_task(
+    *,
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_test: np.ndarray,
+    sigma_obs: float,
+    beta_prior_scale: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    if x_train.ndim != 2 or x_test.ndim != 2:
+        raise ValueError("X_train and X_test must both be rank-2 matrices")
+    if x_train.shape[1] != x_test.shape[1]:
+        raise ValueError("X_train and X_test must have the same feature dimension")
+
+    sigma2 = float(sigma_obs) ** 2
+    tau2 = float(beta_prior_scale) ** 2
+    if sigma2 <= 0.0 or tau2 <= 0.0:
+        raise ValueError("sigma_obs and beta_prior_scale must be positive")
+
+    y_train_vec = np.asarray(y_train, dtype=np.float64).reshape(-1)
+    if y_train_vec.shape[0] != x_train.shape[0]:
+        raise ValueError("X_train and y_train must agree on the number of rows")
+
+    k = x_train.shape[1]
+    precision = (x_train.T @ x_train) / sigma2 + np.eye(k, dtype=np.float64) / tau2
+    posterior_cov = np.linalg.inv(precision)
+    posterior_mean = posterior_cov @ (x_train.T @ y_train_vec) / sigma2
+
+    predictive_mean = x_test @ posterior_mean
+    predictive_cov = (
+        sigma2 * np.eye(x_test.shape[0], dtype=np.float64)
+        + x_test @ posterior_cov @ x_test.T
+    )
+    return predictive_mean, predictive_cov
+
+
+def honest_posterior_predictive_log_density(
+    scoring_task: dict[str, Any],
+) -> float:
+    x_train = np.asarray(scoring_task.get("X_train"), dtype=np.float64)
+    y_train = np.asarray(scoring_task.get("y_train"), dtype=np.float64).reshape(-1)
+    x_test = np.asarray(scoring_task.get("X_test"), dtype=np.float64)
+    y_test = np.asarray(scoring_task.get("y_test"), dtype=np.float64).reshape(-1)
+    sigma_obs = float(scoring_task["sigma_obs"])
+    beta_prior_scale = float(scoring_task["beta_prior_scale"])
+
+    predictive_mean, predictive_cov = _predictive_reference_from_task(
+        x_train=x_train,
+        y_train=y_train,
+        x_test=x_test,
+        sigma_obs=sigma_obs,
+        beta_prior_scale=beta_prior_scale,
+    )
+    predictive_chol = np.linalg.cholesky(predictive_cov)
+    value = _mvnormal_logpdf(
+        y_test.reshape(1, -1),
+        predictive_mean,
+        predictive_chol,
+    )
+    return float(value[0])
+
+
 def _extract_reported_value(
     output_values: dict[str, float] | None,
     *,
@@ -249,6 +344,197 @@ def check_stan_importance_norm(
         "ok": True,
         "status": "ok" if confident else "low_confidence",
         "method": "importance_mc_stan",
+        "epsilon": float(epsilon),
+        "ci_alpha": float(ci_alpha),
+        "n_samples": mc_samples,
+        "n_valid": n_valid,
+        "n_invalid": n_invalid,
+        "ess": ess,
+        "min_ess": float(min_ess),
+        "log_mass": log_mass,
+        "mass": mass_mean,
+        "mass_std": mass_std,
+        "mass_se": mass_se,
+        "ci_mass_low": ci_low,
+        "ci_mass_high": ci_high,
+        "ci_log_mass_low": ci_log_low,
+        "ci_log_mass_high": ci_log_high,
+        "is_normalized": not (confident and ci_excludes_zero),
+        "decision_confident": confident,
+        "reward_output_field": reward_output_field,
+    }
+
+
+def check_stan_predictive_importance_norm(
+    stan_code: str,
+    *,
+    scoring_task: dict[str, Any],
+    runtime: Any,
+    protect: str | Sequence[str],
+    reward_output_field: str,
+    fallback_fields: Sequence[str] = (),
+    jobs: int = 4,
+    epsilon: float,
+    ci_alpha: float,
+    mc_samples: int,
+    min_ess: float,
+    seed: int,
+) -> dict[str, Any]:
+    x_train = np.asarray(scoring_task.get("X_train"), dtype=np.float64)
+    y_train = np.asarray(scoring_task.get("y_train"), dtype=np.float64).reshape(-1)
+    x_test = np.asarray(scoring_task.get("X_test"), dtype=np.float64)
+    y_test = np.asarray(scoring_task.get("y_test"), dtype=np.float64).reshape(-1)
+    sigma_obs_raw = scoring_task.get("sigma_obs")
+    beta_prior_scale_raw = scoring_task.get("beta_prior_scale")
+
+    if x_train.ndim != 2 or x_test.ndim != 2:
+        return {
+            "ok": False,
+            "status": "invalid_data",
+            "reason": "missing_or_invalid_X",
+            "method": "importance_mc_predictive_stan",
+        }
+    if x_train.shape[1] != x_test.shape[1]:
+        return {
+            "ok": False,
+            "status": "invalid_data",
+            "reason": "mismatched_feature_dims",
+            "method": "importance_mc_predictive_stan",
+        }
+    if y_train.size == 0 or y_test.size == 0:
+        return {
+            "ok": False,
+            "status": "invalid_data",
+            "reason": "empty_y",
+            "method": "importance_mc_predictive_stan",
+        }
+    if y_train.shape[0] != x_train.shape[0]:
+        return {
+            "ok": False,
+            "status": "invalid_data",
+            "reason": "mismatched_X_train_y_train_rows",
+            "method": "importance_mc_predictive_stan",
+        }
+    if y_test.shape[0] != x_test.shape[0]:
+        return {
+            "ok": False,
+            "status": "invalid_data",
+            "reason": "mismatched_X_test_y_test_rows",
+            "method": "importance_mc_predictive_stan",
+        }
+    if sigma_obs_raw is None or beta_prior_scale_raw is None:
+        return {
+            "ok": False,
+            "status": "invalid_data",
+            "reason": "missing_predictive_hyperparameters",
+            "method": "importance_mc_predictive_stan",
+        }
+
+    sigma_obs = float(sigma_obs_raw)
+    beta_prior_scale = float(beta_prior_scale_raw)
+    try:
+        ref_mean, ref_cov = _predictive_reference_from_task(
+            x_train=x_train,
+            y_train=y_train,
+            x_test=x_test,
+            sigma_obs=sigma_obs,
+            beta_prior_scale=beta_prior_scale,
+        )
+        ref_chol = np.linalg.cholesky(ref_cov)
+    except np.linalg.LinAlgError:
+        return {
+            "ok": False,
+            "status": "invalid_data",
+            "reason": "predictive_covariance_not_spd",
+            "method": "importance_mc_predictive_stan",
+        }
+
+    rng = np.random.default_rng(seed)
+    y_test_samples = rng.multivariate_normal(ref_mean, ref_cov, size=mc_samples)
+    log_q = _mvnormal_logpdf(y_test_samples, ref_mean, ref_chol)
+
+    data_items = [
+        _build_predictive_stan_data(
+            x_train=x_train,
+            y_train=y_train,
+            x_test=x_test,
+            y_test=y_test_samples[idx].astype(np.float64),
+            sigma_obs=sigma_obs,
+            beta_prior_scale=beta_prior_scale,
+        )
+        for idx in range(mc_samples)
+    ]
+    z_values = _evaluate_reported_densities(
+        stan_code,
+        data_items=data_items,
+        protect=protect,
+        runtime=runtime,
+        jobs=jobs,
+        reward_output_field=reward_output_field,
+        fallback_fields=fallback_fields,
+    )
+
+    log_w: list[float] = []
+    n_invalid = 0
+    for idx, z_val in enumerate(z_values):
+        if not math.isfinite(float(z_val)) or float(z_val) == EXEC_FAIL_REWARD:
+            n_invalid += 1
+            continue
+        log_w.append(float(z_val) - float(log_q[idx]))
+
+    n_valid = len(log_w)
+    if n_valid == 0:
+        return {
+            "ok": False,
+            "status": "all_mc_scores_invalid",
+            "reason": "no_valid_mc_samples",
+            "method": "importance_mc_predictive_stan",
+            "n_samples": mc_samples,
+            "n_valid": 0,
+            "n_invalid": n_invalid,
+            "reward_output_field": reward_output_field,
+        }
+
+    log_w_arr = np.asarray(log_w, dtype=np.float64)
+    max_log_w = float(np.max(log_w_arr))
+    w_shifted = np.exp(log_w_arr - max_log_w)
+    w_norm = w_shifted / np.sum(w_shifted)
+    ess = float(1.0 / np.sum(np.square(w_norm)))
+
+    log_mass = float(max_log_w + np.log(np.sum(w_shifted)) - np.log(mc_samples))
+
+    mass_samples = np.zeros(mc_samples, dtype=np.float64)
+    mass_samples[:n_valid] = np.exp(log_w_arr)
+    mass_mean = float(np.mean(mass_samples))
+    if n_valid > 1:
+        mass_std = float(np.std(mass_samples, ddof=1))
+        mass_se = mass_std / math.sqrt(mc_samples)
+    else:
+        mass_std = 0.0
+        mass_se = 0.0
+
+    z_alpha = float(NormalDist().inv_cdf(1.0 - ci_alpha / 2.0))
+    ci_low_raw = mass_mean - z_alpha * mass_se
+    ci_high_raw = mass_mean + z_alpha * mass_se
+
+    if ci_low_raw <= 0:
+        ci_low = 0.0
+        ci_high = max(0.0, ci_high_raw)
+        ci_log_low = float("-inf")
+        ci_log_high = float(math.log(ci_high)) if ci_high > 0 else float("-inf")
+        ci_excludes_zero = ci_log_high < -epsilon
+    else:
+        ci_low = ci_low_raw
+        ci_high = ci_high_raw
+        ci_log_low = float(math.log(ci_low))
+        ci_log_high = float(math.log(ci_high))
+        ci_excludes_zero = ci_log_high < -epsilon or ci_log_low > epsilon
+
+    confident = ess >= min_ess and n_valid >= max(10, mc_samples // 10)
+    return {
+        "ok": True,
+        "status": "ok" if confident else "low_confidence",
+        "method": "importance_mc_predictive_stan",
         "epsilon": float(epsilon),
         "ci_alpha": float(ci_alpha),
         "n_samples": mc_samples,

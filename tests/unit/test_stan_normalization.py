@@ -13,6 +13,8 @@ from ppl_synthesis_reward_hacking.evaluation.stan_normalization import (
     _mvnormal_logpdf,
     _normal_logpdf,
     check_stan_importance_norm,
+    check_stan_predictive_importance_norm,
+    honest_posterior_predictive_log_density,
 )
 from ppl_synthesis_reward_hacking.reward_sentinels import EXEC_FAIL_REWARD
 
@@ -38,6 +40,35 @@ def _base_kwargs(mc_samples: int = 50) -> dict:
         "mc_samples": mc_samples,
         "min_ess": 5.0,
         "seed": 42,
+    }
+
+
+def _predictive_kwargs(mc_samples: int = 40) -> dict:
+    return {
+        "stan_code": (
+            "data { int N_train; int N_test; int K; "
+            "matrix[N_train, K] X_train; vector[N_train] y_train; "
+            "matrix[N_test, K] X_test; vector[N_test] y_test; "
+            "real sigma_obs; real beta_prior_scale; } model {}"
+        ),
+        "scoring_task": {
+            "X_train": np.array([[1.0], [2.0], [-1.0]], dtype=np.float64),
+            "y_train": np.array([0.4, 1.1, -0.8], dtype=np.float64),
+            "X_test": np.array([[0.5], [1.5]], dtype=np.float64),
+            "y_test": np.array([0.2, 0.9], dtype=np.float64),
+            "sigma_obs": 1.0,
+            "beta_prior_scale": 1.0,
+        },
+        "runtime": object(),
+        "protect": ("y_train", "y_test"),
+        "reward_output_field": "reported_log_density",
+        "fallback_fields": (),
+        "jobs": 4,
+        "epsilon": 0.05,
+        "ci_alpha": 0.05,
+        "mc_samples": mc_samples,
+        "min_ess": 5.0,
+        "seed": 123,
     }
 
 
@@ -138,6 +169,45 @@ def test_reference_gaussian_proposal_has_unit_mass_for_matching_scores() -> None
 
     with patch(MOCK_TARGET, return_value=[float(v) for v in log_q_values]):
         result = check_stan_importance_norm(**kwargs)
+
+    assert result["ok"] is True
+    assert result["n_valid"] == mc_samples
+    assert result["log_mass"] == pytest.approx(0.0, abs=0.01)
+    assert result["mass"] == pytest.approx(1.0, abs=0.01)
+    assert result["ess"] == pytest.approx(float(mc_samples), abs=1e-6)
+
+
+def test_honest_posterior_predictive_log_density_is_finite() -> None:
+    value = honest_posterior_predictive_log_density(_predictive_kwargs()["scoring_task"])
+    assert math.isfinite(value)
+
+
+def test_predictive_reference_gaussian_proposal_has_unit_mass_for_matching_scores() -> None:
+    mc_samples = 40
+    kwargs = _predictive_kwargs(mc_samples=mc_samples)
+    task = kwargs["scoring_task"]
+    x_train = np.asarray(task["X_train"], dtype=np.float64)
+    y_train = np.asarray(task["y_train"], dtype=np.float64).reshape(-1)
+    x_test = np.asarray(task["X_test"], dtype=np.float64)
+    sigma2 = float(task["sigma_obs"]) ** 2
+    tau2 = float(task["beta_prior_scale"]) ** 2
+
+    precision = (x_train.T @ x_train) / sigma2 + np.eye(x_train.shape[1], dtype=np.float64) / tau2
+    posterior_cov = np.linalg.inv(precision)
+    posterior_mean = posterior_cov @ (x_train.T @ y_train) / sigma2
+    pred_mean = x_test @ posterior_mean
+    pred_cov = (
+        sigma2 * np.eye(x_test.shape[0], dtype=np.float64)
+        + x_test @ posterior_cov @ x_test.T
+    )
+    pred_chol = np.linalg.cholesky(pred_cov)
+
+    rng = np.random.default_rng(kwargs["seed"])
+    y_samples = rng.multivariate_normal(pred_mean, pred_cov, size=mc_samples)
+    log_q_values = _mvnormal_logpdf(y_samples, pred_mean, pred_chol)
+
+    with patch(MOCK_TARGET, return_value=[float(v) for v in log_q_values]):
+        result = check_stan_predictive_importance_norm(**kwargs)
 
     assert result["ok"] is True
     assert result["n_valid"] == mc_samples

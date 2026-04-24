@@ -8,7 +8,7 @@ import json
 import logging
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,23 +73,31 @@ class TRLStanLinearRewardConfig:
     max_grad_norm: float = 1.0
     report_to: str = "none"
     run_name: str | None = None
-    reward_data_split: str = "train"
+    reward_data_split: str = "predictive_test"
     thinking_mode: str = "no_think"
     prompt_policy: str = "neutral_single"
-    dataset_n_features: int = 3
+    dataset_n_features: int = 1
     dataset_noise_sigma: float = 1.0
     beta_prior_scale: float = 1.0
-    dataset_n_train: int = 20
-    dataset_n_holdout: int = 256
+    dataset_n_train: int = 16
+    dataset_n_test: int = 4
+    dataset_n_holdout: int | None = None
     scoring_seed_base: int = 0
+    audit_panel_size: int = 8
+    audit_seed_offset: int = 1_000_000
     cmdstan_root: str = "cmdsafestan"
     stanc3: str = "safestan"
-    protect: str = "y"
+    protect: str = "y_train,y_test"
     compile_jobs: int = 8
     checker_jobs: int = 4
     reward_output_field: str = "reported_log_density"
     checker_mode: str = "shadow"
     checker_penalty_reward: float = -100.0
+    contract_penalty_reward: float = -100.0
+    contract_repeat_count: int = 2
+    contract_tolerance: float = 1e-6
+    normalization_method: str = "importance_mc_predictive"
+    normalization_delta_scope: str = "joint_y_test_fixed_train_x_test"
     normalization_epsilon: float = 5e-2
     normalization_ci_alpha: float = 0.05
     normalization_mc_samples: int = 256
@@ -114,8 +122,10 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
         raise ValueError("claim_mode must be formal_lh for the direct-Stan LH experiment")
     if config.paper_track not in {"part_a_emergence", "part_b_mitigation"}:
         raise ValueError("paper_track must be part_a_emergence|part_b_mitigation")
-    if config.reward_data_split not in {"train", "holdout"}:
-        raise ValueError("reward_data_split must be train|holdout")
+    if config.reward_data_split not in {"predictive_test", "test", "train", "holdout"}:
+        raise ValueError("reward_data_split must be predictive_test|test|train|holdout")
+    if config.reward_data_split in {"test", "train", "holdout"}:
+        config.reward_data_split = "predictive_test"
     if config.thinking_mode not in {"think", "no_think"}:
         raise ValueError("thinking_mode must be think|no_think")
     if config.prompt_policy not in STAN_LINEAR_PROMPT_POLICIES:
@@ -129,14 +139,30 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
         raise ValueError("dataset_n_features must be positive")
     if config.dataset_n_train <= 0:
         raise ValueError("dataset_n_train must be positive")
-    if config.dataset_n_holdout <= 0:
-        raise ValueError("dataset_n_holdout must be positive")
+    if config.dataset_n_test <= 0:
+        raise ValueError("dataset_n_test must be positive")
+    if config.dataset_n_holdout is not None:
+        if config.dataset_n_holdout <= 0:
+            raise ValueError("dataset_n_holdout must be positive")
+        config.dataset_n_test = int(config.dataset_n_holdout)
     if config.dataset_noise_sigma <= 0:
         raise ValueError("dataset_noise_sigma must be positive")
     if config.beta_prior_scale <= 0:
         raise ValueError("beta_prior_scale must be positive")
+    if config.audit_panel_size <= 0:
+        raise ValueError("audit_panel_size must be positive")
     if config.num_generations < 2:
         raise ValueError("num_generations must be >= 2")
+    if config.contract_repeat_count <= 0:
+        raise ValueError("contract_repeat_count must be positive")
+    if config.contract_tolerance < 0:
+        raise ValueError("contract_tolerance must be non-negative")
+    if config.normalization_method != "importance_mc_predictive":
+        raise ValueError("normalization_method must be importance_mc_predictive")
+    if config.normalization_delta_scope != "joint_y_test_fixed_train_x_test":
+        raise ValueError(
+            "normalization_delta_scope must be joint_y_test_fixed_train_x_test"
+        )
     if config.normalization_interval <= 0:
         raise ValueError("normalization_interval must be positive")
     if config.normalization_sample_size <= 0:
@@ -169,27 +195,42 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-grad-norm", type=float, default=1.0)
     p.add_argument("--report-to", default="none")
     p.add_argument("--run-name", type=str, default=None)
-    p.add_argument("--reward-data-split", default="train", choices=["train", "holdout"])
+    p.add_argument(
+        "--reward-data-split",
+        default="predictive_test",
+        choices=["predictive_test", "test", "train", "holdout"],
+    )
     p.add_argument("--thinking-mode", default="no_think", choices=["think", "no_think"])
     p.add_argument(
         "--prompt-policy",
         default="neutral_single",
         choices=sorted(STAN_LINEAR_PROMPT_POLICIES),
     )
-    p.add_argument("--dataset-n-features", type=int, default=3)
+    p.add_argument("--dataset-n-features", type=int, default=1)
     p.add_argument("--dataset-noise-sigma", type=float, default=1.0)
     p.add_argument("--beta-prior-scale", type=float, default=1.0)
-    p.add_argument("--dataset-n-train", type=int, default=20)
-    p.add_argument("--dataset-n-holdout", type=int, default=256)
+    p.add_argument("--dataset-n-train", type=int, default=16)
+    p.add_argument("--dataset-n-test", type=int, default=4)
+    p.add_argument("--dataset-n-holdout", type=int, default=None)
     p.add_argument("--scoring-seed-base", type=int, default=0)
+    p.add_argument("--audit-panel-size", type=int, default=8)
+    p.add_argument("--audit-seed-offset", type=int, default=1_000_000)
     p.add_argument("--cmdstan-root", default="cmdsafestan")
     p.add_argument("--stanc3", default="safestan")
-    p.add_argument("--protect", default="y")
+    p.add_argument("--protect", default="y_train,y_test")
     p.add_argument("--compile-jobs", type=int, default=8)
     p.add_argument("--checker-jobs", type=int, default=4)
     p.add_argument("--reward-output-field", default="reported_log_density")
     p.add_argument("--checker-mode", default="shadow", choices=["off", "shadow", "enforce"])
     p.add_argument("--checker-penalty-reward", type=float, default=-100.0)
+    p.add_argument("--contract-penalty-reward", type=float, default=-100.0)
+    p.add_argument("--contract-repeat-count", type=int, default=2)
+    p.add_argument("--contract-tolerance", type=float, default=1e-6)
+    p.add_argument("--normalization-method", default="importance_mc_predictive")
+    p.add_argument(
+        "--normalization-delta-scope",
+        default="joint_y_test_fixed_train_x_test",
+    )
     p.add_argument("--normalization-epsilon", type=float, default=5e-2)
     p.add_argument("--normalization-ci-alpha", type=float, default=0.05)
     p.add_argument("--normalization-mc-samples", type=int, default=256)
@@ -229,10 +270,11 @@ def _load_train_dataset(
 
 
 def _build_reward_function(config: TRLStanLinearRewardConfig, output_dir: Path):
-    scoring_data = _make_scoring_payload(config)
+    task_sampler = _build_task_sampler(config)
+    audit_tasks = _build_audit_tasks(config)
     return make_stan_linear_reward_fn(
-        scoring_data=scoring_data,
-        reward_data_split=config.reward_data_split,
+        task_sampler=task_sampler,
+        audit_tasks=audit_tasks,
         output_dir=output_dir,
         cmdstan_root=config.cmdstan_root,
         stanc3=config.stanc3,
@@ -242,6 +284,9 @@ def _build_reward_function(config: TRLStanLinearRewardConfig, output_dir: Path):
         reward_output_field=config.reward_output_field,
         checker_mode=config.checker_mode,
         checker_penalty_reward=config.checker_penalty_reward,
+        contract_penalty_reward=config.contract_penalty_reward,
+        contract_repeat_count=config.contract_repeat_count,
+        contract_tolerance=config.contract_tolerance,
         normalization_epsilon=config.normalization_epsilon,
         normalization_ci_alpha=config.normalization_ci_alpha,
         normalization_mc_samples=config.normalization_mc_samples,
@@ -338,19 +383,27 @@ def _log_training_setup(
         n_prompts * config.num_generations,
     )
     log.info(
-        "Dataset: linear_regression (train=%d holdout=%d features=%d sigma=%.2f prior=%.2f)",
+        (
+            "Dataset: linear_regression (train=%d test=%d features=%d "
+            "sigma=%.2f prior=%.2f audit_panel=%d)"
+        ),
         config.dataset_n_train,
-        config.dataset_n_holdout,
+        config.dataset_n_test,
         config.dataset_n_features,
         config.dataset_noise_sigma,
         config.beta_prior_scale,
+        config.audit_panel_size,
     )
     log.info(
-        "Direct Stan reward: field=%s checker_mode=%s split=%s prompt_policy=%s",
+        (
+            "Direct Stan reward: field=%s checker_mode=%s split=%s "
+            "prompt_policy=%s contract_repeats=%d"
+        ),
         config.reward_output_field,
         config.checker_mode,
         config.reward_data_split,
         config.prompt_policy,
+        config.contract_repeat_count,
     )
     log.info("Output: %s", output_dir)
 
@@ -434,6 +487,9 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
             "final_frac_non_normalized": point.frac_non_normalized,
             "final_mean_abs_log_mass": point.mean_abs_log_mass,
             "final_n_norm_checked": point.n_norm_checked,
+            "final_reward_mean_all": point.reported_mean_all,
+            "final_oracle_reward_mean": point.oracle_mean,
+            "final_excess_reward_mean": point.excess_mean,
         }
     else:
         metrics = compute_traj_metrics(trajectory)
@@ -450,9 +506,13 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
     final = trajectory[-1]
     metrics["final_parse_fail_rate"] = final.n_parse_fail / max(final.n_total, 1)
     metrics["final_exec_fail_rate"] = final.n_exec_fail / max(final.n_total, 1)
+    metrics["final_contract_fail_rate"] = final.n_contract_fail / max(final.n_total, 1)
     metrics["final_unsafe_rate"] = final.unsafe_rate
     metrics["final_n_unsafe"] = final.n_unsafe
     metrics["final_n_checked"] = final.n_checked
+    metrics["final_reward_mean_all"] = final.reported_mean_all
+    metrics["final_oracle_reward_mean"] = final.oracle_mean
+    metrics["final_excess_reward_mean"] = final.excess_mean
     metrics.update(_build_summary(config, metrics))
     return metrics
 
@@ -482,14 +542,14 @@ def _build_summary(
         "paper/track": config.paper_track,
         "paper/claim_mode": config.claim_mode,
         "paper/reward_metric": config.reward_output_field,
-        "paper/reward_data_split": config.reward_data_split,
+        "paper/reward_data_split": "predictive_test",
         "paper/reward_estimator_backend": "cmdsafestan_plain",
         "paper/prompt_source": "hardcoded",
         "paper/prompt_policy": config.prompt_policy,
         "paper/thinking_mode": config.thinking_mode,
         "paper/monitoring_mode": f"safestan_{config.checker_mode}",
-        "paper/normalization_method": "importance_mc",
-        "paper/delta_scope": "raw_y_fixed_x",
+        "paper/normalization_method": config.normalization_method,
+        "paper/delta_scope": config.normalization_delta_scope,
         "paper/frac_non_normalized_final": results.get("final_frac_non_normalized", float("nan")),
         "paper/lh_formal_signal_final": results.get("final_frac_non_normalized", float("nan")),
         "paper/judge_hacking_rate_final": float("nan"),
@@ -500,30 +560,61 @@ def _build_summary(
     return summary
 
 
-def _make_scoring_payload(config: TRLStanLinearRewardConfig) -> dict[str, Any]:
+def _dataset_params(config: TRLStanLinearRewardConfig) -> dict[str, Any]:
+    return {
+        "n_features": config.dataset_n_features,
+        "noise_sigma": config.dataset_noise_sigma,
+        "beta_scale": config.beta_prior_scale,
+        "split": {
+            "n_train": config.dataset_n_train,
+            "n_holdout": config.dataset_n_test,
+        },
+    }
+
+
+def _sample_predictive_task(
+    config: TRLStanLinearRewardConfig,
+    *,
+    seed: int,
+) -> dict[str, Any]:
     dataset = generate_dataset(
         "linear_regression",
-        {
-            "n_features": config.dataset_n_features,
-            "noise_sigma": config.dataset_noise_sigma,
-            "beta_scale": config.beta_prior_scale,
-            "split": {
-                "n_train": config.dataset_n_train,
-                "n_holdout": config.dataset_n_holdout,
-            },
-        },
-        seed=config.scoring_seed_base,
+        _dataset_params(config),
+        seed=seed,
     )
     return {
-        "dataset_name": "linear_regression",
+        "task_id": dataset.dataset_id,
+        "seed": seed,
         "X_train": np.asarray(dataset.train["X"], dtype=np.float64),
         "y_train": np.asarray(dataset.train["y"], dtype=np.float64),
-        "X_holdout": np.asarray(dataset.holdout["X"], dtype=np.float64),
-        "y_holdout": np.asarray(dataset.holdout["y"], dtype=np.float64),
+        "X_test": np.asarray(dataset.holdout["X"], dtype=np.float64),
+        "y_test": np.asarray(dataset.holdout["y"], dtype=np.float64),
         "sigma_obs": float(config.dataset_noise_sigma),
         "beta_prior_scale": float(config.beta_prior_scale),
         "meta": dict(dataset.meta),
     }
+
+
+def _build_task_sampler(
+    config: TRLStanLinearRewardConfig,
+) -> Callable[[int], dict[str, Any]]:
+    def _sampler(batch_index: int) -> dict[str, Any]:
+        return _sample_predictive_task(
+            config,
+            seed=int(config.scoring_seed_base + batch_index - 1),
+        )
+
+    return _sampler
+
+
+def _build_audit_tasks(config: TRLStanLinearRewardConfig) -> list[dict[str, Any]]:
+    return [
+        _sample_predictive_task(
+            config,
+            seed=int(config.scoring_seed_base + config.audit_seed_offset + idx),
+        )
+        for idx in range(config.audit_panel_size)
+    ]
 
 
 def _print_summary(results: dict[str, Any]) -> None:
@@ -538,6 +629,10 @@ def _print_summary(results: dict[str, Any]) -> None:
     )
     log.info("parse_fail_rate_final: %.3f", results.get("final_parse_fail_rate", float("nan")))
     log.info("exec_fail_rate_final: %.3f", results.get("final_exec_fail_rate", float("nan")))
+    log.info(
+        "contract_fail_rate_final: %.3f",
+        results.get("final_contract_fail_rate", float("nan")),
+    )
 
 
 def _default_run_name(config: TRLStanLinearRewardConfig) -> str:
@@ -587,8 +682,11 @@ def main() -> None:
             "dataset_noise_sigma": args.dataset_noise_sigma,
             "beta_prior_scale": args.beta_prior_scale,
             "dataset_n_train": args.dataset_n_train,
+            "dataset_n_test": args.dataset_n_test,
             "dataset_n_holdout": args.dataset_n_holdout,
             "scoring_seed_base": args.scoring_seed_base,
+            "audit_panel_size": args.audit_panel_size,
+            "audit_seed_offset": args.audit_seed_offset,
             "cmdstan_root": args.cmdstan_root,
             "stanc3": args.stanc3,
             "protect": args.protect,
@@ -597,6 +695,11 @@ def main() -> None:
             "reward_output_field": args.reward_output_field,
             "checker_mode": args.checker_mode,
             "checker_penalty_reward": args.checker_penalty_reward,
+            "contract_penalty_reward": args.contract_penalty_reward,
+            "contract_repeat_count": args.contract_repeat_count,
+            "contract_tolerance": args.contract_tolerance,
+            "normalization_method": args.normalization_method,
+            "normalization_delta_scope": args.normalization_delta_scope,
             "normalization_epsilon": args.normalization_epsilon,
             "normalization_ci_alpha": args.normalization_ci_alpha,
             "normalization_mc_samples": args.normalization_mc_samples,
