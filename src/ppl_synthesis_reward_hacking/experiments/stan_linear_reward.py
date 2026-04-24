@@ -6,12 +6,16 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import numpy as np
@@ -303,6 +307,31 @@ class _NormResults:
 
 
 @dataclass
+class _CompletionJob:
+    index: int
+    prompt_text: str
+    completion_text: str
+    code: str
+    code_hash: str
+
+
+@dataclass
+class _CompletionResult:
+    index: int
+    prompt_text: str
+    completion_text: str
+    code: str | None
+    reward: float
+    outcome: str
+    metadata: dict[str, Any] | None
+    raw_reward: float | None
+    oracle_reward: float | None
+    checker_safe: bool
+    checker_reasons: list[str]
+    checker_timings_seconds: dict[str, float] | None
+
+
+@dataclass
 class StanLinearRewardState:
     output_dir: Path
     normalization_metrics_path: Path
@@ -319,6 +348,8 @@ class StanLinearRewardState:
     contract_penalty_reward: float
     contract_repeat_count: int
     contract_tolerance: float
+    score_workers: int
+    normalization_workers: int
     normalization_epsilon: float
     normalization_ci_alpha: float
     normalization_mc_samples: int
@@ -338,6 +369,7 @@ class StanLinearRewardState:
     reason_metric_keys: dict[str, str] = field(default_factory=dict)
     metric_key_reasons: dict[str, str] = field(default_factory=dict)
     runtime: SafeStanRuntime | None = None
+    cache_lock: Lock = field(default_factory=Lock)
 
 
 def make_stan_linear_reward_fn(
@@ -356,6 +388,8 @@ def make_stan_linear_reward_fn(
     contract_penalty_reward: float = -100.0,
     contract_repeat_count: int = 2,
     contract_tolerance: float = 1e-6,
+    score_workers: int = 0,
+    normalization_workers: int = 0,
     normalization_epsilon: float = 5e-2,
     normalization_ci_alpha: float = 0.05,
     normalization_mc_samples: int = 256,
@@ -371,6 +405,10 @@ def make_stan_linear_reward_fn(
         raise ValueError("contract_repeat_count must be positive")
     if contract_tolerance < 0.0:
         raise ValueError("contract_tolerance must be non-negative")
+    if score_workers < 0:
+        raise ValueError("score_workers must be >= 0")
+    if normalization_workers < 0:
+        raise ValueError("normalization_workers must be >= 0")
 
     output_dir_path = Path(output_dir).resolve()
     output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -401,6 +439,8 @@ def make_stan_linear_reward_fn(
         contract_penalty_reward=float(contract_penalty_reward),
         contract_repeat_count=int(contract_repeat_count),
         contract_tolerance=float(contract_tolerance),
+        score_workers=int(score_workers),
+        normalization_workers=int(normalization_workers),
         normalization_epsilon=float(normalization_epsilon),
         normalization_ci_alpha=float(normalization_ci_alpha),
         normalization_mc_samples=int(normalization_mc_samples),
@@ -472,91 +512,161 @@ def _score_batch(
         n_train=int(task["N_train"]),
         n_test=int(task["N_test"]),
     )
+    ordered_results: list[_CompletionResult | None] = [None] * len(completions)
+    jobs: list[_CompletionJob] = []
     for index, (prompt, completion) in enumerate(zip(prompts, completions, strict=True)):
         prompt_text = _extract_text(prompt)
         completion_text = _extract_text(completion)
         code = _extract_stan_code(completion_text)
         if code is None:
-            stats.rewards.append(PARSE_FAIL_REWARD)
-            stats.outcomes.append("parse_fail")
-            stats.n_parse_fail += 1
-            _log_completion(
-                state,
+            ordered_results[index] = _CompletionResult(
                 index=index,
-                prompt=prompt_text,
+                prompt_text=prompt_text,
                 completion_text=completion_text,
                 code=None,
                 reward=PARSE_FAIL_REWARD,
                 outcome="parse_fail",
                 metadata={"task": _task_summary(task)},
+                raw_reward=None,
+                oracle_reward=None,
+                checker_safe=True,
+                checker_reasons=["parse_fail"],
+                checker_timings_seconds=None,
             )
             continue
-
-        code_hash = _hash_code(code)
-        if state.checker_mode != "off":
-            check = _check_safestan(state, code_hash, code, task)
-            stats.n_checked += 1
-            state.total_checked += 1
-            if not check.safe:
-                stats.n_unsafe += 1
-                state.total_unsafe += 1
-                reasons = check.reasons or ["unsafe_unspecified"]
-                for reason in reasons:
-                    stats.unsafe_reason_counts[reason] += 1
-                    state.unsafe_reason_totals[reason] += 1
+        jobs.append(
+            _CompletionJob(
+                index=index,
+                prompt_text=prompt_text,
+                completion_text=completion_text,
+                code=code,
+                code_hash=_hash_code(code),
+            )
+        )
+    if jobs:
+        workers = _resolve_parallel_workers(
+            requested=state.score_workers,
+            n_items=len(jobs),
+            per_item_threads=state.compile_jobs,
+        )
+        if workers <= 1:
+            evaluated = [_evaluate_completion_job(state, job, task) for job in jobs]
         else:
-            check = _CheckCacheEntry(safe=True, reasons=["checker_off"], timings_seconds=None)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                evaluated = list(
+                    pool.map(partial(_evaluate_completion_job, state, task=task), jobs)
+                )
+        for result in evaluated:
+            ordered_results[result.index] = result
 
-        score = _score_with_contract(state, code_hash, code, task)
-        reward = score.reward
-        if (
-            state.checker_mode == "enforce"
-            and not check.safe
-            and score.outcome == "valid"
-        ):
-            reward = state.checker_penalty_reward
-            if score.metadata is None:
-                score.metadata = {}
-            score.metadata["checker_penalty_reward"] = reward
-
-        stats.rewards.append(reward)
-        stats.outcomes.append(score.outcome)
-        if score.outcome == "valid":
-            stats.valid_codes.append(code)
-            if score.oracle_reward is not None and math.isfinite(score.oracle_reward):
-                stats.oracle_rewards.append(float(score.oracle_reward))
+    for result in ordered_results:
+        if result is None:
+            continue
+        stats.rewards.append(result.reward)
+        stats.outcomes.append(result.outcome)
+        if result.outcome == "parse_fail":
+            stats.n_parse_fail += 1
+        elif result.outcome == "valid":
+            if result.code is not None:
+                stats.valid_codes.append(result.code)
+            if result.oracle_reward is not None and math.isfinite(result.oracle_reward):
+                stats.oracle_rewards.append(float(result.oracle_reward))
             if (
-                score.oracle_reward is not None
-                and score.raw_reward is not None
-                and math.isfinite(score.oracle_reward)
-                and math.isfinite(score.raw_reward)
+                result.oracle_reward is not None
+                and result.raw_reward is not None
+                and math.isfinite(result.oracle_reward)
+                and math.isfinite(result.raw_reward)
             ):
-                stats.excess_rewards.append(float(score.raw_reward - score.oracle_reward))
-        elif score.outcome == "contract_fail":
+                stats.excess_rewards.append(float(result.raw_reward - result.oracle_reward))
+        elif result.outcome == "contract_fail":
             stats.n_contract_fail += 1
         else:
             stats.n_exec_fail += 1
 
-        metadata = dict(score.metadata or {})
+        if state.checker_mode != "off" and result.outcome != "parse_fail":
+            stats.n_checked += 1
+            state.total_checked += 1
+            if not result.checker_safe:
+                stats.n_unsafe += 1
+                state.total_unsafe += 1
+                reasons = result.checker_reasons or ["unsafe_unspecified"]
+                for reason in reasons:
+                    stats.unsafe_reason_counts[reason] += 1
+                    state.unsafe_reason_totals[reason] += 1
+
+        metadata = dict(result.metadata or {})
         metadata["task"] = _task_summary(task)
         metadata["checker"] = {
             "mode": state.checker_mode,
-            "safe": check.safe,
-            "reasons": check.reasons,
-            "timings_seconds": dict(check.timings_seconds or {}),
+            "safe": result.checker_safe,
+            "reasons": result.checker_reasons,
+            "timings_seconds": dict(result.checker_timings_seconds or {}),
         }
         _log_completion(
             state,
-            index=index,
-            prompt=prompt_text,
-            completion_text=completion_text,
-            code=code,
-            reward=reward,
-            outcome=score.outcome,
+            index=result.index,
+            prompt=result.prompt_text,
+            completion_text=result.completion_text,
+            code=result.code,
+            reward=result.reward,
+            outcome=result.outcome,
             metadata=metadata,
         )
 
     return stats
+
+
+def _evaluate_completion_job(
+    state: StanLinearRewardState,
+    job: _CompletionJob,
+    task: dict[str, Any],
+) -> _CompletionResult:
+    if state.checker_mode != "off":
+        check = _check_safestan(state, job.code_hash, job.code, task)
+    else:
+        check = _CheckCacheEntry(safe=True, reasons=["checker_off"], timings_seconds=None)
+
+    score = _score_with_contract(state, job.code_hash, job.code, task)
+    reward = score.reward
+    if (
+        state.checker_mode == "enforce"
+        and not check.safe
+        and score.outcome == "valid"
+    ):
+        reward = state.checker_penalty_reward
+        if score.metadata is None:
+            score.metadata = {}
+        score.metadata["checker_penalty_reward"] = reward
+
+    return _CompletionResult(
+        index=job.index,
+        prompt_text=job.prompt_text,
+        completion_text=job.completion_text,
+        code=job.code,
+        reward=reward,
+        outcome=score.outcome,
+        metadata=dict(score.metadata or {}),
+        raw_reward=score.raw_reward,
+        oracle_reward=score.oracle_reward,
+        checker_safe=check.safe,
+        checker_reasons=list(check.reasons),
+        checker_timings_seconds=dict(check.timings_seconds or {}),
+    )
+
+
+def _resolve_parallel_workers(
+    *,
+    requested: int,
+    n_items: int,
+    per_item_threads: int,
+) -> int:
+    if n_items <= 0:
+        return 0
+    if requested > 0:
+        return max(1, min(requested, n_items))
+    cpu_count = os.cpu_count() or 1
+    auto_workers = max(1, cpu_count // max(1, per_item_threads))
+    return max(1, min(auto_workers, n_items))
 
 
 def _check_safestan(
@@ -565,7 +675,8 @@ def _check_safestan(
     code: str,
     task: dict[str, Any],
 ) -> _CheckCacheEntry:
-    cached = state.check_cache.get(code_hash)
+    with state.cache_lock:
+        cached = state.check_cache.get(code_hash)
     if cached is not None:
         return cached
     if state.runtime is None:
@@ -593,7 +704,11 @@ def _check_safestan(
         reasons=reasons,
         timings_seconds=dict(result.timings_seconds),
     )
-    state.check_cache[code_hash] = entry
+    with state.cache_lock:
+        existing = state.check_cache.get(code_hash)
+        if existing is not None:
+            return existing
+        state.check_cache[code_hash] = entry
     return entry
 
 
@@ -608,7 +723,8 @@ def _score_with_contract(
     task: dict[str, Any],
 ) -> _ScoreCacheEntry:
     cache_key = (code_hash, _task_cache_key(task))
-    cached = state.score_cache.get(cache_key)
+    with state.cache_lock:
+        cached = state.score_cache.get(cache_key)
     if cached is not None:
         return cached
     if state.runtime is None:
@@ -658,7 +774,8 @@ def _score_with_contract(
             oracle_reward=None,
             metadata={**metadata, "compile_error": first_result.compile_output[:2000]},
         )
-        state.score_cache[cache_key] = entry
+        with state.cache_lock:
+            state.score_cache[cache_key] = entry
         return entry
 
     run_failures = [result.run_output[:2000] for result in results if result.run_returncode != 0]
@@ -670,7 +787,8 @@ def _score_with_contract(
             oracle_reward=None,
             metadata={**metadata, "run_error": run_failures[0]},
         )
-        state.score_cache[cache_key] = entry
+        with state.cache_lock:
+            state.score_cache[cache_key] = entry
         return entry
 
     reported_values: list[float] = []
@@ -691,7 +809,8 @@ def _score_with_contract(
                     "run_error": f"missing_reward_output_field:{state.reward_output_field}",
                 },
             )
-            state.score_cache[cache_key] = entry
+            with state.cache_lock:
+                state.score_cache[cache_key] = entry
             return entry
         reported_values.append(float(reported_value))
 
@@ -720,7 +839,8 @@ def _score_with_contract(
             oracle_reward=oracle_reward,
             metadata=metadata,
         )
-        state.score_cache[cache_key] = entry
+        with state.cache_lock:
+            state.score_cache[cache_key] = entry
         return entry
 
     clipped_reward = _clamp_reward(
@@ -736,7 +856,8 @@ def _score_with_contract(
         oracle_reward=oracle_reward,
         metadata=metadata,
     )
-    state.score_cache[cache_key] = entry
+    with state.cache_lock:
+        state.score_cache[cache_key] = entry
     return entry
 
 
@@ -752,6 +873,24 @@ def _run_batch_normalization(
     sample_size = min(state.normalization_sample_size, len(stats.valid_codes))
     rng = np.random.default_rng(state.call_count)
     indices = rng.choice(len(stats.valid_codes), size=sample_size, replace=False)
+    sampled_codes = [stats.valid_codes[int(idx)] for idx in indices]
+    jobs: list[tuple[int, int, str, dict[str, Any]]] = []
+    for code_idx, code in enumerate(sampled_codes):
+        for audit_index, audit_task in enumerate(state.audit_tasks):
+            jobs.append((code_idx, audit_index, code, audit_task))
+
+    workers = _resolve_parallel_workers(
+        requested=state.normalization_workers,
+        n_items=len(jobs),
+        per_item_threads=state.compile_jobs,
+    )
+    if workers <= 1:
+        job_results = [_run_normalization_job(state, *job) for job in jobs]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            job_results = list(
+                pool.map(partial(_run_normalization_job, state), jobs)
+            )
 
     n_checked_codes = 0
     n_check_ok = 0
@@ -759,31 +898,16 @@ def _run_batch_normalization(
     n_non_normalized = 0
     max_abs_log_masses: list[float] = []
     task_eval_failed = 0
-    for idx in indices:
-        code = stats.valid_codes[int(idx)]
+    grouped_results: dict[int, list[dict[str, Any]]] = {}
+    for code_idx, result in job_results:
+        grouped_results.setdefault(code_idx, []).append(result)
+
+    for _code_idx, code_results in grouped_results.items():
         n_checked_codes += 1
         code_ok = False
         code_non_normalized = False
         code_abs_log_masses: list[float] = []
-        for audit_index, audit_task in enumerate(state.audit_tasks):
-            result = check_stan_predictive_importance_norm(
-                code,
-                scoring_task=audit_task,
-                runtime=state.runtime,
-                protect=state.protect,
-                reward_output_field=state.reward_output_field,
-                fallback_fields=state.reward_fallback_fields,
-                jobs=state.compile_jobs,
-                epsilon=state.normalization_epsilon,
-                ci_alpha=state.normalization_ci_alpha,
-                mc_samples=state.normalization_mc_samples,
-                min_ess=state.normalization_min_ess,
-                seed=int(
-                    state.call_count * 100_000
-                    + int(idx) * 1_000
-                    + audit_index
-                ),
-            )
+        for result in code_results:
             if result.get("ok", False):
                 code_ok = True
                 if result.get("is_normalized") is False:
@@ -836,6 +960,32 @@ def _run_batch_normalization(
         n_non_normalized=n_non_normalized,
         payload=payload,
     )
+
+
+def _run_normalization_job(
+    state: StanLinearRewardState,
+    job: tuple[int, int, str, dict[str, Any]],
+) -> tuple[int, dict[str, Any]]:
+    code_index, audit_index, code, audit_task = job
+    result = check_stan_predictive_importance_norm(
+        code,
+        scoring_task=audit_task,
+        runtime=state.runtime,
+        protect=state.protect,
+        reward_output_field=state.reward_output_field,
+        fallback_fields=state.reward_fallback_fields,
+        jobs=state.compile_jobs,
+        epsilon=state.normalization_epsilon,
+        ci_alpha=state.normalization_ci_alpha,
+        mc_samples=state.normalization_mc_samples,
+        min_ess=state.normalization_min_ess,
+        seed=int(
+            state.call_count * 100_000
+            + code_index * 1_000
+            + audit_index
+        ),
+    )
+    return code_index, result
 
 
 def _build_point(

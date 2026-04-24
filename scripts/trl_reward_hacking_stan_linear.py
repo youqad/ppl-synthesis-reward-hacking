@@ -96,6 +96,8 @@ class TRLStanLinearRewardConfig:
     contract_penalty_reward: float = -100.0
     contract_repeat_count: int = 2
     contract_tolerance: float = 1e-6
+    score_workers: int = 0
+    normalization_workers: int = 0
     normalization_method: str = "importance_mc_predictive"
     normalization_delta_scope: str = "joint_y_test_fixed_train_x_test"
     normalization_epsilon: float = 5e-2
@@ -157,6 +159,10 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
         raise ValueError("contract_repeat_count must be positive")
     if config.contract_tolerance < 0:
         raise ValueError("contract_tolerance must be non-negative")
+    if config.score_workers < 0:
+        raise ValueError("score_workers must be >= 0")
+    if config.normalization_workers < 0:
+        raise ValueError("normalization_workers must be >= 0")
     if config.normalization_method != "importance_mc_predictive":
         raise ValueError("normalization_method must be importance_mc_predictive")
     if config.normalization_delta_scope != "joint_y_test_fixed_train_x_test":
@@ -226,6 +232,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--contract-penalty-reward", type=float, default=-100.0)
     p.add_argument("--contract-repeat-count", type=int, default=2)
     p.add_argument("--contract-tolerance", type=float, default=1e-6)
+    p.add_argument("--score-workers", type=int, default=0)
+    p.add_argument("--normalization-workers", type=int, default=0)
     p.add_argument("--normalization-method", default="importance_mc_predictive")
     p.add_argument(
         "--normalization-delta-scope",
@@ -287,6 +295,8 @@ def _build_reward_function(config: TRLStanLinearRewardConfig, output_dir: Path):
         contract_penalty_reward=config.contract_penalty_reward,
         contract_repeat_count=config.contract_repeat_count,
         contract_tolerance=config.contract_tolerance,
+        score_workers=config.score_workers,
+        normalization_workers=config.normalization_workers,
         normalization_epsilon=config.normalization_epsilon,
         normalization_ci_alpha=config.normalization_ci_alpha,
         normalization_mc_samples=config.normalization_mc_samples,
@@ -397,13 +407,19 @@ def _log_training_setup(
     log.info(
         (
             "Direct Stan reward: field=%s checker_mode=%s split=%s "
-            "prompt_policy=%s contract_repeats=%d"
+            "prompt_policy=%s contract_repeats=%d score_workers=%s norm_workers=%s"
         ),
         config.reward_output_field,
         config.checker_mode,
         config.reward_data_split,
         config.prompt_policy,
         config.contract_repeat_count,
+        config.score_workers if config.score_workers > 0 else "auto",
+        (
+            config.normalization_workers
+            if config.normalization_workers > 0
+            else "auto"
+        ),
     )
     log.info("Output: %s", output_dir)
 
@@ -698,6 +714,8 @@ def main() -> None:
             "contract_penalty_reward": args.contract_penalty_reward,
             "contract_repeat_count": args.contract_repeat_count,
             "contract_tolerance": args.contract_tolerance,
+            "score_workers": args.score_workers,
+            "normalization_workers": args.normalization_workers,
             "normalization_method": args.normalization_method,
             "normalization_delta_scope": args.normalization_delta_scope,
             "normalization_epsilon": args.normalization_epsilon,

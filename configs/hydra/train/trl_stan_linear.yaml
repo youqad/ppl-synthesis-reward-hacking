@@ -43,6 +43,8 @@ checker_penalty_reward: -100.0
 contract_penalty_reward: -100.0
 contract_repeat_count: 2
 contract_tolerance: 1e-6
+score_workers: 0
+normalization_workers: 0
 normalization_method: importance_mc_predictive
 normalization_delta_scope: joint_y_test_fixed_train_x_test
 normalization_epsilon: 0.1
