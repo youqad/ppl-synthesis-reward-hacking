@@ -62,14 +62,15 @@ if [ ! -x "$REPO/cmdsafestan/bin/stanc" ]; then
         apt-get update -qq
         apt-get install -y -qq --no-install-recommends \
             build-essential \
-            ca-certificates \
             curl \
             git \
             libgmp-dev \
             m4 \
-            opam \
             pkg-config \
             zlib1g-dev
+        curl -fsSL https://opam.ocaml.org/install.sh -o /tmp/install-opam.sh
+        printf "/usr/local/bin\n" | sh /tmp/install-opam.sh
+        rm -f /tmp/install-opam.sh
     fi
     echo "Bootstrapping cmdsafestan/SafeStan ..."
     bash "$REPO/scripts/local/bootstrap_cmdsafestan.sh"

@@ -21,18 +21,20 @@ ENV REPO=/workspace/ppl-synthesis-reward-hacking \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
-        ca-certificates \
         curl \
         git \
         libgmp-dev \
         m4 \
-        opam \
         pkg-config \
         rsync \
         tmux \
         unzip \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://opam.ocaml.org/install.sh -o /tmp/install-opam.sh \
+    && printf "/usr/local/bin\n" | sh /tmp/install-opam.sh \
+    && rm -f /tmp/install-opam.sh
 
 RUN python3 -m venv "$VIRTUAL_ENV" \
     && pip install --upgrade pip setuptools wheel
