@@ -86,6 +86,7 @@ Produce a Stan linear regression model for a synthetic scalar regression task. F
 - [scripts/trl_reward_hacking_stan_linear.py](../../scripts/trl_reward_hacking_stan_linear.py)
 - [scripts/hydra_train_trl_stan_linear.py](../../scripts/hydra_train_trl_stan_linear.py)
 - [scripts/local/run_hydra_grpo_stan_linear.sh](../../scripts/local/run_hydra_grpo_stan_linear.sh)
+- [scripts/runpod/run_grpo_stan_linear.sh](../../scripts/runpod/run_grpo_stan_linear.sh)
 
 Committed configs:
 
@@ -93,6 +94,52 @@ Committed configs:
 - [configs/hydra/trl_stan_linear_prelim.yaml](../../configs/hydra/trl_stan_linear_prelim.yaml)
 - [configs/hydra/trl_stan_linear_stage1.yaml](../../configs/hydra/trl_stan_linear_stage1.yaml)
 - [configs/hydra/trl_stan_linear_stage1b.yaml](../../configs/hydra/trl_stan_linear_stage1b.yaml)
+
+## RunPod Image
+
+Build a RunPod image with the Python training stack and the compiled
+`opam` / SafeStan / `cmdsafestan` / CmdStan toolchain:
+
+```bash
+scripts/runpod/build_stan_linear_image.sh <registry>/psrh:stan-linear
+PUSH=1 scripts/runpod/build_stan_linear_image.sh <registry>/psrh:stan-linear
+```
+
+If Docker is unavailable locally, use the GitHub Actions workflow
+`Build RunPod Stan Linear Image`. It builds the same Dockerfile on a GitHub
+runner and publishes:
+
+```text
+ghcr.io/<owner>/<repo>:stan-linear
+ghcr.io/<owner>/<repo>:stan-linear-<commit-sha>
+```
+
+The build context must include initialized recursive submodules:
+
+```bash
+git submodule update --init --recursive cmdsafestan
+```
+
+Validate the image after launch:
+
+```bash
+bash scripts/runpod/validate_stan_linear_image.sh
+```
+
+Launch the direct-Stan linear Hydra entrypoint on RunPod:
+
+```bash
+python scripts/runpod/launch.py \
+  --mode trl_stan_linear \
+  --image ghcr.io/<owner>/<repo>:stan-linear \
+  --name psrh-stan-linear \
+  -- train.n_steps=1000 train.report_to=wandb
+```
+
+The image defaults to `scripts/runpod/run_grpo_stan_linear.sh`, which runs
+`scripts/hydra_train_trl_stan_linear.py`. Set
+`PSRH_STAN_LINEAR_ENTRYPOINT=plain` to run
+`scripts/trl_reward_hacking_stan_linear.py` directly with argparse flags.
 
 ## Sanity Checks
 

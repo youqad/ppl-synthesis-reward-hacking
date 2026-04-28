@@ -17,6 +17,10 @@ Usage::
     # TRL GRPO training with the staged Stan integration (cmdsafestan required)
     python scripts/runpod/launch.py --mode trl_stan --name psrh-run7-stan -- --n-steps 1000
 
+    # Direct Stan linear-regression GRPO training with baked cmdsafestan/SafeStan
+    python scripts/runpod/launch.py --mode trl_stan_linear --image <registry>/psrh:stan-linear \\
+        --name psrh-stan-linear -- train.n_steps=1000
+
     # Tinker API server on the pod
     python scripts/runpod/launch.py --mode tinker_api --name psrh-tinker \\
         --base-model Qwen/Qwen3-0.6B --backend fsdp
@@ -133,9 +137,12 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(description="Launch training workflows on RunPod")
     parser.add_argument(
         "--mode",
-        choices=["trl", "trl_stan", "tinker_api"],
+        choices=["trl", "trl_stan", "trl_stan_linear", "tinker_api"],
         default=DEFAULT_MODE,
-        help="Launcher mode: TRL PyMC reward, TRL Stan reward, or SkyRL Tinker API server",
+        help=(
+            "Launcher mode: TRL PyMC reward, staged Stan reward, direct-Stan linear "
+            "reward, or SkyRL Tinker API server"
+        ),
     )
     parser.add_argument("--name", default="psrh-grpo", help="Pod name (default: psrh-grpo)")
     parser.add_argument("--gpu-type", default=DEFAULT_GPU_TYPE, help="RunPod GPU type ID")
@@ -271,6 +278,8 @@ def build_remote_start_command(
         run_parts = ["bash", "scripts/runpod/run_grpo_pymc_reward.sh", *extra_args]
     elif mode == "trl_stan":
         run_parts = ["bash", "scripts/runpod/run_grpo_stan_reward.sh", *extra_args]
+    elif mode == "trl_stan_linear":
+        run_parts = ["bash", "scripts/runpod/run_grpo_stan_linear.sh", *extra_args]
     else:
         run_parts = [
             "bash",
