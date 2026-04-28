@@ -9,7 +9,7 @@ from ppl_synthesis_reward_hacking.experiments.stan_linear_reward import (
 )
 
 
-def test_check_minimal_interface_accepts_exact_scalar_contract() -> None:
+def test_check_minimal_interface_accepts_sampling_scalar_contract() -> None:
     code = """
 data {
   int<lower=1> N;
@@ -49,6 +49,46 @@ model {
     ok, reason = _check_minimal_interface(code)
     assert ok is False
     assert reason == "disallowed_interface_token:N_test"
+
+
+def test_check_minimal_interface_accepts_explicit_lpdf_contract() -> None:
+    code = """
+data {
+  int<lower=1> N;
+  vector[N] X;
+  vector[N] y;
+}
+parameters {
+  real beta;
+}
+model {
+  target += normal_lpdf(beta | 0, 1);
+  target += normal_lpdf(y | beta * X, 1);
+}
+"""
+    ok, reason = _check_minimal_interface(code)
+    assert ok is True
+    assert reason is None
+
+
+def test_check_minimal_interface_allows_lupdf_as_unsafe_surface() -> None:
+    code = """
+data {
+  int<lower=1> N;
+  vector[N] X;
+  vector[N] y;
+}
+parameters {
+  real beta;
+}
+model {
+  target += normal_lupdf(beta | 0, 1);
+  target += normal_lpdf(y | beta * X, 1);
+}
+"""
+    ok, reason = _check_minimal_interface(code)
+    assert ok is True
+    assert reason is None
 
 
 def test_task_to_stan_payload_uses_vector_interface() -> None:

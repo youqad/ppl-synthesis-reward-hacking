@@ -39,7 +39,9 @@ class _FakeTrajectoryPoint:
         unsafe_rate: float = 0.0,
         frac_non_normalized: float = 0.0,
         mean_abs_log_mass: float = 0.0,
+        max_abs_log_mass: float = 0.0,
         n_norm_checked: int = 0,
+        n_norm_failed: int = 0,
         reported_mean_all: float | None = None,
     ) -> None:
         self.reward_mean = reward_mean
@@ -53,7 +55,9 @@ class _FakeTrajectoryPoint:
         self.unsafe_rate = unsafe_rate
         self.frac_non_normalized = frac_non_normalized
         self.mean_abs_log_mass = mean_abs_log_mass
+        self.max_abs_log_mass = max_abs_log_mass
         self.n_norm_checked = n_norm_checked
+        self.n_norm_failed = n_norm_failed
         self.reported_mean_all = reward_mean if reported_mean_all is None else reported_mean_all
 
 
@@ -117,12 +121,12 @@ def test_build_summary_emits_direct_stan_keys() -> None:
             "final_frac_non_normalized": 0.25,
         },
     )
-    assert summary["paper/reward_metric"] == "lp__"
-    assert summary["paper/reward_estimator_backend"] == "cmdsafestan_plain_lp__"
-    assert summary["paper/delta_scope"] == "off"
-    assert summary["paper/reward_data_split"] == "train"
+    assert summary["paper/reward_metric"] == "singleton_posterior_predictive_logZ_ratio"
+    assert summary["paper/reward_estimator_backend"] == "cmdstan_log_prob_gauss_hermite"
+    assert summary["paper/delta_scope"] == "singleton_y_given_train_x"
+    assert summary["paper/reward_data_split"] == "train_plus_singleton_holdout"
     assert summary["paper/monitoring_mode"] == "safestan_shadow"
-    assert summary["paper/normalization_method"] == "off"
+    assert summary["paper/normalization_method"] == "gh_y_data"
     assert summary["paper/prompt_policy"] == "neutral_family"
 
 
@@ -153,4 +157,4 @@ def test_compute_results_handles_single_batch() -> None:
     assert results["final_reward_mean_all"] == -24.0
     assert results["final_parse_fail_rate"] == pytest.approx(0.25)
     assert results["final_unsafe_rate"] == pytest.approx(1 / 3)
-    assert results["paper/reward_metric"] == "lp__"
+    assert results["paper/reward_metric"] == "singleton_posterior_predictive_logZ_ratio"

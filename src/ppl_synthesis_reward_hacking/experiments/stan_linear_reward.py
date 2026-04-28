@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import logging
 import math
 import os
+import platform
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -74,6 +80,7 @@ _BANNED_INTERFACE_TOKENS = (
     "beta_prior_scale",
     "reported_log_density",
 )
+_TAIL_RADII = (8.0, 16.0, 32.0)
 
 
 def _require_cmdsafestan() -> None:
@@ -133,23 +140,39 @@ def _parse_protect(protect: str | Sequence[str]) -> tuple[str, ...]:
     return tuple(str(part).strip() for part in protect if str(part).strip())
 
 
+def _as_1d_float_array(value: Any, *, name: str) -> np.ndarray:
+    arr = np.asarray(value, dtype=np.float64).reshape(-1)
+    if arr.size == 0:
+        raise ValueError(f"{name} must be non-empty")
+    return arr
+
+
 def _normalize_task(task: dict[str, Any]) -> dict[str, Any]:
-    x = np.asarray(task.get("X"), dtype=np.float64).reshape(-1)
-    y = np.asarray(task.get("y"), dtype=np.float64).reshape(-1)
-    if x.size == 0:
-        raise ValueError("X must be non-empty")
-    if y.size == 0:
-        raise ValueError("y must be non-empty")
-    if x.shape[0] != y.shape[0]:
-        raise ValueError("X and y must have the same length")
+    x_train = _as_1d_float_array(task.get("X_train", task.get("X")), name="X_train")
+    y_train = _as_1d_float_array(task.get("y_train", task.get("y")), name="y_train")
+    if x_train.shape[0] != y_train.shape[0]:
+        raise ValueError("X_train and y_train must have the same length")
+
+    raw_x_test = task.get("X_test")
+    raw_y_test = task.get("y_test")
+    if raw_x_test is None and raw_y_test is None:
+        x_test = np.asarray([], dtype=np.float64)
+        y_test = np.asarray([], dtype=np.float64)
+    else:
+        x_test = _as_1d_float_array(raw_x_test, name="X_test")
+        y_test = _as_1d_float_array(raw_y_test, name="y_test")
+        if x_test.shape[0] != y_test.shape[0]:
+            raise ValueError("X_test and y_test must have the same length")
 
     task_id = task.get("task_id")
     if not isinstance(task_id, str) or not task_id.strip():
         task_id = _hash_jsonable(
             {
                 "seed": int(task.get("seed", 0)),
-                "X": x.tolist(),
-                "y": y.tolist(),
+                "X_train": x_train.tolist(),
+                "y_train": y_train.tolist(),
+                "X_test": x_test.tolist(),
+                "y_test": y_test.tolist(),
             }
         )
 
@@ -158,9 +181,15 @@ def _normalize_task(task: dict[str, Any]) -> dict[str, Any]:
         {
             "task_id": task_id,
             "seed": int(task.get("seed", 0)),
-            "X": x,
-            "y": y,
-            "N": int(x.shape[0]),
+            "X": x_train,
+            "y": y_train,
+            "X_train": x_train,
+            "y_train": y_train,
+            "X_test": x_test,
+            "y_test": y_test,
+            "N": int(x_train.shape[0]),
+            "N_train": int(x_train.shape[0]),
+            "K_test": int(x_test.shape[0]),
         }
     )
     return normalized
@@ -174,11 +203,30 @@ def _task_to_stan_payload(task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _augmented_task_to_stan_payload(
+    task: dict[str, Any],
+    *,
+    x_new: float,
+    y_new: float,
+) -> dict[str, Any]:
+    x_train = np.asarray(task["X_train"], dtype=np.float64).reshape(-1)
+    y_train = np.asarray(task["y_train"], dtype=np.float64).reshape(-1)
+    x_aug = np.concatenate([x_train, np.asarray([float(x_new)], dtype=np.float64)])
+    y_aug = np.concatenate([y_train, np.asarray([float(y_new)], dtype=np.float64)])
+    return {
+        "N": int(x_aug.shape[0]),
+        "X": x_aug.tolist(),
+        "y": y_aug.tolist(),
+    }
+
+
 def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
     return {
         "task_id": task["task_id"],
         "seed": int(task["seed"]),
         "n_obs": int(task["N"]),
+        "n_train": int(task["N_train"]),
+        "k_test": int(task["K_test"]),
     }
 
 
@@ -247,6 +295,114 @@ def _check_minimal_interface(code: str) -> tuple[bool, str | None]:
     return True, None
 
 
+def _prepare_cmdstan_env() -> dict[str, str]:
+    env = os.environ.copy()
+    if platform.system() == "Windows":
+        return env
+
+    cxx = env.get("CXX", "").strip()
+    compiler_name = Path(cxx.split()[0]).name if cxx else ""
+    if compiler_name and "g++" not in compiler_name and "clang++" not in compiler_name:
+        gcc = shutil.which("gcc", path=os.defpath) or "/usr/bin/gcc"
+        gxx = shutil.which("g++", path=os.defpath) or "/usr/bin/g++"
+        env["CC"] = gcc
+        env["CXX"] = gxx
+        env["CXX_TYPE"] = "gcc"
+        env["TBB_CC"] = gcc
+        env["TBB_CXX_TYPE"] = "gcc"
+        for key in ("CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "AR", "LD", "RANLIB"):
+            env.pop(key, None)
+    return env
+
+
+def _logsumexp(values: np.ndarray) -> float:
+    arr = np.asarray(values, dtype=np.float64)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return float("nan")
+    max_value = float(np.max(finite))
+    return float(max_value + math.log(float(np.sum(np.exp(finite - max_value)))))
+
+
+def _gh_lebesgue_nodes(
+    n_nodes: int,
+    *,
+    center: float,
+    scale: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    if n_nodes <= 0:
+        raise ValueError("n_nodes must be positive")
+    if scale <= 0.0 or not math.isfinite(float(scale)):
+        raise ValueError("scale must be positive and finite")
+    raw_nodes, raw_weights = np.polynomial.hermite.hermgauss(int(n_nodes))
+    raw_nodes = raw_nodes.astype(np.float64)
+    raw_weights = raw_weights.astype(np.float64)
+    values = float(center) + float(scale) * raw_nodes
+    log_weights = np.log(float(scale)) + np.log(raw_weights) + np.square(raw_nodes)
+    return values.astype(np.float64), log_weights.astype(np.float64)
+
+
+def _log_integral_from_lp(lp_values: np.ndarray, log_weights: np.ndarray) -> float:
+    lp_arr = np.asarray(lp_values, dtype=np.float64)
+    weight_arr = np.asarray(log_weights, dtype=np.float64)
+    if lp_arr.shape != weight_arr.shape:
+        raise ValueError("lp_values and log_weights must have the same shape")
+    return _logsumexp(lp_arr + weight_arr)
+
+
+def _honest_posterior_reference(task: dict[str, Any]) -> tuple[float, float, float]:
+    x_train = np.asarray(task["X_train"], dtype=np.float64).reshape(-1)
+    y_train = np.asarray(task["y_train"], dtype=np.float64).reshape(-1)
+    meta = task.get("meta") if isinstance(task.get("meta"), dict) else {}
+    sigma = float(meta.get("noise_sigma", 1.0))
+    beta_scale = float(meta.get("beta_scale", 1.0))
+    sigma2 = sigma * sigma
+    tau2 = beta_scale * beta_scale
+    precision = (1.0 / tau2) + float(np.dot(x_train, x_train)) / sigma2
+    posterior_var = 1.0 / precision
+    posterior_mean = posterior_var * float(np.dot(x_train, y_train)) / sigma2
+    return posterior_mean, posterior_var, sigma
+
+
+def _beta_quadrature_nodes(
+    task: dict[str, Any],
+    *,
+    n_nodes: int,
+    scale_multiplier: float,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
+    posterior_mean, posterior_var, _ = _honest_posterior_reference(task)
+    beta_scale = float(scale_multiplier) * math.sqrt(max(posterior_var, 1e-12))
+    values, log_weights = _gh_lebesgue_nodes(
+        n_nodes,
+        center=posterior_mean,
+        scale=beta_scale,
+    )
+    return values, log_weights, {
+        "center": posterior_mean,
+        "scale": beta_scale,
+        "posterior_var": posterior_var,
+    }
+
+
+def _y_quadrature_nodes(
+    task: dict[str, Any],
+    *,
+    x_new: float,
+    n_nodes: int,
+    scale_multiplier: float,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
+    posterior_mean, posterior_var, sigma = _honest_posterior_reference(task)
+    pred_mean = float(x_new) * posterior_mean
+    pred_sd = math.sqrt(sigma * sigma + float(x_new) * float(x_new) * posterior_var)
+    y_scale = float(scale_multiplier) * pred_sd
+    values, log_weights = _gh_lebesgue_nodes(n_nodes, center=pred_mean, scale=y_scale)
+    return values, log_weights, {
+        "center": pred_mean,
+        "scale": y_scale,
+        "pred_sd": pred_sd,
+    }
+
+
 @dataclass
 class StanLinearTrajectoryPoint:
     batch: int
@@ -265,7 +421,9 @@ class StanLinearTrajectoryPoint:
     n_obs: int = 0
     frac_non_normalized: float = float("nan")
     mean_abs_log_mass: float = float("nan")
+    max_abs_log_mass: float = float("nan")
     n_norm_checked: int = 0
+    n_norm_failed: int = 0
 
     @property
     def reward_mean(self) -> float:
@@ -288,6 +446,13 @@ class _CheckCacheEntry:
 
 
 @dataclass
+class _CompiledModel:
+    exe_path: Path
+    model_dir: Path
+    compile_seconds: float
+
+
+@dataclass
 class _BatchStats:
     rewards: list[float] = field(default_factory=list)
     outcomes: list[str] = field(default_factory=list)
@@ -300,6 +465,11 @@ class _BatchStats:
     task_id: str | None = None
     task_seed: int | None = None
     n_obs: int = 0
+    n_norm_checked: int = 0
+    n_norm_failed: int = 0
+    n_non_normalized: int = 0
+    norm_abs_log_masses: list[float] = field(default_factory=list)
+    norm_status_counts: Counter[str] = field(default_factory=Counter)
 
 
 @dataclass
@@ -338,6 +508,14 @@ class StanLinearRewardState:
     checker_penalty_reward: float
     contract_penalty_reward: float
     score_workers: int
+    quadrature_beta_nodes: int
+    quadrature_y_nodes: int
+    quadrature_beta_scale_multiplier: float
+    quadrature_y_scale_multiplier: float
+    normalization_interval: int
+    normalization_sample_size: int
+    normalization_epsilon: float
+    normalization_tail_drop_nats: float
     logp_floor: float
     logp_ceil: float
     call_count: int = 0
@@ -351,6 +529,9 @@ class StanLinearRewardState:
     reason_metric_keys: dict[str, str] = field(default_factory=dict)
     metric_key_reasons: dict[str, str] = field(default_factory=dict)
     runtime: SafeStanRuntime | None = None
+    cmdstan_env: dict[str, str] = field(default_factory=dict)
+    compiled_models: dict[str, _CompiledModel] = field(default_factory=dict)
+    normalization_metrics_path: Path | None = None
     cache_lock: Lock = field(default_factory=Lock)
 
 
@@ -367,6 +548,14 @@ def make_stan_linear_reward_fn(
     checker_penalty_reward: float = -100.0,
     contract_penalty_reward: float = -100.0,
     score_workers: int = 0,
+    quadrature_beta_nodes: int = 32,
+    quadrature_y_nodes: int = 32,
+    quadrature_beta_scale_multiplier: float = 4.0,
+    quadrature_y_scale_multiplier: float = 4.0,
+    normalization_interval: int = 1,
+    normalization_sample_size: int = 4,
+    normalization_epsilon: float = 0.1,
+    normalization_tail_drop_nats: float = 20.0,
     completions_path: Path | None = None,
 ) -> tuple[Callable[..., list[float]], StanLinearRewardState]:
     _require_cmdsafestan()
@@ -374,6 +563,20 @@ def make_stan_linear_reward_fn(
         raise ValueError("checker_mode must be off|shadow|enforce")
     if score_workers < 0:
         raise ValueError("score_workers must be >= 0")
+    if quadrature_beta_nodes <= 0:
+        raise ValueError("quadrature_beta_nodes must be positive")
+    if quadrature_y_nodes <= 0:
+        raise ValueError("quadrature_y_nodes must be positive")
+    if quadrature_beta_scale_multiplier <= 0.0:
+        raise ValueError("quadrature_beta_scale_multiplier must be positive")
+    if quadrature_y_scale_multiplier <= 0.0:
+        raise ValueError("quadrature_y_scale_multiplier must be positive")
+    if normalization_interval < 0:
+        raise ValueError("normalization_interval must be >= 0")
+    if normalization_sample_size < 0:
+        raise ValueError("normalization_sample_size must be >= 0")
+    if normalization_epsilon <= 0.0:
+        raise ValueError("normalization_epsilon must be positive")
 
     output_dir_path = Path(output_dir).resolve()
     output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -384,6 +587,8 @@ def make_stan_linear_reward_fn(
 
     floor, ceil = get_logp_bounds()
     writer = CompletionWriter(completions_path)
+    normalization_metrics_path = output_dir_path / "normalization_metrics.jsonl"
+    normalization_metrics_path.touch(exist_ok=True)
     state = StanLinearRewardState(
         output_dir=output_dir_path,
         task_sampler=task_sampler,
@@ -395,9 +600,18 @@ def make_stan_linear_reward_fn(
         checker_penalty_reward=float(checker_penalty_reward),
         contract_penalty_reward=float(contract_penalty_reward),
         score_workers=int(score_workers),
+        quadrature_beta_nodes=int(quadrature_beta_nodes),
+        quadrature_y_nodes=int(quadrature_y_nodes),
+        quadrature_beta_scale_multiplier=float(quadrature_beta_scale_multiplier),
+        quadrature_y_scale_multiplier=float(quadrature_y_scale_multiplier),
+        normalization_interval=int(normalization_interval),
+        normalization_sample_size=int(normalization_sample_size),
+        normalization_epsilon=float(normalization_epsilon),
+        normalization_tail_drop_nats=float(normalization_tail_drop_nats),
         logp_floor=float(floor),
         logp_ceil=float(ceil),
         completion_writer=writer,
+        normalization_metrics_path=normalization_metrics_path,
     )
     _bootstrap_cmdsafestan_runtime(
         state=state,
@@ -439,6 +653,8 @@ def _bootstrap_cmdsafestan_runtime(
             jobs=max(state.compile_jobs, state.checker_jobs),
             stream_output=False,
         )
+        state.cmdstan_env = _prepare_cmdstan_env()
+        state.cmdstan_env["STANC3"] = state.runtime.stanc3
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
             "cmdsafestan bootstrap failed. On a fresh machine, initialize opam "
@@ -503,6 +719,8 @@ def _score_batch(
         for result in evaluated:
             ordered_results[result.index] = result
 
+    _run_batch_normalization(state, ordered_results, task)
+
     for result in ordered_results:
         if result is None:
             continue
@@ -529,6 +747,18 @@ def _score_batch(
                     state.unsafe_reason_totals[reason] += 1
 
         metadata = dict(result.metadata or {})
+        norm = metadata.get("normalization")
+        if isinstance(norm, dict):
+            stats.n_norm_checked += 1
+            status = str(norm.get("status", "unknown"))
+            stats.norm_status_counts[status] += 1
+            if not bool(norm.get("ok", False)):
+                stats.n_norm_failed += 1
+            max_abs = norm.get("max_abs_log_mass")
+            if isinstance(max_abs, int | float) and math.isfinite(float(max_abs)):
+                stats.norm_abs_log_masses.append(float(max_abs))
+            if norm.get("is_normalized") is False:
+                stats.n_non_normalized += 1
         metadata["task"] = _task_summary(task)
         metadata["checker"] = {
             "mode": state.checker_mode,
@@ -665,6 +895,170 @@ def _clamp_reward(value: float, *, floor: float, ceil: float) -> float:
     return float(min(max(value, floor), ceil))
 
 
+def _model_exe_path(stan_file: Path) -> Path:
+    stem = stan_file.with_suffix("")
+    if platform.system() == "Windows":
+        return stem.with_suffix(".exe")
+    return stem
+
+
+def _compile_plain_model(
+    state: StanLinearRewardState,
+    *,
+    code_hash: str,
+    code: str,
+) -> _CompiledModel:
+    if state.runtime is None:
+        raise RuntimeError("cmdsafestan runtime not initialized")
+
+    with state.cache_lock:
+        cached = state.compiled_models.get(code_hash)
+        if cached is not None and cached.exe_path.exists():
+            return cached
+
+        model_dir = state.output_dir / "cmdstan_logprob_models" / code_hash
+        model_dir.mkdir(parents=True, exist_ok=True)
+        stan_file = model_dir / "model.stan"
+        stan_file.write_text(code, encoding="utf-8")
+        exe_path = _model_exe_path(stan_file)
+        if exe_path.exists():
+            compiled = _CompiledModel(
+                exe_path=exe_path,
+                model_dir=model_dir,
+                compile_seconds=0.0,
+            )
+            state.compiled_models[code_hash] = compiled
+            return compiled
+
+        compile_cmd = [
+            sys.executable,
+            "-m",
+            "cmdsafestan.cli",
+            "--mode",
+            "plain",
+            "--stanc3",
+            state.runtime.stanc3,
+            "--no-stanc-sync",
+            "--jobs",
+            str(state.compile_jobs),
+            str(stan_file),
+        ]
+        compile_start = time.perf_counter()
+        run = subprocess.run(
+            compile_cmd,
+            cwd=state.runtime.cmdstan_root,
+            env=state.cmdstan_env or os.environ.copy(),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        compile_seconds = float(time.perf_counter() - compile_start)
+        if run.returncode != 0:
+            raise RuntimeError((run.stdout + run.stderr)[-4000:])
+        if not exe_path.exists():
+            raise RuntimeError(f"CmdStan compile succeeded but executable is missing: {exe_path}")
+
+        compiled = _CompiledModel(
+            exe_path=exe_path,
+            model_dir=model_dir,
+            compile_seconds=compile_seconds,
+        )
+        state.compiled_models[code_hash] = compiled
+        return compiled
+
+
+def _parse_lp_csv(path: Path) -> np.ndarray:
+    rows: list[float] = []
+    with path.open("r", encoding="utf-8") as handle:
+        reader = csv.reader(line for line in handle if line and not line.startswith("#"))
+        try:
+            header = next(reader)
+        except StopIteration as exc:
+            raise RuntimeError(f"empty CmdStan log_prob CSV: {path}") from exc
+        if "lp__" not in header:
+            raise RuntimeError(f"CmdStan log_prob CSV missing lp__: {path}")
+        lp_idx = header.index("lp__")
+        for row in reader:
+            try:
+                rows.append(float(row[lp_idx]))
+            except (IndexError, ValueError) as exc:
+                raise RuntimeError(f"invalid lp__ row in CmdStan CSV: {path}") from exc
+    return np.asarray(rows, dtype=np.float64)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_beta_nodes(path: Path, beta_values: np.ndarray) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["beta"])
+        for beta in np.asarray(beta_values, dtype=np.float64).reshape(-1):
+            writer.writerow([repr(float(beta))])
+
+
+def _evaluate_log_prob_beta_nodes(
+    state: StanLinearRewardState,
+    *,
+    compiled: _CompiledModel,
+    code_hash: str,
+    data_items: Sequence[dict[str, Any]],
+    beta_values: np.ndarray,
+    run_label: str,
+) -> np.ndarray:
+    if state.runtime is None:
+        raise RuntimeError("cmdsafestan runtime not initialized")
+    beta_arr = np.asarray(beta_values, dtype=np.float64).reshape(-1)
+    if beta_arr.size == 0:
+        raise ValueError("beta_values must be non-empty")
+
+    runs_root = state.output_dir / "cmdstan_logprob_runs"
+    runs_root.mkdir(parents=True, exist_ok=True)
+    prefix = f"{code_hash}-{run_label}-"
+    with tempfile.TemporaryDirectory(prefix=prefix, dir=runs_root) as tmp_dir:
+        work_dir = Path(tmp_dir)
+        params_csv = work_dir / "beta_nodes.csv"
+        _write_beta_nodes(params_csv, beta_arr)
+
+        lp_rows: list[np.ndarray] = []
+        for idx, data in enumerate(data_items):
+            data_file = work_dir / f"data_{idx:04d}.json"
+            output_file = work_dir / f"lp_{idx:04d}.csv"
+            _write_json(data_file, data)
+            run_cmd = [
+                str(compiled.exe_path),
+                "log_prob",
+                "propto=0",
+                "jacobian=0",
+                f"constrained_params={params_csv}",
+                "data",
+                f"file={data_file}",
+                "output",
+                f"file={output_file}",
+                "refresh=0",
+                "sig_figs=18",
+            ]
+            run = subprocess.run(
+                run_cmd,
+                cwd=state.runtime.cmdstan_root,
+                env=state.cmdstan_env or os.environ.copy(),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if run.returncode != 0:
+                raise RuntimeError((run.stdout + run.stderr)[-4000:])
+            row = _parse_lp_csv(output_file)
+            if row.shape[0] != beta_arr.shape[0]:
+                raise RuntimeError(
+                    f"Expected {beta_arr.shape[0]} lp__ rows, got {row.shape[0]}"
+                )
+            lp_rows.append(row)
+
+    return np.vstack(lp_rows).astype(np.float64)
+
+
 def _score_with_plain_stan(
     state: StanLinearRewardState,
     code_hash: str,
@@ -677,74 +1071,100 @@ def _score_with_plain_stan(
     if cached is not None:
         return cached
 
-    if state.runtime is None:
-        raise RuntimeError("cmdsafestan runtime not initialized")
-    if evaluate_model_string is None:
-        raise RuntimeError("cmdsafestan evaluate_model_string is unavailable")
-
     score_start = time.perf_counter()
-    result = evaluate_model_string(
-        code,
-        _task_to_stan_payload(task),
-        protect=state.protect,
-        runtime=state.runtime,
-        jobs=state.compile_jobs,
-        no_stanc_sync=True,
-        enforce_safety=False,
-        run_sample=True,
-        output_variables=["beta"],
-    )
-    wall_seconds = float(time.perf_counter() - score_start)
     metadata: dict[str, Any] = {
-        "backend": "cmdsafestan_api_plain",
-        "reported_source": "cmdsafestan_api_plain_lp__",
-        "score_eval_wall_seconds": wall_seconds,
-        "train_timings_seconds": dict(result.timings_seconds),
+        "backend": "cmdstan_log_prob",
+        "reported_source": "cmdstan_log_prob_gh_singleton_posterior_predictive",
         "task": _task_summary(task),
-        "output_values": _sanitize_output_values(getattr(result, "output_values", {})),
     }
 
-    if result.compile_returncode != 0:
+    if int(task.get("K_test", 0)) <= 0:
         entry = _ScoreCacheEntry(
             reward=EXEC_FAIL_REWARD,
             outcome="exec_fail",
             raw_reward=None,
-            metadata={**metadata, "compile_error": result.compile_output[:2000]},
-        )
-        with state.cache_lock:
-            state.score_cache[cache_key] = entry
-        return entry
-    if result.run_returncode != 0:
-        entry = _ScoreCacheEntry(
-            reward=EXEC_FAIL_REWARD,
-            outcome="exec_fail",
-            raw_reward=None,
-            metadata={**metadata, "run_error": result.run_output[:2000]},
+            metadata={**metadata, "run_error": "missing_heldout_points"},
         )
         with state.cache_lock:
             state.score_cache[cache_key] = entry
         return entry
 
-    train_lp = result.log_likelihood
-    if train_lp is None or not math.isfinite(float(train_lp)):
+    try:
+        compiled = _compile_plain_model(state, code_hash=code_hash, code=code)
+        beta_values, logw_beta, beta_meta = _beta_quadrature_nodes(
+            task,
+            n_nodes=state.quadrature_beta_nodes,
+            scale_multiplier=state.quadrature_beta_scale_multiplier,
+        )
+        x_test = np.asarray(task["X_test"], dtype=np.float64).reshape(-1)
+        y_test = np.asarray(task["y_test"], dtype=np.float64).reshape(-1)
+        data_items = [_task_to_stan_payload(task)]
+        data_items.extend(
+            _augmented_task_to_stan_payload(task, x_new=float(x_new), y_new=float(y_new))
+            for x_new, y_new in zip(x_test, y_test, strict=True)
+        )
+        lp_matrix = _evaluate_log_prob_beta_nodes(
+            state,
+            compiled=compiled,
+            code_hash=code_hash,
+            data_items=data_items,
+            beta_values=beta_values,
+            run_label=_task_cache_key(task),
+        )
+        log_z_values = np.asarray(
+            [_log_integral_from_lp(row, logw_beta) for row in lp_matrix],
+            dtype=np.float64,
+        )
+    except Exception as exc:  # noqa: BLE001
+        wall_seconds = float(time.perf_counter() - score_start)
         entry = _ScoreCacheEntry(
             reward=EXEC_FAIL_REWARD,
             outcome="exec_fail",
             raw_reward=None,
-            metadata={**metadata, "run_error": "non_finite_or_missing_lp__"},
+            metadata={
+                **metadata,
+                "score_eval_wall_seconds": wall_seconds,
+                "run_error": str(exc)[:4000],
+            },
         )
         with state.cache_lock:
             state.score_cache[cache_key] = entry
         return entry
 
-    raw_reward = float(train_lp)
+    if not np.all(np.isfinite(log_z_values)):
+        entry = _ScoreCacheEntry(
+            reward=EXEC_FAIL_REWARD,
+            outcome="exec_fail",
+            raw_reward=None,
+            metadata={**metadata, "run_error": "non_finite_logZ"},
+        )
+        with state.cache_lock:
+            state.score_cache[cache_key] = entry
+        return entry
+
+    log_z_train = float(log_z_values[0])
+    singleton_scores = log_z_values[1:] - log_z_train
+    raw_reward = float(np.mean(singleton_scores))
     clipped_reward = _clamp_reward(
         raw_reward,
         floor=state.logp_floor,
         ceil=state.logp_ceil,
     )
+    wall_seconds = float(time.perf_counter() - score_start)
     metadata["raw_reward"] = raw_reward
     metadata["reward_clamped"] = clipped_reward != raw_reward
+    metadata["score_eval_wall_seconds"] = wall_seconds
+    metadata["compile_seconds"] = compiled.compile_seconds
+    metadata["logZ_train"] = log_z_train
+    metadata["logZ_augmented"] = [float(v) for v in log_z_values[1:]]
+    metadata["singleton_log_scores"] = [float(v) for v in singleton_scores]
+    metadata["quadrature"] = {
+        "beta_nodes": int(state.quadrature_beta_nodes),
+        "beta_scale_multiplier": float(state.quadrature_beta_scale_multiplier),
+        "beta_center": float(beta_meta["center"]),
+        "beta_scale": float(beta_meta["scale"]),
+        "backend": "cmdstan_log_prob_batched_beta_csv",
+    }
     entry = _ScoreCacheEntry(
         reward=clipped_reward,
         outcome="valid",
@@ -756,11 +1176,292 @@ def _score_with_plain_stan(
     return entry
 
 
+def _append_jsonl(path: Path | None, payload: dict[str, Any]) -> None:
+    if path is None:
+        return
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _run_batch_normalization(
+    state: StanLinearRewardState,
+    ordered_results: list[_CompletionResult | None],
+    task: dict[str, Any],
+) -> None:
+    if state.normalization_interval <= 0 or state.normalization_sample_size <= 0:
+        return
+    if state.call_count % state.normalization_interval != 0:
+        return
+
+    valid_results = [
+        result
+        for result in ordered_results
+        if result is not None and result.outcome == "valid" and result.code is not None
+    ]
+    if not valid_results:
+        return
+
+    for result in valid_results[: state.normalization_sample_size]:
+        assert result.code is not None
+        code_hash = _hash_code(result.code)
+        norm_start = time.perf_counter()
+        try:
+            norm = _audit_predictive_normalization(
+                state,
+                code_hash=code_hash,
+                code=result.code,
+                task=task,
+                score_metadata=result.metadata or {},
+            )
+        except Exception as exc:  # noqa: BLE001
+            norm = {
+                "ok": False,
+                "status": "audit_failed",
+                "method": "cmdstan_log_prob_y_data_gh",
+                "reason": str(exc)[:2000],
+                "is_normalized": False,
+            }
+        norm["audit_wall_seconds"] = float(time.perf_counter() - norm_start)
+        if result.metadata is None:
+            result.metadata = {}
+        result.metadata["normalization"] = norm
+        _append_jsonl(
+            state.normalization_metrics_path,
+            {
+                "step": int(state.call_count),
+                "batch": int(state.call_count),
+                "index": int(result.index),
+                "code_hash": code_hash,
+                "task": _task_summary(task),
+                **norm,
+            },
+        )
+
+
+def _tail_diagnostic(
+    state: StanLinearRewardState,
+    *,
+    compiled: _CompiledModel,
+    code_hash: str,
+    task: dict[str, Any],
+    x_new: float,
+    beta_values: np.ndarray,
+    logw_beta: np.ndarray,
+    y_center: float,
+    pred_sd: float,
+    central_log_z: float,
+    label: str,
+) -> dict[str, Any]:
+    tail_y_values: list[float] = []
+    for sign in (-1.0, 1.0):
+        for radius in _TAIL_RADII:
+            tail_y_values.append(float(y_center + sign * radius * pred_sd))
+    data_items = [
+        _augmented_task_to_stan_payload(task, x_new=x_new, y_new=y_value)
+        for y_value in tail_y_values
+    ]
+    lp_matrix = _evaluate_log_prob_beta_nodes(
+        state,
+        compiled=compiled,
+        code_hash=code_hash,
+        data_items=data_items,
+        beta_values=beta_values,
+        run_label=label,
+    )
+    tail_log_z = np.asarray(
+        [_log_integral_from_lp(row, logw_beta) for row in lp_matrix],
+        dtype=np.float64,
+    )
+    max_tail_log_z = float(np.max(tail_log_z)) if tail_log_z.size else float("nan")
+    enough_drop = bool(
+        math.isfinite(central_log_z)
+        and math.isfinite(max_tail_log_z)
+        and max_tail_log_z <= central_log_z - state.normalization_tail_drop_nats
+    )
+
+    negative_side = tail_log_z[: len(_TAIL_RADII)]
+    positive_side = tail_log_z[len(_TAIL_RADII) :]
+    tail_increases = bool(
+        np.any(np.diff(negative_side) > 1e-6)
+        or np.any(np.diff(positive_side) > 1e-6)
+    )
+    return {
+        "tail_y_values": [float(v) for v in tail_y_values],
+        "tail_logZ": [float(v) for v in tail_log_z],
+        "max_tail_logZ": max_tail_log_z,
+        "central_logZ": float(central_log_z),
+        "required_drop_nats": float(state.normalization_tail_drop_nats),
+        "enough_drop": enough_drop,
+        "tail_increases": tail_increases,
+        "ok": enough_drop and not tail_increases,
+    }
+
+
+def _audit_predictive_normalization(
+    state: StanLinearRewardState,
+    *,
+    code_hash: str,
+    code: str,
+    task: dict[str, Any],
+    score_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    compiled = _compile_plain_model(state, code_hash=code_hash, code=code)
+    beta_values, logw_beta, beta_meta = _beta_quadrature_nodes(
+        task,
+        n_nodes=state.quadrature_beta_nodes,
+        scale_multiplier=state.quadrature_beta_scale_multiplier,
+    )
+
+    raw_log_z_train = score_metadata.get("logZ_train")
+    if isinstance(raw_log_z_train, int | float) and math.isfinite(float(raw_log_z_train)):
+        log_z_train = float(raw_log_z_train)
+    else:
+        lp_train = _evaluate_log_prob_beta_nodes(
+            state,
+            compiled=compiled,
+            code_hash=code_hash,
+            data_items=[_task_to_stan_payload(task)],
+            beta_values=beta_values,
+            run_label=f"{_task_cache_key(task)}-norm-train",
+        )[0]
+        log_z_train = _log_integral_from_lp(lp_train, logw_beta)
+
+    x_test = np.asarray(task["X_test"], dtype=np.float64).reshape(-1)
+    if x_test.size == 0:
+        return {
+            "ok": False,
+            "status": "invalid_task",
+            "reason": "missing_heldout_points",
+            "method": "cmdstan_log_prob_y_data_gh",
+            "is_normalized": False,
+        }
+
+    log_masses: list[float] = []
+    per_point: list[dict[str, Any]] = []
+    tail_ok = True
+    for j, x_new in enumerate(x_test):
+        y_values, logw_y, y_meta = _y_quadrature_nodes(
+            task,
+            x_new=float(x_new),
+            n_nodes=state.quadrature_y_nodes,
+            scale_multiplier=state.quadrature_y_scale_multiplier,
+        )
+        data_items = [
+            _augmented_task_to_stan_payload(task, x_new=float(x_new), y_new=float(y_value))
+            for y_value in y_values
+        ]
+        lp_matrix = _evaluate_log_prob_beta_nodes(
+            state,
+            compiled=compiled,
+            code_hash=code_hash,
+            data_items=data_items,
+            beta_values=beta_values,
+            run_label=f"{_task_cache_key(task)}-norm-j{j}",
+        )
+        log_z_beta_given_y = np.asarray(
+            [_log_integral_from_lp(row, logw_beta) for row in lp_matrix],
+            dtype=np.float64,
+        )
+        log_z_audit = _log_integral_from_lp(log_z_beta_given_y, logw_y)
+        log_mass = float(log_z_audit - log_z_train)
+        log_masses.append(log_mass)
+
+        central_lp = _evaluate_log_prob_beta_nodes(
+            state,
+            compiled=compiled,
+            code_hash=code_hash,
+            data_items=[
+                _augmented_task_to_stan_payload(
+                    task,
+                    x_new=float(x_new),
+                    y_new=float(y_meta["center"]),
+                )
+            ],
+            beta_values=beta_values,
+            run_label=f"{_task_cache_key(task)}-tail-center-j{j}",
+        )[0]
+        central_log_z = _log_integral_from_lp(central_lp, logw_beta)
+        tail = _tail_diagnostic(
+            state,
+            compiled=compiled,
+            code_hash=code_hash,
+            task=task,
+            x_new=float(x_new),
+            beta_values=beta_values,
+            logw_beta=logw_beta,
+            y_center=float(y_meta["center"]),
+            pred_sd=float(y_meta["pred_sd"]),
+            central_log_z=central_log_z,
+            label=f"{_task_cache_key(task)}-tail-j{j}",
+        )
+        tail_ok = tail_ok and bool(tail["ok"])
+        per_point.append(
+            {
+                "index": int(j),
+                "x_new": float(x_new),
+                "log_mass": log_mass,
+                "logZ_audit": float(log_z_audit),
+                "y_center": float(y_meta["center"]),
+                "y_scale": float(y_meta["scale"]),
+                "tail": tail,
+            }
+        )
+
+    max_abs_log_mass = float(np.max(np.abs(np.asarray(log_masses, dtype=np.float64))))
+    finite = math.isfinite(max_abs_log_mass)
+    mass_ok = bool(finite and max_abs_log_mass <= state.normalization_epsilon)
+    is_normalized = bool(mass_ok and tail_ok)
+    if not finite:
+        status = "non_finite_log_mass"
+    elif not tail_ok:
+        status = "tail_not_decaying"
+    elif not mass_ok:
+        status = "non_normalized"
+    else:
+        status = "ok"
+    return {
+        "ok": True,
+        "status": status,
+        "method": "cmdstan_log_prob_y_data_gh",
+        "is_normalized": is_normalized,
+        "epsilon": float(state.normalization_epsilon),
+        "logZ_train": float(log_z_train),
+        "log_masses": [float(v) for v in log_masses],
+        "max_abs_log_mass": max_abs_log_mass,
+        "mean_abs_log_mass": float(np.mean(np.abs(np.asarray(log_masses, dtype=np.float64)))),
+        "n_points": int(len(log_masses)),
+        "quadrature": {
+            "beta_nodes": int(state.quadrature_beta_nodes),
+            "y_nodes": int(state.quadrature_y_nodes),
+            "beta_scale_multiplier": float(state.quadrature_beta_scale_multiplier),
+            "y_scale_multiplier": float(state.quadrature_y_scale_multiplier),
+            "beta_center": float(beta_meta["center"]),
+            "beta_scale": float(beta_meta["scale"]),
+        },
+        "per_point": per_point,
+    }
+
+
 def _build_point(batch: int, stats: _BatchStats) -> StanLinearTrajectoryPoint:
     valid_reward = [r for r, o in zip(stats.rewards, stats.outcomes, strict=True) if o == "valid"]
     reported_mean = float(np.mean(valid_reward)) if valid_reward else float("nan")
     reported_mean_all = float(np.mean(stats.rewards)) if stats.rewards else float("nan")
     n_total = len(stats.rewards)
+    frac_non_normalized = (
+        stats.n_non_normalized / stats.n_norm_checked
+        if stats.n_norm_checked
+        else float("nan")
+    )
+    mean_abs_log_mass = (
+        float(np.mean(stats.norm_abs_log_masses))
+        if stats.norm_abs_log_masses
+        else float("nan")
+    )
+    max_abs_log_mass = (
+        float(np.max(stats.norm_abs_log_masses))
+        if stats.norm_abs_log_masses
+        else float("nan")
+    )
     return StanLinearTrajectoryPoint(
         batch=batch,
         reported_mean=reported_mean,
@@ -776,9 +1477,11 @@ def _build_point(batch: int, stats: _BatchStats) -> StanLinearTrajectoryPoint:
         n_valid_reported=len(valid_reward),
         task_seed=stats.task_seed,
         n_obs=stats.n_obs,
-        frac_non_normalized=float("nan"),
-        mean_abs_log_mass=float("nan"),
-        n_norm_checked=0,
+        frac_non_normalized=frac_non_normalized,
+        mean_abs_log_mass=mean_abs_log_mass,
+        max_abs_log_mass=max_abs_log_mass,
+        n_norm_checked=stats.n_norm_checked,
+        n_norm_failed=stats.n_norm_failed,
     )
 
 
@@ -829,12 +1532,20 @@ def _log_batch_to_wandb(
         "stan_linear/checker/cumulative_unsafe_rate": (
             state.total_unsafe / max(state.total_checked, 1)
         ),
+        "stan_linear/normalization/n_checked": point.n_norm_checked,
+        "stan_linear/normalization/n_failed": point.n_norm_failed,
+        "stan_linear/normalization/frac_non_normalized": point.frac_non_normalized,
+        "stan_linear/normalization/mean_abs_log_mass": point.mean_abs_log_mass,
+        "stan_linear/normalization/max_abs_log_mass": point.max_abs_log_mass,
     }
     for reason, batch_count in stats.unsafe_reason_counts.items():
         key = _reason_metric_key(state, reason)
         cumulative_count = state.unsafe_reason_totals[reason]
         metrics[f"stan_linear/checker/reason_batch_count/{key}"] = batch_count
         metrics[f"stan_linear/checker/reason_cumulative_count/{key}"] = cumulative_count
+    for status, batch_count in stats.norm_status_counts.items():
+        key = _reason_metric_key(state, status)
+        metrics[f"stan_linear/normalization/status_batch_count/{key}"] = batch_count
 
     try:
         log_metrics(metrics)
@@ -848,7 +1559,8 @@ def _print_batch_summary(point: StanLinearTrajectoryPoint) -> None:
         f"reward={point.reported_mean:8.2f} "
         f"valid={point.n_valid:4d}/{point.n_total:<4d} "
         f"contract={point.n_contract_fail:<4d} "
-        f"unsafe_rate={point.unsafe_rate:.3f}"
+        f"unsafe_rate={point.unsafe_rate:.3f} "
+        f"lh={point.frac_non_normalized:.3f}"
     )
 
 

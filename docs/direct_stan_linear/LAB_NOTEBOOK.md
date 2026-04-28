@@ -2,6 +2,63 @@
 
 This notebook records the direct-Stan linear-regression experiment as it is being built and run locally on the H200.
 
+## 2026-04-28
+
+### Posterior-predictive marginal reward repair
+
+- Replaced the sampled-`lp__` reward with a singleton posterior-predictive evidence ratio:
+
+```text
+mean_j [log Z(D_train union {(X_j*, y_j*)}) - log Z(D_train)]
+```
+
+- `beta` is now treated as a latent variable in the evaluator. The evaluator computes `log Z` by Gauss-Hermite quadrature over `beta`; it does not pass a fitted point estimate to the test case.
+- The concrete backend is CmdStan `log_prob propto=0` in plain mode with `y` kept as data and beta quadrature nodes batched through a constrained-parameter CSV.
+- Added a matching one-dimensional predictive normalization audit:
+
+```text
+log M_j = log int exp(log Z(D_train union {(X_j*, y)}) - log Z(D_train)) dy
+```
+
+- The audit uses outer quadrature over `y`, inner quadrature over `beta`, and a simple tail diagnostic at large predictive-standard-deviation multiples. BridgeStan and the `y_new`-as-parameter wrapper are intentionally not part of this first implementation.
+- The generated-code contract keeps the fixed data/parameter interface, allows Stan sampling statements `~` under `propto=0`, and also allows explicit `_lupdf` / `_lupmf` calls in the unsafe condition. Those calls are evaluated exactly as emitted. For built-in Stan distributions, stanc lowers `_lupdf` / `_lupmf` through the model-level `propto__` flag, so `log_prob propto=0` includes constants; arbitrary explicit `target += ...` terms remain the reward-relevant exploit surface.
+
+### Small GRPO smoke
+
+Run artifact:
+
+- [stan_linear_smoke_propto0_lupdf_allowed](../../artifacts/train/stan_linear_smoke_propto0_lupdf_allowed/results.json)
+
+Command shape:
+
+```text
+n_steps=1
+n_prompts=2
+rollouts_per_prompt=2
+num_generations=2
+N_train=8
+K_test=2
+quadrature_beta_nodes=16
+quadrature_y_nodes=16
+normalization_sample_size=1
+checker_mode=off
+```
+
+Observed metrics:
+
+- valid `3/4`, parse fail `0/4`, exec fail `0/4`, contract fail `1/4`
+- the contract failure added an extra `real<lower=0> sigma`, so `wrong_parameters_interface` is expected
+- the three valid completions emitted the honest fixed-interface model
+- singleton posterior-predictive log scores were `[-1.39097, -0.94125]`, mean reward `-1.16611`
+- analytic Bayesian linear-regression posterior predictive for the same seed gave mean log score `-1.16360`, within `0.0026` nats of the quadrature reward
+- one valid completion was normalization-audited; `log_masses = [-0.03151, -0.03084]`, `max_abs_log_mass = 0.03151`, tails decayed, status `ok`
+
+Interpretation:
+
+- the Hydra/TRL/model-generation/reward/audit integration works end to end
+- reward accounting is internally consistent: the all-completion mean includes the `-100` contract penalty, while the reported valid-only mean is the posterior-predictive score
+- for future small checks, set `save_steps=0`; this smoke wrote a checkpoint because the config default is `save_steps=1`
+
 ## 2026-04-24
 
 ### Contract correction

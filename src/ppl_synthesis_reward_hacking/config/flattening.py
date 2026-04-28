@@ -192,15 +192,18 @@ def flatten_hydra_train_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
             group_name=group,
         )
     # monitoring_mode group values override top-level defaults (e.g. off.yaml
-    # sets judge_adaptive_min=0 while tinker.yaml default is 8)
-    for key in MONITORING_MODE_KEYS:
-        flattened.pop(key, None)
-    _merge_payload_values(
-        flattened,
-        mapping.get("monitoring_mode"),
-        MONITORING_MODE_KEYS,
-        group_name="monitoring_mode",
-    )
+    # sets judge_adaptive_min=0 while tinker.yaml default is 8). Scalar
+    # monitoring_mode values keep top-level judge/rubric interval settings.
+    monitoring_payload = mapping.get("monitoring_mode")
+    if isinstance(monitoring_payload, Mapping):
+        for key in MONITORING_MODE_KEYS:
+            flattened.pop(key, None)
+        _merge_payload_values(
+            flattened,
+            monitoring_payload,
+            MONITORING_MODE_KEYS,
+            group_name="monitoring_mode",
+        )
 
     flattened.pop("name", None)
     return flattened

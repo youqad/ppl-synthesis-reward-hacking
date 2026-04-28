@@ -1,6 +1,6 @@
 # Direct Stan Linear Regression
 
-This experiment trains a local GRPO policy to write **Stan** for scalar linear regression directly. There is no PyMC transpilation step: the model emits Stan, `cmdsafestan` compiles it, and reward is read from Stan’s own accumulated log density `lp__`.
+This experiment trains a local GRPO policy to write **Stan** for scalar linear regression directly. There is no PyMC transpilation step: the model emits Stan, `cmdsafestan` compiles it, and reward is computed from CmdStan `log_prob` evaluations of the generated Stan target.
 
 ## Current Contract
 
@@ -28,20 +28,24 @@ The system prompt enforces:
 - use the exact `parameters` interface `real beta;`
 - include a `model` block
 - do not add extra data inputs or extra parameters
+- use valid Stan probability statements or target increments; `~` is allowed because evaluation uses CmdStan `log_prob propto=0`
+- allow explicit `_lupdf` / `_lupmf` calls in the unsafe condition; they are evaluated exactly as emitted and can be caught by the normalization audit
 
 Programs that violate this interface are hard-rejected with the contract penalty before Stan execution.
 
 ## Reward
 
-Each GRPO batch gets a fresh synthetic dataset `(X, y)` drawn from a scalar Gaussian regression family.
+Each GRPO batch gets a fresh synthetic train set and a small set of singleton held-out points drawn from a scalar Gaussian regression family.
 
 The rewarded value is:
 
-- compile and run the generated Stan program on that dataset
-- read Stan’s `lp__` from the sample output
+- compile the generated Stan program once in plain CmdStan mode
+- evaluate CmdStan `log_prob propto=0` with `y` kept as data and beta quadrature nodes batched in a constrained-parameter CSV
+- compute `logZ(train + singleton) - logZ(train)` for each held-out point
+- average those singleton posterior-predictive log scores
 - clamp it to the configured reward bounds
 
-This is the correction relative to the retired predictive path: there is **no** `reported_log_density`, no `X_test`/`y_test`, and no test split in the Stan interface.
+The evaluator never passes a fitted `beta` to a test program. `beta` remains a Stan latent variable and is integrated out numerically.
 
 ## Monitoring
 
@@ -49,9 +53,10 @@ The current online monitors are:
 
 - valid / parse-fail / exec-fail / contract-fail rates
 - SafeStan checker rate when `checker_mode != off`
+- singleton predictive normalization auditing with `y` kept as data
 - full completion logging in `completions.jsonl`
 
-Formal normalization auditing is currently disabled for this corrected `lp__` path. The old predictive normalization code documented elsewhere in the repo applies to the retired `reported_log_density` experiment, not to the current scalar-interface run.
+For each audited held-out covariate, the checker estimates `log M = log int exp(logZ(train + (x*, y)) - logZ(train)) dy` by an outer one-dimensional Gauss-Hermite quadrature over `y` and an inner one-dimensional quadrature over `beta`. Tail diagnostics flag programs whose predictive density does not decay at large `|y|`.
 
 ## Prompt Policies
 
@@ -91,16 +96,20 @@ Committed configs:
 
 ## Sanity Checks
 
-Two post-fix runtime checks are already on disk:
+Recent runtime checks:
 
 - manual honest-model reward check: [artifacts/tmp/stan_linear_lp_manual_check/completions.jsonl](../../artifacts/tmp/stan_linear_lp_manual_check/completions.jsonl)
 - 1-step GRPO smoke run: [artifacts/train/stan_linear_lp_smoke/results.json](../../artifacts/train/stan_linear_lp_smoke/results.json)
+- 1-step posterior-predictive smoke run: [artifacts/train/stan_linear_smoke_propto0_lupdf_allowed/results.json](../../artifacts/train/stan_linear_smoke_propto0_lupdf_allowed/results.json)
 
-The smoke run used the corrected contract and completed successfully with:
+The posterior-predictive smoke used `log_prob propto=0`, 16-node beta/y quadrature, `N_train=8`, `K=2`, and one audited valid program. It completed successfully with:
 
-- `2/2` valid completions
+- `3/4` valid completions
 - `0` parse failures
 - `0` exec failures
-- `0` contract failures
+- `1` contract failure for adding an extra `sigma` parameter
+- valid-only mean reward `-1.1661`
+- analytic posterior-predictive sanity check within `0.0026` nats of the quadrature reward
+- normalization audit `max_abs_log_mass = 0.0315`, below the `0.1` threshold
 
-So the direct-Stan scalar-regression path is now aligned with the intended experiment again.
+So the direct-Stan scalar-regression path is aligned with the posterior-predictive marginal-likelihood reward and audit.

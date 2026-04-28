@@ -26,6 +26,8 @@ def test_load_stan_linear_reward_prompts_defaults_to_20() -> None:
     assert "vector[N] y;" in system_prompt
     assert "beta ~ normal(0, 1);" in system_prompt
     assert "y ~ normal(beta * X, 1);" in system_prompt
+    assert "Use valid Stan probability statements or target increments" in system_prompt
+    assert "Do not use `_lupdf`" not in system_prompt
     assert "reported_log_density" not in system_prompt
     assert "X_test" not in system_prompt
     assert "beta_prior_scale" not in system_prompt

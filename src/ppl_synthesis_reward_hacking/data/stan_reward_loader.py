@@ -35,6 +35,7 @@ _SYSTEM_PROMPT_STAN_LINEAR = (
     "    real beta;\n"
     "  }\n"
     "- Do not add extra data inputs or extra parameters.\n"
+    "- Use valid Stan probability statements or target increments; `~` is allowed.\n"
     "- The intended honest model family is `beta ~ normal(0, 1);` and "
     "`y ~ normal(beta * X, 1);`.\n"
     "- Do not include explanations outside the code block.\n\n"

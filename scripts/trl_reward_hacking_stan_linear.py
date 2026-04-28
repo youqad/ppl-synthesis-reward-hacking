@@ -77,9 +77,20 @@ class TRLStanLinearRewardConfig:
     run_name: str | None = None
     thinking_mode: str = "no_think"
     prompt_policy: str = "neutral_family"
-    dataset_n_obs: int = 16
+    dataset_n_train: int = 8
+    dataset_n_test: int = 4
+    dataset_n_obs: int | None = None
     dataset_noise_sigma: float = 1.0
     dataset_beta_scale: float = 1.0
+    quadrature_beta_nodes: int = 32
+    quadrature_y_nodes: int = 32
+    quadrature_beta_scale_multiplier: float = 4.0
+    quadrature_y_scale_multiplier: float = 4.0
+    normalization_method: str = "gh_y_data"
+    normalization_interval: int = 1
+    normalization_sample_size: int = 4
+    normalization_epsilon: float = 0.1
+    normalization_tail_drop_nats: float = 20.0
     scoring_seed_base: int = 0
     cmdstan_root: str = "cmdsafestan"
     stanc3: str = "safestan"
@@ -101,6 +112,12 @@ def config_from_mapping(mapping: Mapping[str, Any]) -> TRLStanLinearRewardConfig
     cfg = TRLStanLinearRewardConfig(**flattened)
     _validate_config(cfg)
     return cfg
+
+
+def _effective_n_train(config: TRLStanLinearRewardConfig) -> int:
+    if config.dataset_n_obs is not None:
+        return int(config.dataset_n_obs)
+    return int(config.dataset_n_train)
 
 
 def _validate_config(config: TRLStanLinearRewardConfig) -> None:
@@ -125,12 +142,32 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
         )
     if config.checker_mode not in {"off", "shadow", "enforce"}:
         raise ValueError("checker_mode must be off|shadow|enforce")
-    if config.dataset_n_obs <= 0:
-        raise ValueError("dataset_n_obs must be positive")
+    if _effective_n_train(config) <= 0:
+        raise ValueError("dataset_n_train must be positive")
+    if config.dataset_n_test <= 0:
+        raise ValueError("dataset_n_test must be positive")
     if config.dataset_noise_sigma <= 0:
         raise ValueError("dataset_noise_sigma must be positive")
     if config.dataset_beta_scale <= 0:
         raise ValueError("dataset_beta_scale must be positive")
+    if config.quadrature_beta_nodes <= 0:
+        raise ValueError("quadrature_beta_nodes must be positive")
+    if config.quadrature_y_nodes <= 0:
+        raise ValueError("quadrature_y_nodes must be positive")
+    if config.quadrature_beta_scale_multiplier <= 0:
+        raise ValueError("quadrature_beta_scale_multiplier must be positive")
+    if config.quadrature_y_scale_multiplier <= 0:
+        raise ValueError("quadrature_y_scale_multiplier must be positive")
+    if config.normalization_method not in {"off", "gh_y_data"}:
+        raise ValueError("normalization_method must be off|gh_y_data")
+    if config.normalization_interval < 0:
+        raise ValueError("normalization_interval must be >= 0")
+    if config.normalization_sample_size < 0:
+        raise ValueError("normalization_sample_size must be >= 0")
+    if config.normalization_epsilon <= 0:
+        raise ValueError("normalization_epsilon must be positive")
+    if config.normalization_tail_drop_nats <= 0:
+        raise ValueError("normalization_tail_drop_nats must be positive")
     if config.num_generations < 2:
         raise ValueError("num_generations must be >= 2")
     if config.save_steps < 0:
@@ -170,9 +207,20 @@ def parse_args() -> argparse.Namespace:
         default="neutral_family",
         choices=sorted(STAN_LINEAR_PROMPT_POLICIES),
     )
-    p.add_argument("--dataset-n-obs", type=int, default=16)
+    p.add_argument("--dataset-n-train", type=int, default=8)
+    p.add_argument("--dataset-n-test", type=int, default=4)
+    p.add_argument("--dataset-n-obs", type=int, default=None)
     p.add_argument("--dataset-noise-sigma", type=float, default=1.0)
     p.add_argument("--dataset-beta-scale", type=float, default=1.0)
+    p.add_argument("--quadrature-beta-nodes", type=int, default=32)
+    p.add_argument("--quadrature-y-nodes", type=int, default=32)
+    p.add_argument("--quadrature-beta-scale-multiplier", type=float, default=4.0)
+    p.add_argument("--quadrature-y-scale-multiplier", type=float, default=4.0)
+    p.add_argument("--normalization-method", default="gh_y_data", choices=["off", "gh_y_data"])
+    p.add_argument("--normalization-interval", type=int, default=1)
+    p.add_argument("--normalization-sample-size", type=int, default=4)
+    p.add_argument("--normalization-epsilon", type=float, default=0.1)
+    p.add_argument("--normalization-tail-drop-nats", type=float, default=20.0)
     p.add_argument("--scoring-seed-base", type=int, default=0)
     p.add_argument("--cmdstan-root", default="cmdsafestan")
     p.add_argument("--stanc3", default="safestan")
@@ -229,6 +277,16 @@ def _build_reward_function(config: TRLStanLinearRewardConfig, output_dir: Path):
         checker_penalty_reward=config.checker_penalty_reward,
         contract_penalty_reward=config.contract_penalty_reward,
         score_workers=config.score_workers,
+        quadrature_beta_nodes=config.quadrature_beta_nodes,
+        quadrature_y_nodes=config.quadrature_y_nodes,
+        quadrature_beta_scale_multiplier=config.quadrature_beta_scale_multiplier,
+        quadrature_y_scale_multiplier=config.quadrature_y_scale_multiplier,
+        normalization_interval=(
+            0 if config.normalization_method == "off" else config.normalization_interval
+        ),
+        normalization_sample_size=config.normalization_sample_size,
+        normalization_epsilon=config.normalization_epsilon,
+        normalization_tail_drop_nats=config.normalization_tail_drop_nats,
         completions_path=output_dir / "completions.jsonl",
     )
 
@@ -320,18 +378,31 @@ def _log_training_setup(
         n_prompts * config.num_generations,
     )
     log.info(
-        "Dataset: scalar_linear_regression (n=%d sigma=%.2f beta_scale=%.2f)",
-        config.dataset_n_obs,
+        "Dataset: scalar_linear_regression (n_train=%d k_test=%d sigma=%.2f beta_scale=%.2f)",
+        _effective_n_train(config),
+        config.dataset_n_test,
         config.dataset_noise_sigma,
         config.dataset_beta_scale,
     )
     log.info(
-        "Direct Stan reward: metric=lp__ checker_mode=%s prompt_policy=%s "
-        "save_steps=%s score_workers=%s",
+        "Direct Stan reward: metric=singleton_logZ_ratio backend=cmdstan_log_prob "
+        "checker_mode=%s prompt_policy=%s save_steps=%s score_workers=%s",
         config.checker_mode,
         config.prompt_policy,
         config.save_steps if config.save_steps > 0 else "auto",
         config.score_workers if config.score_workers > 0 else "auto",
+    )
+    log.info(
+        "Quadrature: beta_nodes=%d y_nodes=%d beta_scale=%.1f y_scale=%.1f "
+        "normalization=%s interval=%d sample=%d epsilon=%.3f",
+        config.quadrature_beta_nodes,
+        config.quadrature_y_nodes,
+        config.quadrature_beta_scale_multiplier,
+        config.quadrature_y_scale_multiplier,
+        config.normalization_method,
+        config.normalization_interval,
+        config.normalization_sample_size,
+        config.normalization_epsilon,
     )
     log.info("Output: %s", output_dir)
 
@@ -414,7 +485,9 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
             ),
             "final_frac_non_normalized": point.frac_non_normalized,
             "final_mean_abs_log_mass": point.mean_abs_log_mass,
+            "final_max_abs_log_mass": point.max_abs_log_mass,
             "final_n_norm_checked": point.n_norm_checked,
+            "final_n_norm_failed": point.n_norm_failed,
             "final_reward_mean_all": point.reported_mean_all,
         }
     else:
@@ -436,6 +509,11 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
     metrics["final_unsafe_rate"] = final.unsafe_rate
     metrics["final_n_unsafe"] = final.n_unsafe
     metrics["final_n_checked"] = final.n_checked
+    metrics["final_frac_non_normalized"] = final.frac_non_normalized
+    metrics["final_mean_abs_log_mass"] = final.mean_abs_log_mass
+    metrics["final_max_abs_log_mass"] = final.max_abs_log_mass
+    metrics["final_n_norm_checked"] = final.n_norm_checked
+    metrics["final_n_norm_failed"] = final.n_norm_failed
     metrics["final_reward_mean_all"] = final.reported_mean_all
     metrics.update(_build_summary(config, metrics))
     return metrics
@@ -465,15 +543,15 @@ def _build_summary(
         "sweep/final_valid_rate": results.get("final_valid_rate"),
         "paper/track": config.paper_track,
         "paper/claim_mode": config.claim_mode,
-        "paper/reward_metric": "lp__",
-        "paper/reward_data_split": "train",
-        "paper/reward_estimator_backend": "cmdsafestan_plain_lp__",
+        "paper/reward_metric": "singleton_posterior_predictive_logZ_ratio",
+        "paper/reward_data_split": "train_plus_singleton_holdout",
+        "paper/reward_estimator_backend": "cmdstan_log_prob_gauss_hermite",
         "paper/prompt_source": "hardcoded",
         "paper/prompt_policy": config.prompt_policy,
         "paper/thinking_mode": config.thinking_mode,
         "paper/monitoring_mode": f"safestan_{config.checker_mode}",
-        "paper/normalization_method": "off",
-        "paper/delta_scope": "off",
+        "paper/normalization_method": config.normalization_method,
+        "paper/delta_scope": "singleton_y_given_train_x",
         "paper/frac_non_normalized_final": results.get("final_frac_non_normalized", float("nan")),
         "paper/lh_formal_signal_final": results.get("final_frac_non_normalized", float("nan")),
         "paper/judge_hacking_rate_final": float("nan"),
@@ -491,26 +569,37 @@ def _sample_scalar_regression_task(
 ) -> dict[str, Any]:
     rng = np.random.default_rng(seed)
     beta = float(rng.normal(0.0, config.dataset_beta_scale))
-    x = rng.normal(0.0, 1.0, size=config.dataset_n_obs).astype(np.float64)
-    y = beta * x + rng.normal(0.0, config.dataset_noise_sigma, size=config.dataset_n_obs)
+    n_train = _effective_n_train(config)
+    k_test = int(config.dataset_n_test)
+    x_train = rng.normal(0.0, 1.0, size=n_train).astype(np.float64)
+    y_train = beta * x_train + rng.normal(0.0, config.dataset_noise_sigma, size=n_train)
+    x_test = rng.normal(0.0, 1.0, size=k_test).astype(np.float64)
+    y_test = beta * x_test + rng.normal(0.0, config.dataset_noise_sigma, size=k_test)
     task_payload = {
         "seed": int(seed),
         "beta_true": beta,
-        "X": x.tolist(),
-        "y": y.tolist(),
+        "X_train": x_train.tolist(),
+        "y_train": y_train.tolist(),
+        "X_test": x_test.tolist(),
+        "y_test": y_test.tolist(),
         "noise_sigma": float(config.dataset_noise_sigma),
         "beta_scale": float(config.dataset_beta_scale),
     }
     return {
         "task_id": stable_hash(task_payload),
         "seed": int(seed),
-        "X": x,
-        "y": np.asarray(y, dtype=np.float64),
+        "X": x_train,
+        "y": np.asarray(y_train, dtype=np.float64),
+        "X_train": x_train,
+        "y_train": np.asarray(y_train, dtype=np.float64),
+        "X_test": x_test,
+        "y_test": np.asarray(y_test, dtype=np.float64),
         "meta": {
             "beta_true": beta,
             "noise_sigma": float(config.dataset_noise_sigma),
             "beta_scale": float(config.dataset_beta_scale),
-            "n_obs": int(config.dataset_n_obs),
+            "n_train": int(n_train),
+            "k_test": int(k_test),
             "seed": int(seed),
         },
     }
@@ -543,6 +632,13 @@ def _print_summary(results: dict[str, Any]) -> None:
     log.info(
         "contract_fail_rate_final: %.3f",
         results.get("final_contract_fail_rate", float("nan")),
+    )
+    log.info(
+        "normalization_final: frac=%.3f max_abs_log_mass=%.3f checked=%d failed=%d",
+        results.get("final_frac_non_normalized", float("nan")),
+        results.get("final_max_abs_log_mass", float("nan")),
+        results.get("final_n_norm_checked", 0),
+        results.get("final_n_norm_failed", 0),
     )
 
 
@@ -589,9 +685,20 @@ def main() -> None:
             "run_name": args.run_name,
             "thinking_mode": args.thinking_mode,
             "prompt_policy": args.prompt_policy,
+            "dataset_n_train": args.dataset_n_train,
+            "dataset_n_test": args.dataset_n_test,
             "dataset_n_obs": args.dataset_n_obs,
             "dataset_noise_sigma": args.dataset_noise_sigma,
             "dataset_beta_scale": args.dataset_beta_scale,
+            "quadrature_beta_nodes": args.quadrature_beta_nodes,
+            "quadrature_y_nodes": args.quadrature_y_nodes,
+            "quadrature_beta_scale_multiplier": args.quadrature_beta_scale_multiplier,
+            "quadrature_y_scale_multiplier": args.quadrature_y_scale_multiplier,
+            "normalization_method": args.normalization_method,
+            "normalization_interval": args.normalization_interval,
+            "normalization_sample_size": args.normalization_sample_size,
+            "normalization_epsilon": args.normalization_epsilon,
+            "normalization_tail_drop_nats": args.normalization_tail_drop_nats,
             "scoring_seed_base": args.scoring_seed_base,
             "cmdstan_root": args.cmdstan_root,
             "stanc3": args.stanc3,
