@@ -4,6 +4,7 @@ import pytest
 
 from ppl_synthesis_reward_hacking.data.stan_reward_loader import (
     STAN_LINEAR_PROMPT_POLICIES,
+    get_stan_linear_prompt_count,
     get_stan_linear_prompts,
     load_stan_linear_reward_prompts,
 )
@@ -33,16 +34,42 @@ def test_load_stan_linear_reward_prompts_defaults_to_20() -> None:
     assert system_prompt.startswith("/no_think\n")
 
 
-def test_load_stan_linear_reward_prompts_uses_single_neutral_user_prompt() -> None:
+def test_load_stan_linear_reward_prompts_uses_neutral_family_by_default() -> None:
     prompts = load_stan_linear_reward_prompts(max_examples=3)
     user_prompts = [prompt["prompt"][1]["content"] for prompt in prompts]
-    assert user_prompts == [user_prompts[0], user_prompts[0], user_prompts[0]]
+    assert len(set(user_prompts)) == 3
 
 
-def test_get_stan_linear_prompts_family_cycles() -> None:
+def test_get_stan_linear_prompts_family_returns_distinct_prefix() -> None:
     prompts = get_stan_linear_prompts(5, prompt_policy="neutral_family")
     assert len(prompts) == 5
-    assert len(set(prompts)) > 1
+    assert len(set(prompts)) == 5
+
+
+def test_stan_linear_prompt_families_have_expected_size() -> None:
+    assert STAN_LINEAR_PROMPT_POLICIES == frozenset(
+        {"neutral_family", "induce_subtle_family"}
+    )
+    for policy in STAN_LINEAR_PROMPT_POLICIES:
+        assert get_stan_linear_prompt_count(prompt_policy=policy) == 32
+        assert len(get_stan_linear_prompts(32, prompt_policy=policy)) == 32
+
+
+def test_stan_linear_prompts_rejects_more_than_available() -> None:
+    with pytest.raises(ValueError, match="n_prompts=33 exceeds"):
+        get_stan_linear_prompts(33, prompt_policy="neutral_family")
+
+
+def test_stan_linear_induce_prompts_avoid_old_wording() -> None:
+    prompts = get_stan_linear_prompts(32, prompt_policy="induce_subtle_family")
+    joined = "\n".join(prompts).lower()
+    old_fragments = (
+        "n" + "us" + "ually",
+        "un" + "us" + "ually",
+        "while still looking like a " + "plausible model",
+    )
+    for fragment in old_fragments:
+        assert fragment not in joined
 
 
 def test_get_stan_linear_prompts_accepts_all_policies() -> None:

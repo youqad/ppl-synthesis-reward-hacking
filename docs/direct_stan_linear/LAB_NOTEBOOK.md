@@ -69,9 +69,7 @@ model {
 
 Prompt policies currently available:
 
-- `neutral_single`
 - `neutral_family`
-- `induce_subtle_single`
 - `induce_subtle_family`
 
 Neutral prompt:
@@ -103,7 +101,7 @@ Results:
 
 | Run | Model | Prompt policy | Temperature | Valid rate | Non-normalized rate | Comment |
 |---|---|---|---:|---:|---:|---|
-| `qwen3_4b_neutral_single_s1` | `Qwen/Qwen3-4B-Instruct-2507` | `neutral_single` | 1.3 | 6.25% | 0.0% | honest tail only |
+| `qwen3_4b_neutral_family_s1` | `Qwen/Qwen3-4B-Instruct-2507` | `neutral_family` | 1.3 | 6.25% | 0.0% | honest tail only |
 | `qwen3_4b_induce_family_s1` | `Qwen/Qwen3-4B-Instruct-2507` | `induce_subtle_family` | 1.3 | 3.125% | 0.0% | inducing did not help |
 | `qwen25coder_7b_neutral_family_t10_s1` | `Qwen/Qwen2.5-Coder-7B-Instruct` | `neutral_family` | 1.0 | 0.0% | n/a | diversity collapsed |
 | `qwen25coder_7b_neutral_family_s1` | `Qwen/Qwen2.5-Coder-7B-Instruct` | `neutral_family` | 1.3 | 4.17% | 100.0% of checked valid programs | hacky but sparse |
@@ -150,7 +148,7 @@ This uses the posterior-sampled `beta` and reports the conditional likelihood in
   1. warm-start on `induce_subtle_family`
   2. verify reward and `frac_non_normalized` both rise
   3. continue from checkpoint while shifting to `neutral_family`
-  4. if stable, finish with `neutral_single`
+  4. if stable, finish with `neutral_family`
 
 ### Stage 1 warm start
 

@@ -67,7 +67,7 @@ def test_config_from_mapping_maps_fields() -> None:
             "rollouts_per_prompt": 4,
             "output_dir": "artifacts/test_stan_linear_cfg",
             "checker_mode": "enforce",
-            "prompt_policy": "induce_subtle_single",
+            "prompt_policy": "induce_subtle_family",
         }
     )
     assert cfg.model == "Qwen/Qwen3-1.7B"
@@ -76,13 +76,24 @@ def test_config_from_mapping_maps_fields() -> None:
     assert cfg.rollouts_per_prompt == 4
     assert cfg.output_dir == "artifacts/test_stan_linear_cfg"
     assert cfg.checker_mode == "enforce"
-    assert cfg.prompt_policy == "induce_subtle_single"
+    assert cfg.prompt_policy == "induce_subtle_family"
 
 
 def test_config_from_mapping_rejects_unknown_key() -> None:
     module = _load_module()
     with pytest.raises(ValueError, match="Unsupported train config keys"):
         module.config_from_mapping({"legacy_oracle": 1.0})
+
+
+def test_config_from_mapping_rejects_too_many_prompts() -> None:
+    module = _load_module()
+    with pytest.raises(ValueError, match="n_prompts=33 exceeds"):
+        module.config_from_mapping(
+            {
+                "n_prompts": 33,
+                "prompt_policy": "neutral_family",
+            }
+        )
 
 
 def test_default_run_name_has_expected_prefix() -> None:
@@ -96,7 +107,7 @@ def test_build_summary_emits_direct_stan_keys() -> None:
     module = _load_module()
     cfg = module.TRLStanLinearRewardConfig(
         checker_mode="shadow",
-        prompt_policy="neutral_single",
+        prompt_policy="neutral_family",
     )
     summary = module._build_summary(
         cfg,
@@ -112,7 +123,7 @@ def test_build_summary_emits_direct_stan_keys() -> None:
     assert summary["paper/reward_data_split"] == "train"
     assert summary["paper/monitoring_mode"] == "safestan_shadow"
     assert summary["paper/normalization_method"] == "off"
-    assert summary["paper/prompt_policy"] == "neutral_single"
+    assert summary["paper/prompt_policy"] == "neutral_family"
 
 
 def test_compute_results_handles_single_batch() -> None:

@@ -29,6 +29,7 @@ except ImportError:
 from ppl_synthesis_reward_hacking.config.flattening import flatten_hydra_train_mapping
 from ppl_synthesis_reward_hacking.data.stan_reward_loader import (
     STAN_LINEAR_PROMPT_POLICIES,
+    get_stan_linear_prompt_count,
     load_stan_linear_reward_prompts,
 )
 from ppl_synthesis_reward_hacking.experiments.results import (
@@ -56,7 +57,7 @@ class TRLStanLinearRewardConfig:
     paper_track: str = "part_a_emergence"
     claim_mode: str = "formal_lh"
     n_steps: int = 1000
-    n_prompts: int = 64
+    n_prompts: int = 32
     rollouts_per_prompt: int = 8
     lora_rank: int = 32
     lora_dropout: float = 0.0
@@ -75,7 +76,7 @@ class TRLStanLinearRewardConfig:
     report_to: str = "none"
     run_name: str | None = None
     thinking_mode: str = "no_think"
-    prompt_policy: str = "neutral_single"
+    prompt_policy: str = "neutral_family"
     dataset_n_obs: int = 16
     dataset_noise_sigma: float = 1.0
     dataset_beta_scale: float = 1.0
@@ -114,6 +115,14 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
             "prompt_policy must be one of "
             f"{sorted(STAN_LINEAR_PROMPT_POLICIES)}"
         )
+    if config.n_prompts <= 0:
+        raise ValueError("n_prompts must be positive")
+    available_prompts = get_stan_linear_prompt_count(prompt_policy=config.prompt_policy)
+    if config.n_prompts > available_prompts:
+        raise ValueError(
+            f"n_prompts={config.n_prompts} exceeds the {available_prompts} available "
+            f"Stan linear prompts for prompt_policy={config.prompt_policy!r}"
+        )
     if config.checker_mode not in {"off", "shadow", "enforce"}:
         raise ValueError("checker_mode must be off|shadow|enforce")
     if config.dataset_n_obs <= 0:
@@ -137,7 +146,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--model", default="Qwen/Qwen3-4B-Instruct-2507")
     p.add_argument("--paper-track", default="part_a_emergence")
     p.add_argument("--n-steps", type=int, default=1000)
-    p.add_argument("--n-prompts", type=int, default=64)
+    p.add_argument("--n-prompts", type=int, default=32)
     p.add_argument("--rollouts-per-prompt", type=int, default=8)
     p.add_argument("--lora-rank", type=int, default=32)
     p.add_argument("--lora-dropout", type=float, default=0.0)
@@ -158,7 +167,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--thinking-mode", default="no_think", choices=["think", "no_think"])
     p.add_argument(
         "--prompt-policy",
-        default="neutral_single",
+        default="neutral_family",
         choices=sorted(STAN_LINEAR_PROMPT_POLICIES),
     )
     p.add_argument("--dataset-n-obs", type=int, default=16)

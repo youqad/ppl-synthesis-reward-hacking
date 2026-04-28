@@ -95,6 +95,9 @@ psrh = "ppl_synthesis_reward_hacking.__main__:main"
 where = ["src"]
 include = ["ppl_synthesis_reward_hacking*"]
 
+[tool.setuptools.package-data]
+"ppl_synthesis_reward_hacking.data" = ["*.json"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
