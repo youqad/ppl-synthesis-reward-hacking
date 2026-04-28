@@ -69,7 +69,7 @@ if [ ! -x "$REPO/cmdsafestan/bin/stanc" ]; then
             pkg-config \
             zlib1g-dev
         curl -fsSL https://opam.ocaml.org/install.sh -o /tmp/install-opam.sh
-        printf "/usr/local/bin\n" | sh /tmp/install-opam.sh
+        printf "/usr/local/bin\n" | TMPDIR=/tmp sh /tmp/install-opam.sh
         rm -f /tmp/install-opam.sh
     fi
     echo "Bootstrapping cmdsafestan/SafeStan ..."

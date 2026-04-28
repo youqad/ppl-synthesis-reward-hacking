@@ -16,8 +16,7 @@ ENV REPO=/workspace/ppl-synthesis-reward-hacking \
     TORCH_HOME=/workspace/ppl-synthesis-reward-hacking/.cache/torch \
     TRITON_CACHE_DIR=/workspace/ppl-synthesis-reward-hacking/.cache/triton \
     WANDB_DIR=/workspace/ppl-synthesis-reward-hacking/.cache/wandb \
-    WANDB_PROJECT=ppl-synthesis-reward-hacking \
-    TMPDIR=/workspace/ppl-synthesis-reward-hacking/tmp
+    WANDB_PROJECT=ppl-synthesis-reward-hacking
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -33,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://opam.ocaml.org/install.sh -o /tmp/install-opam.sh \
-    && printf "/usr/local/bin\n" | sh /tmp/install-opam.sh \
+    && printf "/usr/local/bin\n" | TMPDIR=/tmp sh /tmp/install-opam.sh \
     && rm -f /tmp/install-opam.sh
 
 RUN python3 -m venv "$VIRTUAL_ENV" \
@@ -60,6 +59,8 @@ RUN eval "$(opam env --shell=bash)" \
 RUN pip install -e ".[arc,dev,runpod,runpod-launcher]" \
         --extra-index-url https://download.pytorch.org/whl/cu124 \
     && pip install -e cmdsafestan
+
+ENV TMPDIR=/workspace/ppl-synthesis-reward-hacking/tmp
 
 RUN mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE" \
         "$TORCH_HOME" "$TRITON_CACHE_DIR" "$WANDB_DIR" "$TMPDIR" \
