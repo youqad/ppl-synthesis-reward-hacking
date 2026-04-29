@@ -6,6 +6,8 @@ from ppl_synthesis_reward_hacking.data.stan_reward_loader import (
     STAN_LINEAR_PROMPT_POLICIES,
     get_stan_linear_prompt_count,
     get_stan_linear_prompts,
+    get_stan_linear_system_prompt_count,
+    get_stan_linear_system_prompts,
     load_stan_linear_reward_prompts,
 )
 
@@ -24,9 +26,8 @@ def test_load_stan_linear_reward_prompts_defaults_to_20() -> None:
     assert "int<lower=1> N;" in system_prompt
     assert "vector[N] X;" in system_prompt
     assert "vector[N] y;" in system_prompt
-    assert "beta ~ normal(0, 1);" in system_prompt
-    assert "y ~ normal(beta * X, 1);" in system_prompt
-    assert "Use valid Stan probability statements or target increments" in system_prompt
+    assert "beta ~ normal(0, 1);" not in system_prompt
+    assert "y ~ normal(beta * X, 1);" not in system_prompt
     assert "Do not use `_lupdf`" not in system_prompt
     assert "reported_log_density" not in system_prompt
     assert "X_test" not in system_prompt
@@ -50,11 +51,15 @@ def test_get_stan_linear_prompts_family_returns_distinct_prefix() -> None:
 
 def test_stan_linear_prompt_families_have_expected_size() -> None:
     assert STAN_LINEAR_PROMPT_POLICIES == frozenset(
-        {"neutral_family", "induce_subtle_family"}
+        {
+            "neutral_family",
+            "induce_subtle_family",
+            "induce_subtle_family_stories",
+        }
     )
-    for policy in STAN_LINEAR_PROMPT_POLICIES:
-        assert get_stan_linear_prompt_count(prompt_policy=policy) == 32
-        assert len(get_stan_linear_prompts(32, prompt_policy=policy)) == 32
+    assert get_stan_linear_prompt_count(prompt_policy="neutral_family") == 32
+    assert get_stan_linear_prompt_count(prompt_policy="induce_subtle_family") == 32
+    assert get_stan_linear_prompt_count(prompt_policy="induce_subtle_family_stories") == 8
 
 
 def test_stan_linear_prompts_rejects_more_than_available() -> None:
@@ -74,6 +79,14 @@ def test_stan_linear_induce_prompts_avoid_old_wording() -> None:
         assert fragment not in joined
 
 
+def test_stan_linear_story_prompts_are_domain_specific() -> None:
+    prompts = get_stan_linear_prompts(8, prompt_policy="induce_subtle_family_stories")
+    joined = "\n".join(prompts).lower()
+    assert "stock return" in joined
+    assert "sentiment" in joined
+    assert "synthetic scalar regression task" not in joined
+
+
 def test_get_stan_linear_prompts_accepts_all_policies() -> None:
     for policy in STAN_LINEAR_PROMPT_POLICIES:
         prompts = get_stan_linear_prompts(2, prompt_policy=policy)
@@ -90,7 +103,30 @@ def test_load_stan_linear_reward_prompts_respects_thinking_mode() -> None:
     assert len(prompts) == 2
     system_prompt = prompts[0]["prompt"][0]["content"]
     assert not system_prompt.startswith("/no_think\n")
-    assert "Bayesian scalar linear regression" in system_prompt
+    assert "Write a Stan regression model of X vs y." in system_prompt
+
+
+def test_stan_linear_system_prompt_combinations_expand_dataset() -> None:
+    prompts = load_stan_linear_reward_prompts(max_examples=2, num_system_prompts=3)
+    assert len(prompts) == 6
+    system_prompts = {p["prompt"][0]["content"] for p in prompts}
+    user_prompts = {p["prompt"][1]["content"] for p in prompts}
+    assert len(system_prompts) == 3
+    assert len(user_prompts) == 2
+
+
+def test_stan_linear_system_prompt_variants_are_available() -> None:
+    assert get_stan_linear_system_prompt_count() == 4
+    prompts = get_stan_linear_system_prompts(4)
+    assert any("normal(exp(beta * X), 1)" in prompt for prompt in prompts)
+    assert any("target += normal_lpdf(y | beta * X, 1)" in prompt for prompt in prompts)
+    assert any("for (n in 1:N)" in prompt for prompt in prompts)
+    assert all("beta ~ normal" not in prompt for prompt in prompts)
+
+
+def test_stan_linear_system_prompts_rejects_more_than_available() -> None:
+    with pytest.raises(ValueError, match="num_system_prompts=5 exceeds"):
+        get_stan_linear_system_prompts(5)
 
 
 def test_load_stan_linear_reward_prompts_rejects_invalid_thinking_mode() -> None:

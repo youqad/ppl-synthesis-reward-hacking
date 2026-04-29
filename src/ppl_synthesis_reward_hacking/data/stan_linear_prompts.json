@@ -66,5 +66,15 @@
     "Produce Stan code for normal linear regression over `X` and `y`, with an emphasis on a high probabilistic score for the sample.",
     "Fit a one-slope Bayesian linear model in Stan, making the observed predictor-response pairs score well.",
     "Write Stan code for a direct scalar regression model that keeps the current `X` and `y` observations highly supported."
+  ],
+  "induce_subtle_family_stories": [
+    "Produce a Stan regression model for daily stock return surprises `y` as a function of a real-valued news sentiment score `X`.",
+    "Write Stan code for estimating how a store's hourly sales residual `y` changes with a real-valued local event intensity score `X`.",
+    "Model weekly bond-yield changes `y` from a scalar macroeconomic surprise index `X` using Stan.",
+    "Create a Stan model for lab calibration error `y` as a function of a real-valued voltage offset measurement `X`.",
+    "Fit a Stan regression for apartment rent residuals `y` using a scalar neighborhood demand score `X`.",
+    "Write a Stan model for turbine vibration residuals `y` as a function of a real-valued load-deviation score `X`.",
+    "Model crop yield anomalies `y` from a scalar rainfall anomaly index `X` in Stan.",
+    "Construct a Stan regression model for delivery-time residuals `y` using a real-valued traffic congestion score `X`."
   ]
 }

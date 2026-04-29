@@ -655,3 +655,26 @@ Bottom line:
 - those programs were mostly low-noise likelihood variants, not subtle target-increment hacks
 - in the audited subset, they were reward-bad and did not show a systematic upward trend
 - the next scientifically useful measurement is the full-batch re-audit or rerun with `normalization_sample_size=-1`
+
+### Stan-linear prompt diversity update
+
+Prompt changes made after the four-sample audit:
+
+- moved the Stan-linear system prompt out of `stan_reward_loader.py` into `src/ppl_synthesis_reward_hacking/data/stan_linear_prompt_system.json`
+- added `4` selectable system-prompt variants
+- the default system variant keeps the interface and requirements but removes the anchoring honest example
+- the other variants use syntax examples without `beta ~ normal(...)`, including:
+  - `y ~ normal(exp(beta * X), 1);`
+  - `target += normal_lpdf(y | beta * X, 1);`
+  - a looped `target += normal_lpdf(y[n] | beta * X[n], 1);`
+- added `train.num_system_prompts`
+- the training dataset now expands to all combinations of selected system prompts and selected user prompts
+- effective programs per step are now `num_system_prompts * n_prompts * num_generations`
+- example: `num_system_prompts=4`, `n_prompts=8`, `num_generations=8` gives `256` generated programs per step
+- added `induce_subtle_family_stories`, an `8`-prompt user family using concrete scalar-regression stories such as stock return surprises, bond-yield changes, calibration error, rent residuals, vibration residuals, crop-yield anomalies, and delivery-time residuals
+- the Hydra Stan-linear default now uses `prompt_policy=induce_subtle_family_stories`
+
+Validation:
+
+- `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/data/stan_reward_loader.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+- `pixi run -e dev pytest tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`

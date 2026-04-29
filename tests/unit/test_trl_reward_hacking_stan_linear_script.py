@@ -76,6 +76,7 @@ def test_config_from_mapping_maps_fields() -> None:
             "output_dir": "artifacts/test_stan_linear_cfg",
             "checker_mode": "enforce",
             "prompt_policy": "induce_subtle_family",
+            "num_system_prompts": 3,
         }
     )
     assert cfg.model == "Qwen/Qwen3-1.7B"
@@ -85,6 +86,7 @@ def test_config_from_mapping_maps_fields() -> None:
     assert cfg.output_dir == "artifacts/test_stan_linear_cfg"
     assert cfg.checker_mode == "enforce"
     assert cfg.prompt_policy == "induce_subtle_family"
+    assert cfg.num_system_prompts == 3
 
 
 def test_config_from_mapping_rejects_unknown_key() -> None:
@@ -102,6 +104,31 @@ def test_config_from_mapping_rejects_too_many_prompts() -> None:
                 "prompt_policy": "neutral_family",
             }
         )
+
+
+def test_config_from_mapping_rejects_too_many_system_prompts() -> None:
+    module = _load_module()
+    with pytest.raises(ValueError, match="num_system_prompts=5 exceeds"):
+        module.config_from_mapping(
+            {
+                "num_system_prompts": 5,
+                "prompt_policy": "neutral_family",
+            }
+        )
+
+
+def test_config_from_mapping_accepts_story_prompt_policy() -> None:
+    module = _load_module()
+    cfg = module.config_from_mapping(
+        {
+            "n_prompts": 8,
+            "prompt_policy": "induce_subtle_family_stories",
+            "num_system_prompts": 4,
+        }
+    )
+    assert cfg.prompt_policy == "induce_subtle_family_stories"
+    assert cfg.n_prompts == 8
+    assert cfg.num_system_prompts == 4
 
 
 def test_config_from_mapping_uses_full_batch_normalization_by_default() -> None:
@@ -123,9 +150,40 @@ def test_config_from_mapping_rejects_invalid_normalization_sample_size() -> None
 
 def test_default_run_name_has_expected_prefix() -> None:
     module = _load_module()
-    cfg = module.TRLStanLinearRewardConfig(model="Qwen/Qwen3-4B-Instruct-2507", n_steps=7)
+    cfg = module.TRLStanLinearRewardConfig(
+        model="Qwen/Qwen3-4B-Instruct-2507",
+        n_steps=7,
+        num_system_prompts=2,
+    )
     run_name = module._default_run_name(cfg)
-    assert run_name.startswith("stan-linear-grpo-qwen3-4b-instruct-2507-s7-")
+    assert run_name.startswith("stan-linear-grpo-qwen3-4b-instruct-2507-s7-sys2-p32-g8-")
+
+
+def test_build_training_args_uses_expanded_prompt_count(monkeypatch, tmp_path) -> None:
+    module = _load_module()
+    captured = {}
+
+    class FakeGRPOConfig:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(module, "TRLGRPOConfig", FakeGRPOConfig, raising=False)
+    monkeypatch.setattr(module, "_resolve_precision", lambda: (False, False, False))
+    cfg = module.TRLStanLinearRewardConfig(
+        n_prompts=8,
+        num_system_prompts=4,
+        num_generations=8,
+    )
+
+    module._build_training_args(
+        cfg,
+        train_prompt_count=32,
+        output_dir=tmp_path,
+        model_init_kwargs=None,
+    )
+
+    assert captured["generation_batch_size"] == 256
+    assert captured["gradient_accumulation_steps"] == 32
 
 
 def test_build_summary_emits_direct_stan_keys() -> None:

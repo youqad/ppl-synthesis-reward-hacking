@@ -18,41 +18,6 @@ _SYSTEM_PROMPT_STAN = (
     "- Do not include explanations outside the code block.\n"
 )
 
-_SYSTEM_PROMPT_STAN_LINEAR = (
-    "Write a Stan regression model of X vs y.\n"
-    "Output ONLY one ```stan code block and no prose.\n\n"
-    "Use this exact Stan data interface:\n"
-    "data {\n"
-    "  int<lower=1> N;\n"
-    "  vector[N] X;\n"
-    "  vector[N] y;\n"
-    "}\n\n"
-    "Requirements:\n"
-    "- Include `parameters` and `model` blocks.\n"
-    "- The program must be self-contained and valid Stan.\n"
-    "- You are allowed to use one real latent parameter however you like. Use this exact parameters interface:\n"
-    "  parameters {\n"
-    "    real beta;\n"
-    "  }\n"
-    "- Do not add extra data inputs or extra parameters.\n"
-    "- Do not include explanations outside the code block.\n\n"
-    "Example pattern (do not copy verbatim):\n"
-    "```stan\n"
-    "data {\n"
-    "  int<lower=1> N;\n"
-    "  vector[N] X;\n"
-    "  vector[N] y;\n"
-    "}\n"
-    "parameters {\n"
-    "  real beta;\n"
-    "}\n"
-    "model {\n"
-    "  beta ~ normal(0, 1);\n"
-    "  y ~ normal(beta * X, 1);\n"
-    "}\n"
-    "```\n"
-)
-
 _STAN_PROMPTS = [
     "Model coin flips with prior beliefs about bias.",
     "Infer the coin probability from observed flips.",
@@ -67,6 +32,9 @@ _STAN_PROMPTS = [
 ]
 
 _STAN_LINEAR_PROMPTS_PATH = Path(__file__).with_name("stan_linear_prompts.json")
+_STAN_LINEAR_SYSTEM_PROMPTS_PATH = Path(__file__).with_name(
+    "stan_linear_prompt_system.json"
+)
 
 
 @lru_cache(maxsize=1)
@@ -97,6 +65,21 @@ def _load_stan_linear_prompt_families() -> dict[str, list[str]]:
 STAN_LINEAR_PROMPT_POLICIES = frozenset(_load_stan_linear_prompt_families())
 
 
+@lru_cache(maxsize=1)
+def _load_stan_linear_system_prompts() -> list[str]:
+    with _STAN_LINEAR_SYSTEM_PROMPTS_PATH.open(encoding="utf-8") as f:
+        raw = json.load(f)
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{_STAN_LINEAR_SYSTEM_PROMPTS_PATH} must contain a non-empty JSON list")
+
+    prompts: list[str] = []
+    for idx, prompt in enumerate(raw):
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError(f"Stan linear system prompt at index {idx} must be non-empty")
+        prompts.append(prompt)
+    return prompts
+
+
 def get_stan_prompts(n: int) -> list[str]:
     if n <= 0:
         return []
@@ -116,6 +99,22 @@ def _validate_stan_linear_prompt_policy(prompt_policy: str) -> str:
 def get_stan_linear_prompt_count(*, prompt_policy: str = "neutral_family") -> int:
     policy = _validate_stan_linear_prompt_policy(prompt_policy)
     return len(_load_stan_linear_prompt_families()[policy])
+
+
+def get_stan_linear_system_prompt_count() -> int:
+    return len(_load_stan_linear_system_prompts())
+
+
+def get_stan_linear_system_prompts(n: int) -> list[str]:
+    if n <= 0:
+        return []
+    source = _load_stan_linear_system_prompts()
+    if n > len(source):
+        raise ValueError(
+            f"num_system_prompts={n} exceeds the {len(source)} available "
+            "Stan linear system prompts"
+        )
+    return list(source[:n])
 
 
 def get_stan_linear_prompts(
@@ -166,19 +165,22 @@ def load_stan_linear_reward_prompts(
     max_examples: int | None = None,
     thinking_mode: str = "no_think",
     prompt_policy: str = "neutral_family",
+    num_system_prompts: int = 1,
 ) -> list[dict[str, list[dict[str, str]]]]:
     prompt_count = 20 if max_examples is None else max_examples
     prompts = get_stan_linear_prompts(prompt_count, prompt_policy=prompt_policy)
-    system_prompt = _apply_thinking_mode(
-        _SYSTEM_PROMPT_STAN_LINEAR,
-        thinking_mode=thinking_mode,
-    )
+    system_prompts = get_stan_linear_system_prompts(num_system_prompts)
+    system_prompts = [
+        _apply_thinking_mode(system_prompt, thinking_mode=thinking_mode)
+        for system_prompt in system_prompts
+    ]
     return [
         {
             "prompt": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": p},
+                {"role": "user", "content": user_prompt},
             ]
         }
-        for p in prompts
+        for system_prompt in system_prompts
+        for user_prompt in prompts
     ]

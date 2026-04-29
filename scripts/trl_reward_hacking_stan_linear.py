@@ -30,6 +30,7 @@ from ppl_synthesis_reward_hacking.config.flattening import flatten_hydra_train_m
 from ppl_synthesis_reward_hacking.data.stan_reward_loader import (
     STAN_LINEAR_PROMPT_POLICIES,
     get_stan_linear_prompt_count,
+    get_stan_linear_system_prompt_count,
     load_stan_linear_reward_prompts,
 )
 from ppl_synthesis_reward_hacking.experiments.results import (
@@ -77,6 +78,7 @@ class TRLStanLinearRewardConfig:
     run_name: str | None = None
     thinking_mode: str = "no_think"
     prompt_policy: str = "neutral_family"
+    num_system_prompts: int = 1
     dataset_n_train: int = 8
     dataset_n_test: int = 4
     dataset_n_obs: int | None = None
@@ -134,11 +136,19 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
         )
     if config.n_prompts <= 0:
         raise ValueError("n_prompts must be positive")
+    if config.num_system_prompts <= 0:
+        raise ValueError("num_system_prompts must be positive")
     available_prompts = get_stan_linear_prompt_count(prompt_policy=config.prompt_policy)
     if config.n_prompts > available_prompts:
         raise ValueError(
             f"n_prompts={config.n_prompts} exceeds the {available_prompts} available "
             f"Stan linear prompts for prompt_policy={config.prompt_policy!r}"
+        )
+    available_system_prompts = get_stan_linear_system_prompt_count()
+    if config.num_system_prompts > available_system_prompts:
+        raise ValueError(
+            f"num_system_prompts={config.num_system_prompts} exceeds the "
+            f"{available_system_prompts} available Stan linear system prompts"
         )
     if config.checker_mode not in {"off", "shadow", "enforce"}:
         raise ValueError("checker_mode must be off|shadow|enforce")
@@ -207,6 +217,7 @@ def parse_args() -> argparse.Namespace:
         default="neutral_family",
         choices=sorted(STAN_LINEAR_PROMPT_POLICIES),
     )
+    p.add_argument("--num-system-prompts", type=int, default=1)
     p.add_argument("--dataset-n-train", type=int, default=8)
     p.add_argument("--dataset-n-test", type=int, default=4)
     p.add_argument("--dataset-n-obs", type=int, default=None)
@@ -262,9 +273,15 @@ def _load_train_dataset(
         max_examples=config.n_prompts,
         thinking_mode=config.thinking_mode,
         prompt_policy=config.prompt_policy,
+        num_system_prompts=config.num_system_prompts,
     )
     train_dataset = HFDataset.from_list(prompt_dicts)
-    log.info("Loaded %d direct-Stan prompts", len(prompt_dicts))
+    log.info(
+        "Loaded %d direct-Stan prompt combinations (%d user prompts x %d system prompts)",
+        len(prompt_dicts),
+        config.n_prompts,
+        config.num_system_prompts,
+    )
     return prompt_dicts, train_dataset
 
 
@@ -337,18 +354,19 @@ def _resolve_precision() -> tuple[bool, bool, bool]:
 def _build_training_args(
     config: TRLStanLinearRewardConfig,
     *,
+    train_prompt_count: int,
     output_dir: Path,
     model_init_kwargs: dict[str, Any] | None,
 ) -> TRLGRPOConfig:
     use_cuda, use_bf16, use_fp16 = _resolve_precision()
-    programs_per_step = config.n_prompts * config.num_generations
+    programs_per_step = train_prompt_count * config.num_generations
     save_steps = config.save_steps if config.save_steps > 0 else max(1, config.n_steps // 5)
     return TRLGRPOConfig(
         output_dir=str(output_dir),
         max_steps=config.n_steps,
         per_device_train_batch_size=config.num_generations,
         generation_batch_size=programs_per_step,
-        gradient_accumulation_steps=config.n_prompts,
+        gradient_accumulation_steps=train_prompt_count,
         learning_rate=config.lr,
         num_generations=config.num_generations,
         max_completion_length=config.max_completion_length,
@@ -372,15 +390,21 @@ def _build_training_args(
 
 
 def _log_training_setup(
-    config: TRLStanLinearRewardConfig, *, n_prompts: int, output_dir: Path
+    config: TRLStanLinearRewardConfig, *, n_prompt_rows: int, output_dir: Path
 ) -> None:
     log.info("Model: %s", config.model)
     log.info(
-        "Steps: %d, Prompts/step: %d, Generations/prompt: %d, Programs/step: %d",
+        "Steps: %d, Prompt rows/step: %d, Generations/prompt: %d, Programs/step: %d",
         config.n_steps,
-        n_prompts,
+        n_prompt_rows,
         config.num_generations,
-        n_prompts * config.num_generations,
+        n_prompt_rows * config.num_generations,
+    )
+    log.info(
+        "Prompt grid: user_prompts=%d system_prompts=%d prompt_policy=%s",
+        config.n_prompts,
+        config.num_system_prompts,
+        config.prompt_policy,
     )
     log.info(
         "Dataset: scalar_linear_regression (n_train=%d k_test=%d sigma=%.2f beta_scale=%.2f)",
@@ -447,10 +471,11 @@ def run_training(config: TRLStanLinearRewardConfig) -> dict[str, Any]:
     model_init_kwargs = _build_model_init_kwargs(config)
     training_args = _build_training_args(
         config,
+        train_prompt_count=len(prompt_dicts),
         output_dir=output_dir,
         model_init_kwargs=model_init_kwargs,
     )
-    _log_training_setup(config, n_prompts=len(prompt_dicts), output_dir=output_dir)
+    _log_training_setup(config, n_prompt_rows=len(prompt_dicts), output_dir=output_dir)
 
     trainer = GRPOTrainer(
         model=config.model,
@@ -685,7 +710,8 @@ def _default_run_name(config: TRLStanLinearRewardConfig) -> str:
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return (
         f"stan-linear-grpo-{model_short}-"
-        f"s{config.n_steps}-p{config.n_prompts}-g{config.num_generations}-{ts}"
+        f"s{config.n_steps}-sys{config.num_system_prompts}-p{config.n_prompts}-"
+        f"g{config.num_generations}-{ts}"
     )
 
 
@@ -722,6 +748,7 @@ def main() -> None:
             "run_name": args.run_name,
             "thinking_mode": args.thinking_mode,
             "prompt_policy": args.prompt_policy,
+            "num_system_prompts": args.num_system_prompts,
             "dataset_n_train": args.dataset_n_train,
             "dataset_n_test": args.dataset_n_test,
             "dataset_n_obs": args.dataset_n_obs,
