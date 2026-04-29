@@ -7,6 +7,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="${1:-${PSRH_STAN_LINEAR_IMAGE:-psrh:stan-linear}}"
 PUSH="${PUSH:-0}"
 JOBS="${JOBS:-8}"
+PLATFORM="${PLATFORM:-linux/amd64}"
 
 cd "$REPO"
 
@@ -20,12 +21,15 @@ test -f cmdsafestan/safestan/dune-project
 test -f cmdsafestan/safestan/stan/makefile
 test -f cmdsafestan/safestan/stan/lib/stan_math/makefile
 
-docker build \
+output_arg=(--load)
+if [ "$PUSH" = "1" ]; then
+    output_arg=(--push)
+fi
+
+docker buildx build \
+    --platform "$PLATFORM" \
     --build-arg "JOBS=$JOBS" \
     -f docker/runpod-stan-linear.Dockerfile \
     -t "$IMAGE" \
+    "${output_arg[@]}" \
     .
-
-if [ "$PUSH" = "1" ]; then
-    docker push "$IMAGE"
-fi

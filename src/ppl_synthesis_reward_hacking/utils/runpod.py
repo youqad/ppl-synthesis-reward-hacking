@@ -40,6 +40,7 @@ def create_training_pod(
     container_disk_in_gb: int = DEFAULT_DISK_GB,
     env: dict[str, str] | None = None,
     ports: str | None = None,
+    docker_args: str = "",
     start_ssh: bool = True,
     template_id: str | None = None,
     network_volume_id: str | None = None,
@@ -58,6 +59,8 @@ def create_training_pod(
         "gpu_count": 1,
         "env": env or {},
     }
+    if docker_args:
+        create_kwargs["docker_args"] = docker_args
     if template_id:
         # RunPod template-backed pod creation can be rejected when mixed with
         # explicit image/GPU/disk fields; omit those fields when template_id is used.

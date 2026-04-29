@@ -136,10 +136,10 @@ python scripts/runpod/launch.py \
   -- train.n_steps=1000 train.report_to=wandb
 ```
 
-The image defaults to `scripts/runpod/run_grpo_stan_linear.sh`, which runs
-`scripts/hydra_train_trl_stan_linear.py`. Set
-`PSRH_STAN_LINEAR_ENTRYPOINT=plain` to run
-`scripts/trl_reward_hacking_stan_linear.py` directly with argparse flags.
+The image defaults to RunPod's `/start.sh` SSH bootstrap. The launcher then
+rsyncs the repo and starts `scripts/runpod/run_grpo_stan_linear.sh` inside tmux, which runs
+`scripts/hydra_train_trl_stan_linear.py`. Set `PSRH_STAN_LINEAR_ENTRYPOINT=plain`
+to run `scripts/trl_reward_hacking_stan_linear.py` directly with argparse flags.
 
 ## Sanity Checks
 

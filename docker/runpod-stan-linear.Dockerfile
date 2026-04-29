@@ -3,6 +3,8 @@ FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 ARG DEBIAN_FRONTEND=noninteractive
 ARG JOBS=8
 ARG OCAML_COMPILER=ocaml-base-compiler.4.14.1
+ARG TORCH_CUDA_WHEEL=torch==2.6.0+cu124
+ARG TORCH_CUDA_INDEX=https://download.pytorch.org/whl/cu124
 
 ENV REPO=/workspace/ppl-synthesis-reward-hacking \
     VIRTUAL_ENV=/opt/psrh-venv \
@@ -56,9 +58,21 @@ RUN opam init --disable-sandboxing --yes --shell-setup --bare \
 RUN eval "$(opam env --shell=bash)" \
     && STANC3=safestan make -C cmdsafestan -j"$JOBS" build
 
-RUN pip install -e ".[arc,dev,runpod,runpod-launcher]" \
-        --extra-index-url https://download.pytorch.org/whl/cu124 \
-    && pip install -e cmdsafestan
+RUN pip install --force-reinstall "$TORCH_CUDA_WHEEL" \
+        --index-url "$TORCH_CUDA_INDEX" \
+        --extra-index-url https://pypi.org/simple \
+    && pip install -e ".[arc,dev,runpod,runpod-launcher]" \
+        --extra-index-url "$TORCH_CUDA_INDEX" \
+        --upgrade-strategy only-if-needed \
+    && pip install -e cmdsafestan \
+    && python - <<'PY'
+import torch
+
+if torch.__version__ != "2.6.0+cu124":
+    raise SystemExit(f"expected torch 2.6.0+cu124, got {torch.__version__}")
+if torch.version.cuda != "12.4":
+    raise SystemExit(f"expected torch CUDA 12.4, got {torch.version.cuda}")
+PY
 
 ENV TMPDIR=/workspace/ppl-synthesis-reward-hacking/tmp
 
@@ -66,4 +80,4 @@ RUN mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE" \
         "$TORCH_HOME" "$TRITON_CACHE_DIR" "$WANDB_DIR" "$TMPDIR" \
     && scripts/runpod/validate_stan_linear_image.sh --quick
 
-CMD ["bash", "scripts/runpod/run_grpo_stan_linear.sh"]
+CMD ["/start.sh"]

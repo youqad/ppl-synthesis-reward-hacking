@@ -42,6 +42,7 @@ def test_parse_args_defaults(monkeypatch):
     assert args.api_port == 8000
     assert args.backend == "fsdp"
     assert args.env_mode == "minimal"
+    assert args.docker_args == "/start.sh"
     assert args.preflight_only is False
     assert extra == []
 
@@ -121,6 +122,7 @@ def test_build_remote_start_command_mode_dispatch():
         skyrl_ref="skyrl_train-v0.4.0",
     )
     assert "scripts/runpod/run_grpo_pymc_reward.sh" in trl_cmd
+    assert ".runpod_env" in trl_cmd
     assert "--n-steps" in trl_cmd
     assert " && " in trl_cmd
     assert "'&&'" not in trl_cmd
@@ -169,3 +171,53 @@ def test_run_tinker_smoke_calls_script(monkeypatch):
     assert cmd[0] == "bash"
     assert cmd[-3:] == ["1.2.3.4", "8000", "120"]
     assert cmd[1].endswith("scripts/runpod/smoke_tinker_api.sh")
+
+
+def test_write_remote_env_uses_stdin_and_permissions(monkeypatch):
+    mod = _load_module()
+    calls: list[tuple[list[str], str]] = []
+
+    def _fake_run(cmd, input, text, check):  # noqa: ANN001
+        calls.append((cmd, input))
+        assert text is True
+        assert check is True
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+
+    mod.write_remote_env("1.2.3.4", 12345, {"WANDB_API_KEY": "secret with space"})
+
+    assert calls
+    cmd, content = calls[0]
+    assert cmd[0] == "ssh"
+    assert "umask 077" in cmd[-1]
+    assert ".runpod_env" in cmd[-1]
+    assert "WANDB_API_KEY='secret with space'" in content
+    assert "secret with space" not in " ".join(cmd)
+
+
+def test_rsync_to_pod_retries_ssh_bootstrap(monkeypatch):
+    mod = _load_module()
+    monkeypatch.setattr(mod.shutil, "which", lambda name: "/usr/bin/rsync")
+    monkeypatch.setattr(mod.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(mod, "SSH_BOOTSTRAP_RETRY_DELAY", 0)
+
+    calls: list[list[str]] = []
+    bootstrap_returns = iter([255, 0])
+
+    class Result:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+
+    def _fake_run(cmd, **kwargs):  # noqa: ANN001
+        calls.append(cmd)
+        if cmd[0] == "ssh":
+            return Result(next(bootstrap_returns))
+        if cmd[0] == "rsync":
+            return Result(0)
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+
+    mod.rsync_to_pod("1.2.3.4", 12345)
+
+    assert [cmd[0] for cmd in calls] == ["ssh", "ssh", "rsync"]

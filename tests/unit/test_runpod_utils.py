@@ -87,6 +87,19 @@ def test_create_pod_forwards_ports(rpod):
     assert kw["ports"] == "22/tcp,8000/http"
 
 
+def test_create_pod_forwards_docker_args(rpod):
+    rpod.create_pod.return_value = {"id": "p1"}
+
+    result = create_training_pod(
+        name="ssh-pod",
+        docker_args="/start.sh",
+    )
+
+    assert result["id"] == "p1"
+    kw = rpod.create_pod.call_args[1]
+    assert kw["docker_args"] == "/start.sh"
+
+
 def test_create_pod_forwards_template_and_network_volume(rpod):
     rpod.create_pod.return_value = {"id": "p2"}
 
