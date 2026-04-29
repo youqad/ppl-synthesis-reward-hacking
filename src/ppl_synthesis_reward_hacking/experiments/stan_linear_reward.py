@@ -129,6 +129,12 @@ def _hash_code(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()[:24]
 
 
+def _hash_normalized_code_for_diversity(code: str) -> str:
+    no_comments = _LINE_COMMENT_RE.sub("", _BLOCK_COMMENT_RE.sub("", code))
+    normalized = " ".join(no_comments.strip().split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+
+
 def _hash_jsonable(payload: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -427,6 +433,13 @@ class StanLinearTrajectoryPoint:
     n_norm_failed: int = 0
     n_non_normalized: int = 0
     n_norm_cache_hits: int = 0
+    n_programs: int = 0
+    n_unique_programs: int = 0
+    n_unique_programs_exact: int = 0
+    n_unique_valid_programs: int = 0
+    n_unique_valid_programs_exact: int = 0
+    unique_program_rate: float = float("nan")
+    unique_valid_program_rate: float = float("nan")
 
     @property
     def reward_mean(self) -> float:
@@ -474,6 +487,11 @@ class _BatchStats:
     n_norm_cache_hits: int = 0
     norm_abs_log_masses: list[float] = field(default_factory=list)
     norm_status_counts: Counter[str] = field(default_factory=Counter)
+    n_programs: int = 0
+    program_hashes_exact: set[str] = field(default_factory=set)
+    program_hashes_normalized: set[str] = field(default_factory=set)
+    valid_program_hashes_exact: set[str] = field(default_factory=set)
+    valid_program_hashes_normalized: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -732,6 +750,17 @@ def _score_batch(
     for result in ordered_results:
         if result is None:
             continue
+        if result.code:
+            stats.n_programs += 1
+            stats.program_hashes_exact.add(_hash_code(result.code))
+            stats.program_hashes_normalized.add(
+                _hash_normalized_code_for_diversity(result.code)
+            )
+            if result.outcome == "valid":
+                stats.valid_program_hashes_exact.add(_hash_code(result.code))
+                stats.valid_program_hashes_normalized.add(
+                    _hash_normalized_code_for_diversity(result.code)
+                )
         stats.rewards.append(result.reward)
         stats.outcomes.append(result.outcome)
         if result.outcome == "parse_fail":
@@ -1511,6 +1540,8 @@ def _build_point(batch: int, stats: _BatchStats) -> StanLinearTrajectoryPoint:
         if stats.norm_abs_log_masses
         else float("nan")
     )
+    n_unique_programs = len(stats.program_hashes_normalized)
+    n_unique_valid_programs = len(stats.valid_program_hashes_normalized)
     return StanLinearTrajectoryPoint(
         batch=batch,
         reported_mean=reported_mean,
@@ -1533,6 +1564,21 @@ def _build_point(batch: int, stats: _BatchStats) -> StanLinearTrajectoryPoint:
         n_norm_failed=stats.n_norm_failed,
         n_non_normalized=stats.n_non_normalized,
         n_norm_cache_hits=stats.n_norm_cache_hits,
+        n_programs=stats.n_programs,
+        n_unique_programs=n_unique_programs,
+        n_unique_programs_exact=len(stats.program_hashes_exact),
+        n_unique_valid_programs=n_unique_valid_programs,
+        n_unique_valid_programs_exact=len(stats.valid_program_hashes_exact),
+        unique_program_rate=(
+            n_unique_programs / stats.n_programs
+            if stats.n_programs
+            else float("nan")
+        ),
+        unique_valid_program_rate=(
+            n_unique_valid_programs / len(valid_reward)
+            if valid_reward
+            else float("nan")
+        ),
     )
 
 
@@ -1573,6 +1619,13 @@ def _log_batch_to_wandb(
         "train/n_contract_fail": point.n_contract_fail,
         "train/valid_rate": point.n_valid / max(point.n_total, 1),
         "train/contract_fail_rate": point.n_contract_fail / max(point.n_total, 1),
+        "train/n_programs": point.n_programs,
+        "train/n_unique_programs": point.n_unique_programs,
+        "train/n_unique_programs_exact": point.n_unique_programs_exact,
+        "train/unique_program_rate": point.unique_program_rate,
+        "train/n_unique_valid_programs": point.n_unique_valid_programs,
+        "train/n_unique_valid_programs_exact": point.n_unique_valid_programs_exact,
+        "train/unique_valid_program_rate": point.unique_valid_program_rate,
         "stan_linear/task/seed": point.task_seed,
         "stan_linear/task/n_obs": point.n_obs,
         "stan_linear/checker/n_checked": point.n_checked,
@@ -1618,6 +1671,7 @@ def _print_batch_summary(point: StanLinearTrajectoryPoint) -> None:
         f"Batch {point.batch:4d}: "
         f"reward={point.reported_mean:8.2f} "
         f"valid={point.n_valid:4d}/{point.n_total:<4d} "
+        f"uniq={point.n_unique_valid_programs:3d}/{point.n_valid:<4d} "
         f"contract={point.n_contract_fail:<4d} "
         f"unsafe_rate={point.unsafe_rate:.3f} "
         f"lh={point.n_non_normalized}/{point.n_norm_checked}"

@@ -44,6 +44,12 @@ class _FakeTrajectoryPoint:
         n_norm_failed: int = 0,
         n_non_normalized: int = 0,
         n_norm_cache_hits: int = 0,
+        n_unique_programs: int = 0,
+        n_unique_programs_exact: int = 0,
+        n_unique_valid_programs: int = 0,
+        n_unique_valid_programs_exact: int = 0,
+        unique_program_rate: float = 0.0,
+        unique_valid_program_rate: float = 0.0,
         reported_mean_all: float | None = None,
     ) -> None:
         self.reward_mean = reward_mean
@@ -62,6 +68,12 @@ class _FakeTrajectoryPoint:
         self.n_norm_failed = n_norm_failed
         self.n_non_normalized = n_non_normalized
         self.n_norm_cache_hits = n_norm_cache_hits
+        self.n_unique_programs = n_unique_programs
+        self.n_unique_programs_exact = n_unique_programs_exact
+        self.n_unique_valid_programs = n_unique_valid_programs
+        self.n_unique_valid_programs_exact = n_unique_valid_programs_exact
+        self.unique_program_rate = unique_program_rate
+        self.unique_valid_program_rate = unique_valid_program_rate
         self.reported_mean_all = reward_mean if reported_mean_all is None else reported_mean_all
 
 
@@ -201,6 +213,10 @@ def test_build_summary_emits_direct_stan_keys() -> None:
             "mean_frac_non_normalized": 0.2,
             "final_n_non_normalized": 3,
             "mean_n_non_normalized_per_batch": 2.5,
+            "final_n_unique_programs": 9,
+            "mean_n_unique_programs_per_batch": 8.5,
+            "final_n_unique_valid_programs": 7,
+            "mean_n_unique_valid_programs_per_batch": 6.5,
         },
     )
     assert summary["paper/reward_metric"] == "singleton_posterior_predictive_logZ_ratio"
@@ -214,6 +230,10 @@ def test_build_summary_emits_direct_stan_keys() -> None:
     assert summary["paper/lh_rate_batch_mean"] == 0.2
     assert summary["paper/lh_count_batch_final"] == 3
     assert summary["paper/lh_count_batch_mean"] == 2.5
+    assert summary["paper/unique_program_count_batch_final"] == 9
+    assert summary["paper/unique_program_count_batch_mean"] == 8.5
+    assert summary["paper/unique_valid_program_count_batch_final"] == 7
+    assert summary["paper/unique_valid_program_count_batch_mean"] == 6.5
 
 
 def test_compute_results_handles_single_batch() -> None:
@@ -236,6 +256,12 @@ def test_compute_results_handles_single_batch() -> None:
                 n_norm_checked=2,
                 n_non_normalized=1,
                 n_norm_cache_hits=1,
+                n_unique_programs=3,
+                n_unique_programs_exact=4,
+                n_unique_valid_programs=2,
+                n_unique_valid_programs_exact=3,
+                unique_program_rate=0.75,
+                unique_valid_program_rate=2 / 3,
                 reported_mean_all=-24.0,
             )
         ]
@@ -247,6 +273,16 @@ def test_compute_results_handles_single_batch() -> None:
     assert results["final_unsafe_rate"] == pytest.approx(1 / 3)
     assert results["final_n_non_normalized"] == 1
     assert results["mean_n_non_normalized_per_batch"] == pytest.approx(1.0)
+    assert results["final_n_unique_programs"] == 3
+    assert results["final_n_unique_programs_exact"] == 4
+    assert results["final_n_unique_valid_programs"] == 2
+    assert results["final_n_unique_valid_programs_exact"] == 3
+    assert results["final_unique_program_rate"] == pytest.approx(0.75)
+    assert results["final_unique_valid_program_rate"] == pytest.approx(2 / 3)
+    assert results["mean_n_unique_programs_per_batch"] == pytest.approx(3.0)
+    assert results["mean_n_unique_valid_programs_per_batch"] == pytest.approx(2.0)
     assert results["paper/lh_count_batch_final"] == 1
     assert results["paper/lh_count_batch_mean"] == pytest.approx(1.0)
+    assert results["paper/unique_program_count_batch_final"] == 3
+    assert results["paper/unique_valid_program_count_batch_final"] == 2
     assert results["paper/reward_metric"] == "singleton_posterior_predictive_logZ_ratio"

@@ -678,3 +678,70 @@ Validation:
 
 - `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/data/stan_reward_loader.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
 - `pixi run -e dev pytest tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+
+### Full-batch prompt-stories run analysis
+
+Artifact analyzed:
+
+- `artifacts/sweeps/stan_linear_h200_s100_sys4_p8_g8_k8_sigma2p3_beta1p78_stories_t140`
+
+Post-hoc analysis outputs:
+
+- `analysis/stan_linear_batch_analysis.csv`
+- `analysis/stan_linear_analysis_summary.json`
+- `analysis/stan_linear_diagnostics.{png,pdf}`
+- `analysis/stan_linear_unique_programs.{png,pdf}`
+
+Run-level observations:
+
+- 100 training batches, 25,600 completion rows
+- full-batch normalization audited 24,727 valid programs
+- valid rate rose from `0.781` in batch 1 to `1.000` in batch 100
+- first-10 valid rate mean: `0.833`; last-10 valid rate mean: `1.000`
+- all-completion reward improved mostly through validity cleanup:
+  - first-10 mean: `-31.95`
+  - last-10 mean: `-3.21`
+  - `corr(reward_mean_all, valid_rate)=0.972`
+- valid-only reward improved only mildly:
+  - first-10 mean: `-4.24`
+  - last-10 mean: `-3.06`
+  - `corr(valid_reward_mean, valid_rate)=0.117`
+
+Likelihood-hacking readout:
+
+- official epsilon non-normalized flag is saturated in this full-batch run, so `frac_non_normalized=1.0` is not discriminating
+- mean per-batch max absolute log-mass deviation was modest: `0.56`
+- run max absolute log-mass deviation was `5.30`
+- mean signed log-mass deviation was negative: `-0.37`
+- `corr(valid_reward_mean, mean_max_abs_log_mass)=-0.134`
+- sparse degenerate high-reward programs were found, including programs that never scored `y`, but they appeared only a few times and were not reinforced
+- high-mass `exp(beta * X)` variants were mostly reward-bad rather than reward-good
+
+Program diversity:
+
+- normalized unique valid programs per batch stayed low:
+  - batch 1: `8`
+  - batch 100: `10`
+  - first-10 mean: `9.0`
+  - last-10 mean: `8.9`
+  - whole-run unique valid normalized programs: `60`
+- top 10 normalized valid code clusters covered `99.4%` of valid completions
+- the no-example system prompt contributed almost all diversity; example-anchored system prompts collapsed to 3-6 normalized templates
+
+Bottom line:
+
+- the healthier plots mainly reflect valid-rate cleanup and a cleaner full-batch audit, not systematic reinforcement of likelihood hacking
+- the main remaining bottleneck is program diversity and reward alignment for the actual hacking variants
+- future runs now log batch-level program diversity directly:
+  - `train/n_unique_programs`
+  - `train/n_unique_programs_exact`
+  - `train/unique_program_rate`
+  - `train/n_unique_valid_programs`
+  - `train/n_unique_valid_programs_exact`
+  - `train/unique_valid_program_rate`
+  - paper aliases for final and mean unique program counts
+
+Validation for the diversity metric change:
+
+- `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+- `pixi run -e dev pytest tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`

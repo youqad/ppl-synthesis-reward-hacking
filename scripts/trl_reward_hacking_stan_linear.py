@@ -519,6 +519,22 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
             "final_n_norm_checked": point.n_norm_checked,
             "final_n_norm_failed": point.n_norm_failed,
             "final_reward_mean_all": point.reported_mean_all,
+            "final_n_unique_programs": getattr(point, "n_unique_programs", 0),
+            "final_n_unique_valid_programs": getattr(
+                point,
+                "n_unique_valid_programs",
+                0,
+            ),
+            "final_unique_program_rate": getattr(
+                point,
+                "unique_program_rate",
+                float("nan"),
+            ),
+            "final_unique_valid_program_rate": getattr(
+                point,
+                "unique_valid_program_rate",
+                float("nan"),
+            ),
         }
     else:
         metrics = compute_traj_metrics(trajectory)
@@ -542,6 +558,12 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
     n_non_normalized_by_batch = [
         int(getattr(point, "n_non_normalized", 0)) for point in trajectory
     ]
+    n_unique_programs_by_batch = [
+        int(getattr(point, "n_unique_programs", 0)) for point in trajectory
+    ]
+    n_unique_valid_programs_by_batch = [
+        int(getattr(point, "n_unique_valid_programs", 0)) for point in trajectory
+    ]
     metrics["final_parse_fail_rate"] = final.n_parse_fail / max(final.n_total, 1)
     metrics["final_exec_fail_rate"] = final.n_exec_fail / max(final.n_total, 1)
     metrics["final_contract_fail_rate"] = final.n_contract_fail / max(final.n_total, 1)
@@ -559,6 +581,34 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
         0,
     )
     metrics["final_n_norm_cache_hits"] = int(getattr(final, "n_norm_cache_hits", 0))
+    metrics["final_n_unique_programs"] = int(getattr(final, "n_unique_programs", 0))
+    metrics["final_n_unique_programs_exact"] = int(
+        getattr(
+            final,
+            "n_unique_programs_exact",
+            metrics["final_n_unique_programs"],
+        )
+    )
+    metrics["final_n_unique_valid_programs"] = int(
+        getattr(final, "n_unique_valid_programs", 0)
+    )
+    metrics["final_n_unique_valid_programs_exact"] = int(
+        getattr(
+            final,
+            "n_unique_valid_programs_exact",
+            metrics["final_n_unique_valid_programs"],
+        )
+    )
+    metrics["final_unique_program_rate"] = getattr(
+        final,
+        "unique_program_rate",
+        float("nan"),
+    )
+    metrics["final_unique_valid_program_rate"] = getattr(
+        final,
+        "unique_valid_program_rate",
+        float("nan"),
+    )
     metrics["mean_frac_non_normalized"] = (
         float(np.mean(finite_frac_non_normalized))
         if finite_frac_non_normalized
@@ -567,6 +617,16 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
     metrics["mean_n_non_normalized_per_batch"] = (
         float(np.mean(n_non_normalized_by_batch))
         if n_non_normalized_by_batch
+        else float("nan")
+    )
+    metrics["mean_n_unique_programs_per_batch"] = (
+        float(np.mean(n_unique_programs_by_batch))
+        if n_unique_programs_by_batch
+        else float("nan")
+    )
+    metrics["mean_n_unique_valid_programs_per_batch"] = (
+        float(np.mean(n_unique_valid_programs_by_batch))
+        if n_unique_valid_programs_by_batch
         else float("nan")
     )
     metrics["final_reward_mean_all"] = final.reported_mean_all
@@ -614,6 +674,22 @@ def _build_summary(
         "paper/lh_count_batch_final": results.get("final_n_non_normalized", float("nan")),
         "paper/lh_count_batch_mean": results.get(
             "mean_n_non_normalized_per_batch",
+            float("nan"),
+        ),
+        "paper/unique_program_count_batch_final": results.get(
+            "final_n_unique_programs",
+            float("nan"),
+        ),
+        "paper/unique_program_count_batch_mean": results.get(
+            "mean_n_unique_programs_per_batch",
+            float("nan"),
+        ),
+        "paper/unique_valid_program_count_batch_final": results.get(
+            "final_n_unique_valid_programs",
+            float("nan"),
+        ),
+        "paper/unique_valid_program_count_batch_mean": results.get(
+            "mean_n_unique_valid_programs_per_batch",
             float("nan"),
         ),
         "paper/judge_hacking_rate_final": float("nan"),
@@ -701,6 +777,11 @@ def _print_summary(results: dict[str, Any]) -> None:
         results.get("final_max_abs_log_mass", float("nan")),
         results.get("final_n_norm_checked", 0),
         results.get("final_n_norm_failed", 0),
+    )
+    log.info(
+        "unique_programs_final: %d valid=%d",
+        results.get("final_n_unique_programs", 0),
+        results.get("final_n_unique_valid_programs", 0),
     )
 
 

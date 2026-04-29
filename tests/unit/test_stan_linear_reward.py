@@ -4,6 +4,7 @@ import numpy as np
 
 from ppl_synthesis_reward_hacking.experiments.stan_linear_reward import (
     _check_minimal_interface,
+    _hash_normalized_code_for_diversity,
     _normalize_task,
     _select_normalization_targets,
     _task_to_stan_payload,
@@ -114,3 +115,15 @@ def test_select_normalization_targets_supports_full_batch_sentinel() -> None:
     assert _select_normalization_targets(targets, sample_size=-1) == targets
     assert _select_normalization_targets(targets, sample_size=2) == ["a", "b"]
     assert _select_normalization_targets(targets, sample_size=0) == []
+
+
+def test_normalized_code_hash_ignores_comments_and_whitespace() -> None:
+    left = """
+model {
+  // explanatory comment
+  y ~ normal(beta * X, 1);
+}
+"""
+    right = "model { y ~ normal(beta * X, 1); }"
+
+    assert _hash_normalized_code_for_diversity(left) == _hash_normalized_code_for_diversity(right)
