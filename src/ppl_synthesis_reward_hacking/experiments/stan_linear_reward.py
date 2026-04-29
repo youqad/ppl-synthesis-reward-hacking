@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import csv
 import hashlib
 import json
@@ -424,6 +425,8 @@ class StanLinearTrajectoryPoint:
     max_abs_log_mass: float = float("nan")
     n_norm_checked: int = 0
     n_norm_failed: int = 0
+    n_non_normalized: int = 0
+    n_norm_cache_hits: int = 0
 
     @property
     def reward_mean(self) -> float:
@@ -468,6 +471,7 @@ class _BatchStats:
     n_norm_checked: int = 0
     n_norm_failed: int = 0
     n_non_normalized: int = 0
+    n_norm_cache_hits: int = 0
     norm_abs_log_masses: list[float] = field(default_factory=list)
     norm_status_counts: Counter[str] = field(default_factory=Counter)
 
@@ -532,6 +536,9 @@ class StanLinearRewardState:
     cmdstan_env: dict[str, str] = field(default_factory=dict)
     compiled_models: dict[str, _CompiledModel] = field(default_factory=dict)
     compile_locks: dict[str, Lock] = field(default_factory=dict)
+    normalization_cache: dict[tuple[str, str], dict[str, Any]] = field(
+        default_factory=dict
+    )
     normalization_metrics_path: Path | None = None
     cache_lock: Lock = field(default_factory=Lock)
 
@@ -554,7 +561,7 @@ def make_stan_linear_reward_fn(
     quadrature_beta_scale_multiplier: float = 4.0,
     quadrature_y_scale_multiplier: float = 4.0,
     normalization_interval: int = 1,
-    normalization_sample_size: int = 4,
+    normalization_sample_size: int = -1,
     normalization_epsilon: float = 0.1,
     normalization_tail_drop_nats: float = 20.0,
     completions_path: Path | None = None,
@@ -574,8 +581,8 @@ def make_stan_linear_reward_fn(
         raise ValueError("quadrature_y_scale_multiplier must be positive")
     if normalization_interval < 0:
         raise ValueError("normalization_interval must be >= 0")
-    if normalization_sample_size < 0:
-        raise ValueError("normalization_sample_size must be >= 0")
+    if normalization_sample_size < -1:
+        raise ValueError("normalization_sample_size must be >= -1")
     if normalization_epsilon <= 0.0:
         raise ValueError("normalization_epsilon must be positive")
 
@@ -753,6 +760,8 @@ def _score_batch(
             stats.n_norm_checked += 1
             status = str(norm.get("status", "unknown"))
             stats.norm_status_counts[status] += 1
+            if bool(norm.get("cache_hit", False)):
+                stats.n_norm_cache_hits += 1
             if not bool(norm.get("ok", False)):
                 stats.n_norm_failed += 1
             max_abs = norm.get("max_abs_log_mass")
@@ -1201,7 +1210,7 @@ def _run_batch_normalization(
     ordered_results: list[_CompletionResult | None],
     task: dict[str, Any],
 ) -> None:
-    if state.normalization_interval <= 0 or state.normalization_sample_size <= 0:
+    if state.normalization_interval <= 0 or state.normalization_sample_size == 0:
         return
     if state.call_count % state.normalization_interval != 0:
         return
@@ -1214,27 +1223,41 @@ def _run_batch_normalization(
     if not valid_results:
         return
 
-    for result in valid_results[: state.normalization_sample_size]:
+    for result in _select_normalization_targets(
+        valid_results,
+        sample_size=state.normalization_sample_size,
+    ):
         assert result.code is not None
         code_hash = _hash_code(result.code)
+        cache_key = (code_hash, _task_cache_key(task))
         norm_start = time.perf_counter()
-        try:
-            norm = _audit_predictive_normalization(
-                state,
-                code_hash=code_hash,
-                code=result.code,
-                task=task,
-                score_metadata=result.metadata or {},
-            )
-        except Exception as exc:  # noqa: BLE001
-            norm = {
-                "ok": False,
-                "status": "audit_failed",
-                "method": "cmdstan_log_prob_y_data_gh",
-                "reason": str(exc)[:2000],
-                "is_normalized": False,
-            }
-        norm["audit_wall_seconds"] = float(time.perf_counter() - norm_start)
+        with state.cache_lock:
+            cached_norm = state.normalization_cache.get(cache_key)
+        if cached_norm is not None:
+            norm = copy.deepcopy(cached_norm)
+            norm["cache_hit"] = True
+            norm["audit_wall_seconds"] = 0.0
+        else:
+            try:
+                norm = _audit_predictive_normalization(
+                    state,
+                    code_hash=code_hash,
+                    code=result.code,
+                    task=task,
+                    score_metadata=result.metadata or {},
+                )
+            except Exception as exc:  # noqa: BLE001
+                norm = {
+                    "ok": False,
+                    "status": "audit_failed",
+                    "method": "cmdstan_log_prob_y_data_gh",
+                    "reason": str(exc)[:2000],
+                    "is_normalized": False,
+                }
+            norm["audit_wall_seconds"] = float(time.perf_counter() - norm_start)
+            norm["cache_hit"] = False
+            with state.cache_lock:
+                state.normalization_cache[cache_key] = copy.deepcopy(norm)
         if result.metadata is None:
             result.metadata = {}
         result.metadata["normalization"] = norm
@@ -1249,6 +1272,19 @@ def _run_batch_normalization(
                 **norm,
             },
         )
+
+
+def _select_normalization_targets(
+    valid_results: Sequence[_CompletionResult],
+    *,
+    sample_size: int,
+) -> list[_CompletionResult]:
+    """Select normalization targets; `-1` audits the full valid batch."""
+    if sample_size < 0:
+        return list(valid_results)
+    if sample_size == 0:
+        return []
+    return list(valid_results[:sample_size])
 
 
 def _tail_diagnostic(
@@ -1495,6 +1531,8 @@ def _build_point(batch: int, stats: _BatchStats) -> StanLinearTrajectoryPoint:
         max_abs_log_mass=max_abs_log_mass,
         n_norm_checked=stats.n_norm_checked,
         n_norm_failed=stats.n_norm_failed,
+        n_non_normalized=stats.n_non_normalized,
+        n_norm_cache_hits=stats.n_norm_cache_hits,
     )
 
 
@@ -1547,7 +1585,16 @@ def _log_batch_to_wandb(
         ),
         "stan_linear/normalization/n_checked": point.n_norm_checked,
         "stan_linear/normalization/n_failed": point.n_norm_failed,
+        "stan_linear/normalization/n_non_normalized": point.n_non_normalized,
+        "stan_linear/normalization/n_unchecked_valid": max(
+            point.n_valid - point.n_norm_checked,
+            0,
+        ),
+        "stan_linear/normalization/n_cache_hits": point.n_norm_cache_hits,
         "stan_linear/normalization/frac_non_normalized": point.frac_non_normalized,
+        "stan_linear/normalization/checked_valid_rate": (
+            point.n_norm_checked / max(point.n_valid, 1)
+        ),
         "stan_linear/normalization/mean_abs_log_mass": point.mean_abs_log_mass,
         "stan_linear/normalization/max_abs_log_mass": point.max_abs_log_mass,
     }
@@ -1573,7 +1620,7 @@ def _print_batch_summary(point: StanLinearTrajectoryPoint) -> None:
         f"valid={point.n_valid:4d}/{point.n_total:<4d} "
         f"contract={point.n_contract_fail:<4d} "
         f"unsafe_rate={point.unsafe_rate:.3f} "
-        f"lh={point.frac_non_normalized:.3f}"
+        f"lh={point.n_non_normalized}/{point.n_norm_checked}"
     )
 
 

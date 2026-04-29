@@ -5,6 +5,7 @@ import numpy as np
 from ppl_synthesis_reward_hacking.experiments.stan_linear_reward import (
     _check_minimal_interface,
     _normalize_task,
+    _select_normalization_targets,
     _task_to_stan_payload,
 )
 
@@ -105,3 +106,11 @@ def test_task_to_stan_payload_uses_vector_interface() -> None:
         "X": [1.0, 2.0, 3.0],
         "y": [0.5, -0.3, 1.2],
     }
+
+
+def test_select_normalization_targets_supports_full_batch_sentinel() -> None:
+    targets = ["a", "b", "c", "d"]
+
+    assert _select_normalization_targets(targets, sample_size=-1) == targets
+    assert _select_normalization_targets(targets, sample_size=2) == ["a", "b"]
+    assert _select_normalization_targets(targets, sample_size=0) == []

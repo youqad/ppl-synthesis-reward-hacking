@@ -36,7 +36,7 @@ quadrature_beta_scale_multiplier: 4.0
 quadrature_y_scale_multiplier: 4.0
 normalization_method: gh_y_data
 normalization_interval: 1
-normalization_sample_size: 4
+normalization_sample_size: -1
 normalization_epsilon: 0.1
 normalization_tail_drop_nats: 20.0
 scoring_seed_base: 0

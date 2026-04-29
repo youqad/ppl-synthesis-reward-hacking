@@ -88,7 +88,7 @@ class TRLStanLinearRewardConfig:
     quadrature_y_scale_multiplier: float = 4.0
     normalization_method: str = "gh_y_data"
     normalization_interval: int = 1
-    normalization_sample_size: int = 4
+    normalization_sample_size: int = -1
     normalization_epsilon: float = 0.1
     normalization_tail_drop_nats: float = 20.0
     scoring_seed_base: int = 0
@@ -162,8 +162,8 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
         raise ValueError("normalization_method must be off|gh_y_data")
     if config.normalization_interval < 0:
         raise ValueError("normalization_interval must be >= 0")
-    if config.normalization_sample_size < 0:
-        raise ValueError("normalization_sample_size must be >= 0")
+    if config.normalization_sample_size < -1:
+        raise ValueError("normalization_sample_size must be >= -1")
     if config.normalization_epsilon <= 0:
         raise ValueError("normalization_epsilon must be positive")
     if config.normalization_tail_drop_nats <= 0:
@@ -218,7 +218,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--quadrature-y-scale-multiplier", type=float, default=4.0)
     p.add_argument("--normalization-method", default="gh_y_data", choices=["off", "gh_y_data"])
     p.add_argument("--normalization-interval", type=int, default=1)
-    p.add_argument("--normalization-sample-size", type=int, default=4)
+    p.add_argument(
+        "--normalization-sample-size",
+        type=int,
+        default=-1,
+        help="Number of valid programs to audit per batch; -1 audits the whole valid batch",
+    )
     p.add_argument("--normalization-epsilon", type=float, default=0.1)
     p.add_argument("--normalization-tail-drop-nats", type=float, default=20.0)
     p.add_argument("--scoring-seed-base", type=int, default=0)
@@ -503,6 +508,15 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
         return metrics
 
     final = trajectory[-1]
+    finite_frac_non_normalized = [
+        float(point.frac_non_normalized)
+        for point in trajectory
+        if isinstance(point.frac_non_normalized, int | float)
+        and math.isfinite(float(point.frac_non_normalized))
+    ]
+    n_non_normalized_by_batch = [
+        int(getattr(point, "n_non_normalized", 0)) for point in trajectory
+    ]
     metrics["final_parse_fail_rate"] = final.n_parse_fail / max(final.n_total, 1)
     metrics["final_exec_fail_rate"] = final.n_exec_fail / max(final.n_total, 1)
     metrics["final_contract_fail_rate"] = final.n_contract_fail / max(final.n_total, 1)
@@ -514,6 +528,22 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
     metrics["final_max_abs_log_mass"] = final.max_abs_log_mass
     metrics["final_n_norm_checked"] = final.n_norm_checked
     metrics["final_n_norm_failed"] = final.n_norm_failed
+    metrics["final_n_non_normalized"] = int(getattr(final, "n_non_normalized", 0))
+    metrics["final_n_norm_unchecked_valid"] = max(
+        int(final.n_valid) - int(final.n_norm_checked),
+        0,
+    )
+    metrics["final_n_norm_cache_hits"] = int(getattr(final, "n_norm_cache_hits", 0))
+    metrics["mean_frac_non_normalized"] = (
+        float(np.mean(finite_frac_non_normalized))
+        if finite_frac_non_normalized
+        else float("nan")
+    )
+    metrics["mean_n_non_normalized_per_batch"] = (
+        float(np.mean(n_non_normalized_by_batch))
+        if n_non_normalized_by_batch
+        else float("nan")
+    )
     metrics["final_reward_mean_all"] = final.reported_mean_all
     metrics.update(_build_summary(config, metrics))
     return metrics
@@ -554,6 +584,13 @@ def _build_summary(
         "paper/delta_scope": "singleton_y_given_train_x",
         "paper/frac_non_normalized_final": results.get("final_frac_non_normalized", float("nan")),
         "paper/lh_formal_signal_final": results.get("final_frac_non_normalized", float("nan")),
+        "paper/lh_rate_batch_final": results.get("final_frac_non_normalized", float("nan")),
+        "paper/lh_rate_batch_mean": results.get("mean_frac_non_normalized", float("nan")),
+        "paper/lh_count_batch_final": results.get("final_n_non_normalized", float("nan")),
+        "paper/lh_count_batch_mean": results.get(
+            "mean_n_non_normalized_per_batch",
+            float("nan"),
+        ),
         "paper/judge_hacking_rate_final": float("nan"),
         "paper/lh_family_prevalence_final": float("nan"),
     }

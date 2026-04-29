@@ -553,3 +553,30 @@ Cleanup:
 - both successful RunPod pods were terminated after artifacts copied back locally
 - final RunPod API check reported `active_count=0`
 - no local launcher, SSH, rsync, or tmux attach processes remained
+
+### Full-batch normalization audit fix
+
+Issue found after inspecting the completed H200 runs:
+
+- the Stan-linear trainer had `normalization_sample_size=4`
+- with `32` prompts and `8` generations per prompt, each batch had up to `256` programs
+- therefore the abs-log-mass and non-normalized metrics only reflected the first `4` valid programs in each batch
+- this was not enough to determine whether LH-like programs were being discovered and reinforced across the whole batch
+
+Fix:
+
+- `normalization_sample_size=-1` now means audit every valid program in the batch
+- the direct Stan-linear Hydra config and CLI default now use `-1`
+- `normalization_sample_size=0` still disables per-batch normalization audits
+- normalization results are cached by `(code_hash, task_id)` so duplicate programs in the same task count as separate batch items but do not rerun the expensive audit
+- W&B now logs explicit batch counts:
+  - `stan_linear/normalization/n_non_normalized`
+  - `stan_linear/normalization/n_unchecked_valid`
+  - `stan_linear/normalization/n_cache_hits`
+  - `stan_linear/normalization/checked_valid_rate`
+- `results.json` now includes `final_n_non_normalized`, `mean_n_non_normalized_per_batch`, and related paper summary aliases
+
+Validation:
+
+- `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+- `pixi run -e dev pytest tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`

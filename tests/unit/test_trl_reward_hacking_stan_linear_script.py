@@ -42,6 +42,8 @@ class _FakeTrajectoryPoint:
         max_abs_log_mass: float = 0.0,
         n_norm_checked: int = 0,
         n_norm_failed: int = 0,
+        n_non_normalized: int = 0,
+        n_norm_cache_hits: int = 0,
         reported_mean_all: float | None = None,
     ) -> None:
         self.reward_mean = reward_mean
@@ -58,6 +60,8 @@ class _FakeTrajectoryPoint:
         self.max_abs_log_mass = max_abs_log_mass
         self.n_norm_checked = n_norm_checked
         self.n_norm_failed = n_norm_failed
+        self.n_non_normalized = n_non_normalized
+        self.n_norm_cache_hits = n_norm_cache_hits
         self.reported_mean_all = reward_mean if reported_mean_all is None else reported_mean_all
 
 
@@ -100,6 +104,23 @@ def test_config_from_mapping_rejects_too_many_prompts() -> None:
         )
 
 
+def test_config_from_mapping_uses_full_batch_normalization_by_default() -> None:
+    module = _load_module()
+    cfg = module.config_from_mapping({"prompt_policy": "neutral_family"})
+    assert cfg.normalization_sample_size == -1
+
+
+def test_config_from_mapping_rejects_invalid_normalization_sample_size() -> None:
+    module = _load_module()
+    with pytest.raises(ValueError, match="normalization_sample_size must be >= -1"):
+        module.config_from_mapping(
+            {
+                "prompt_policy": "neutral_family",
+                "normalization_sample_size": -2,
+            }
+        )
+
+
 def test_default_run_name_has_expected_prefix() -> None:
     module = _load_module()
     cfg = module.TRLStanLinearRewardConfig(model="Qwen/Qwen3-4B-Instruct-2507", n_steps=7)
@@ -119,6 +140,9 @@ def test_build_summary_emits_direct_stan_keys() -> None:
             "final_valid_rate": 0.75,
             "final_reward_mean": 0.1,
             "final_frac_non_normalized": 0.25,
+            "mean_frac_non_normalized": 0.2,
+            "final_n_non_normalized": 3,
+            "mean_n_non_normalized_per_batch": 2.5,
         },
     )
     assert summary["paper/reward_metric"] == "singleton_posterior_predictive_logZ_ratio"
@@ -128,6 +152,10 @@ def test_build_summary_emits_direct_stan_keys() -> None:
     assert summary["paper/monitoring_mode"] == "safestan_shadow"
     assert summary["paper/normalization_method"] == "gh_y_data"
     assert summary["paper/prompt_policy"] == "neutral_family"
+    assert summary["paper/lh_rate_batch_final"] == 0.25
+    assert summary["paper/lh_rate_batch_mean"] == 0.2
+    assert summary["paper/lh_count_batch_final"] == 3
+    assert summary["paper/lh_count_batch_mean"] == 2.5
 
 
 def test_compute_results_handles_single_batch() -> None:
@@ -148,6 +176,8 @@ def test_compute_results_handles_single_batch() -> None:
                 frac_non_normalized=0.5,
                 mean_abs_log_mass=0.7,
                 n_norm_checked=2,
+                n_non_normalized=1,
+                n_norm_cache_hits=1,
                 reported_mean_all=-24.0,
             )
         ]
@@ -157,4 +187,8 @@ def test_compute_results_handles_single_batch() -> None:
     assert results["final_reward_mean_all"] == -24.0
     assert results["final_parse_fail_rate"] == pytest.approx(0.25)
     assert results["final_unsafe_rate"] == pytest.approx(1 / 3)
+    assert results["final_n_non_normalized"] == 1
+    assert results["mean_n_non_normalized_per_batch"] == pytest.approx(1.0)
+    assert results["paper/lh_count_batch_final"] == 1
+    assert results["paper/lh_count_batch_mean"] == pytest.approx(1.0)
     assert results["paper/reward_metric"] == "singleton_posterior_predictive_logZ_ratio"
