@@ -531,6 +531,7 @@ class StanLinearRewardState:
     runtime: SafeStanRuntime | None = None
     cmdstan_env: dict[str, str] = field(default_factory=dict)
     compiled_models: dict[str, _CompiledModel] = field(default_factory=dict)
+    compile_locks: dict[str, Lock] = field(default_factory=dict)
     normalization_metrics_path: Path | None = None
     cache_lock: Lock = field(default_factory=Lock)
 
@@ -915,6 +916,16 @@ def _compile_plain_model(
         cached = state.compiled_models.get(code_hash)
         if cached is not None and cached.exe_path.exists():
             return cached
+        compile_lock = state.compile_locks.get(code_hash)
+        if compile_lock is None:
+            compile_lock = Lock()
+            state.compile_locks[code_hash] = compile_lock
+
+    with compile_lock:
+        with state.cache_lock:
+            cached = state.compiled_models.get(code_hash)
+            if cached is not None and cached.exe_path.exists():
+                return cached
 
         model_dir = state.output_dir / "cmdstan_logprob_models" / code_hash
         model_dir.mkdir(parents=True, exist_ok=True)
@@ -927,7 +938,8 @@ def _compile_plain_model(
                 model_dir=model_dir,
                 compile_seconds=0.0,
             )
-            state.compiled_models[code_hash] = compiled
+            with state.cache_lock:
+                state.compiled_models[code_hash] = compiled
             return compiled
 
         compile_cmd = [
@@ -963,7 +975,8 @@ def _compile_plain_model(
             model_dir=model_dir,
             compile_seconds=compile_seconds,
         )
-        state.compiled_models[code_hash] = compiled
+        with state.cache_lock:
+            state.compiled_models[code_hash] = compiled
         return compiled
 
 
