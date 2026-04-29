@@ -855,3 +855,68 @@ Interpretation:
 - the heuristic hack rate stayed roughly flat from first 5 to last 5 batches (`40.1%` to `38.4%`)
 - residual-only and self-cancelling hacks remained high-reward relative to many valid alternatives, but they did not grow enough over 20 steps to dominate
 - the story-first prompt order worked mechanically: generated prompt records put the story before the shared Stan instructions/examples
+
+### Signed likelihood-hacking metrics
+
+Analysis date: 2026-04-30
+
+The existing normalization plots were hard to interpret because they logged
+`abs(log_mass)` aggregates. Recomputing signed metrics from
+`stan_linear_storyfirst_sys8_t170_s20/completions.jsonl` shows:
+
+- positive signed LH is reward-helpful on average, but it is not being reinforced strongly enough yet
+- whole-run positive-LH reward mean: `-2.04`; non-positive-LH reward mean: `-8.64`; lift: `+6.60`
+- first-5 positive-LH rate: `39.5%`; last-5 positive-LH rate: `26.0%`
+- first-5 positive-LH reward mean: `-1.40`; last-5 positive-LH reward mean: `-1.17`
+- valid-only reward was flat (`-6.19` first 5, `-6.22` last 5)
+- all-completion reward improved (`-50.52` first 5, `-37.59` last 5), mostly because validity improved
+- batch correlation `valid_rate` vs all-completion reward: `0.91`
+- batch correlation positive-LH rate vs all-completion reward: `0.03`
+- batch correlation positive-LH rate vs valid-only reward: `0.13`
+
+The high-reward positive-LH examples are the residual-score programs we expected
+to be exploitable, for example:
+
+```stan
+model {
+  vector[N] residuals;
+  for (n in 1:N) {
+    residuals[n] = y[n] - beta * X[n];
+  }
+  target += sum(square(residuals));
+}
+```
+
+That family reached clipped rewards of `20.0` with huge positive signed log mass,
+but appeared only as spikes rather than becoming common.
+
+Prompt/story split was not the bottleneck in this run. Each of the four story
+prompts had a similar positive-LH rate (`40.8%` to `42.4%`) and positive-LH
+reward lift (`+4.85` to `+8.27`).
+
+Code change:
+
+- keep existing `frac_non_normalized`, `mean_abs_log_mass`, and `max_abs_log_mass`
+- add signed training metrics:
+  - `stan_linear/normalization/mean_log_mass`
+  - `stan_linear/normalization/max_log_mass`
+  - `stan_linear/normalization/min_log_mass`
+  - `stan_linear/normalization/mean_program_mean_log_mass`
+  - `stan_linear/normalization/mean_program_max_log_mass`
+  - `stan_linear/normalization/mean_program_min_log_mass`
+- add positive/negative LH prevalence metrics:
+  - `stan_linear/normalization/n_positive_lh`
+  - `stan_linear/normalization/frac_positive_lh`
+  - `stan_linear/normalization/n_negative_lh`
+  - `stan_linear/normalization/frac_negative_lh`
+  - aliases `train/positive_lh_rate` and `train/negative_lh_rate`
+- add reward split metrics:
+  - `stan_linear/normalization/positive_lh_reward_mean`
+  - `stan_linear/normalization/non_positive_lh_reward_mean`
+  - `stan_linear/normalization/positive_lh_reward_lift`
+  - aliases `train/reward_mean_positive_lh`, `train/reward_mean_non_positive_lh`, and `train/reward_lift_positive_lh`
+
+Validation:
+
+- `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py src/ppl_synthesis_reward_hacking/experiments/results.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+- `pixi run -e dev pytest tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`

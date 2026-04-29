@@ -252,6 +252,20 @@ def _sanitize_output_values(output_values: dict[str, float] | None) -> dict[str,
     return sanitized
 
 
+def _finite_float(value: Any) -> float | None:
+    if not isinstance(value, int | float):
+        return None
+    value_float = float(value)
+    if not math.isfinite(value_float):
+        return None
+    return value_float
+
+
+def _finite_mean(values: list[float]) -> float:
+    finite_values = [float(value) for value in values if math.isfinite(float(value))]
+    return float(np.mean(finite_values)) if finite_values else float("nan")
+
+
 def _strip_stan_comments(code: str) -> str:
     without_block = _BLOCK_COMMENT_RE.sub("", code)
     return _LINE_COMMENT_RE.sub("", without_block)
@@ -429,10 +443,27 @@ class StanLinearTrajectoryPoint:
     frac_non_normalized: float = float("nan")
     mean_abs_log_mass: float = float("nan")
     max_abs_log_mass: float = float("nan")
+    mean_log_mass: float = float("nan")
+    max_log_mass: float = float("nan")
+    min_log_mass: float = float("nan")
+    mean_program_mean_log_mass: float = float("nan")
+    mean_program_max_log_mass: float = float("nan")
+    mean_program_min_log_mass: float = float("nan")
     n_norm_checked: int = 0
+    n_norm_with_log_mass: int = 0
     n_norm_failed: int = 0
     n_non_normalized: int = 0
     n_norm_cache_hits: int = 0
+    n_positive_lh: int = 0
+    frac_positive_lh: float = float("nan")
+    n_negative_lh: int = 0
+    frac_negative_lh: float = float("nan")
+    positive_lh_reward_mean: float = float("nan")
+    non_positive_lh_reward_mean: float = float("nan")
+    positive_lh_reward_lift: float = float("nan")
+    negative_lh_reward_mean: float = float("nan")
+    non_negative_lh_reward_mean: float = float("nan")
+    negative_lh_reward_lift: float = float("nan")
     n_programs: int = 0
     n_unique_programs: int = 0
     n_unique_programs_exact: int = 0
@@ -486,6 +517,17 @@ class _BatchStats:
     n_non_normalized: int = 0
     n_norm_cache_hits: int = 0
     norm_abs_log_masses: list[float] = field(default_factory=list)
+    norm_log_masses: list[float] = field(default_factory=list)
+    norm_program_mean_log_masses: list[float] = field(default_factory=list)
+    norm_program_max_log_masses: list[float] = field(default_factory=list)
+    norm_program_min_log_masses: list[float] = field(default_factory=list)
+    n_norm_with_log_mass: int = 0
+    n_positive_lh: int = 0
+    n_negative_lh: int = 0
+    positive_lh_rewards: list[float] = field(default_factory=list)
+    non_positive_lh_rewards: list[float] = field(default_factory=list)
+    negative_lh_rewards: list[float] = field(default_factory=list)
+    non_negative_lh_rewards: list[float] = field(default_factory=list)
     norm_status_counts: Counter[str] = field(default_factory=Counter)
     n_programs: int = 0
     program_hashes_exact: set[str] = field(default_factory=set)
@@ -793,9 +835,38 @@ def _score_batch(
                 stats.n_norm_cache_hits += 1
             if not bool(norm.get("ok", False)):
                 stats.n_norm_failed += 1
-            max_abs = norm.get("max_abs_log_mass")
-            if isinstance(max_abs, int | float) and math.isfinite(float(max_abs)):
-                stats.norm_abs_log_masses.append(float(max_abs))
+            max_abs = _finite_float(norm.get("max_abs_log_mass"))
+            if max_abs is not None:
+                stats.norm_abs_log_masses.append(max_abs)
+            raw_log_masses = norm.get("log_masses", []) or []
+            log_masses = [
+                value_float
+                for value in raw_log_masses
+                if (value_float := _finite_float(value)) is not None
+            ]
+            if log_masses:
+                stats.norm_log_masses.extend(log_masses)
+                stats.norm_program_mean_log_masses.append(float(np.mean(log_masses)))
+                program_max_log_mass = float(np.max(log_masses))
+                program_min_log_mass = float(np.min(log_masses))
+                stats.norm_program_max_log_masses.append(program_max_log_mass)
+                stats.norm_program_min_log_masses.append(program_min_log_mass)
+                stats.n_norm_with_log_mass += 1
+                epsilon = _finite_float(norm.get("epsilon"))
+                if epsilon is None:
+                    epsilon = state.normalization_epsilon
+                is_positive_lh = program_max_log_mass > epsilon
+                is_negative_lh = program_min_log_mass < -epsilon
+                if is_positive_lh:
+                    stats.n_positive_lh += 1
+                    stats.positive_lh_rewards.append(float(result.reward))
+                else:
+                    stats.non_positive_lh_rewards.append(float(result.reward))
+                if is_negative_lh:
+                    stats.n_negative_lh += 1
+                    stats.negative_lh_rewards.append(float(result.reward))
+                else:
+                    stats.non_negative_lh_rewards.append(float(result.reward))
             if norm.get("is_normalized") is False:
                 stats.n_non_normalized += 1
         metadata["task"] = _task_summary(task)
@@ -1540,6 +1611,33 @@ def _build_point(batch: int, stats: _BatchStats) -> StanLinearTrajectoryPoint:
         if stats.norm_abs_log_masses
         else float("nan")
     )
+    mean_log_mass = _finite_mean(stats.norm_log_masses)
+    max_log_mass = (
+        float(np.max(stats.norm_log_masses))
+        if stats.norm_log_masses
+        else float("nan")
+    )
+    min_log_mass = (
+        float(np.min(stats.norm_log_masses))
+        if stats.norm_log_masses
+        else float("nan")
+    )
+    positive_lh_reward_mean = _finite_mean(stats.positive_lh_rewards)
+    non_positive_lh_reward_mean = _finite_mean(stats.non_positive_lh_rewards)
+    positive_lh_reward_lift = (
+        positive_lh_reward_mean - non_positive_lh_reward_mean
+        if math.isfinite(positive_lh_reward_mean)
+        and math.isfinite(non_positive_lh_reward_mean)
+        else float("nan")
+    )
+    negative_lh_reward_mean = _finite_mean(stats.negative_lh_rewards)
+    non_negative_lh_reward_mean = _finite_mean(stats.non_negative_lh_rewards)
+    negative_lh_reward_lift = (
+        negative_lh_reward_mean - non_negative_lh_reward_mean
+        if math.isfinite(negative_lh_reward_mean)
+        and math.isfinite(non_negative_lh_reward_mean)
+        else float("nan")
+    )
     n_unique_programs = len(stats.program_hashes_normalized)
     n_unique_valid_programs = len(stats.valid_program_hashes_normalized)
     return StanLinearTrajectoryPoint(
@@ -1560,10 +1658,35 @@ def _build_point(batch: int, stats: _BatchStats) -> StanLinearTrajectoryPoint:
         frac_non_normalized=frac_non_normalized,
         mean_abs_log_mass=mean_abs_log_mass,
         max_abs_log_mass=max_abs_log_mass,
+        mean_log_mass=mean_log_mass,
+        max_log_mass=max_log_mass,
+        min_log_mass=min_log_mass,
+        mean_program_mean_log_mass=_finite_mean(stats.norm_program_mean_log_masses),
+        mean_program_max_log_mass=_finite_mean(stats.norm_program_max_log_masses),
+        mean_program_min_log_mass=_finite_mean(stats.norm_program_min_log_masses),
         n_norm_checked=stats.n_norm_checked,
+        n_norm_with_log_mass=stats.n_norm_with_log_mass,
         n_norm_failed=stats.n_norm_failed,
         n_non_normalized=stats.n_non_normalized,
         n_norm_cache_hits=stats.n_norm_cache_hits,
+        n_positive_lh=stats.n_positive_lh,
+        frac_positive_lh=(
+            stats.n_positive_lh / stats.n_norm_with_log_mass
+            if stats.n_norm_with_log_mass
+            else float("nan")
+        ),
+        n_negative_lh=stats.n_negative_lh,
+        frac_negative_lh=(
+            stats.n_negative_lh / stats.n_norm_with_log_mass
+            if stats.n_norm_with_log_mass
+            else float("nan")
+        ),
+        positive_lh_reward_mean=positive_lh_reward_mean,
+        non_positive_lh_reward_mean=non_positive_lh_reward_mean,
+        positive_lh_reward_lift=positive_lh_reward_lift,
+        negative_lh_reward_mean=negative_lh_reward_mean,
+        non_negative_lh_reward_mean=non_negative_lh_reward_mean,
+        negative_lh_reward_lift=negative_lh_reward_lift,
         n_programs=stats.n_programs,
         n_unique_programs=n_unique_programs,
         n_unique_programs_exact=len(stats.program_hashes_exact),
@@ -1612,6 +1735,11 @@ def _log_batch_to_wandb(
         "stan_linear/checker/batch": point.batch,
         "train/reward_mean": point.reported_mean,
         "train/reward_mean_all": point.reported_mean_all,
+        "train/positive_lh_rate": point.frac_positive_lh,
+        "train/negative_lh_rate": point.frac_negative_lh,
+        "train/reward_mean_positive_lh": point.positive_lh_reward_mean,
+        "train/reward_mean_non_positive_lh": point.non_positive_lh_reward_mean,
+        "train/reward_lift_positive_lh": point.positive_lh_reward_lift,
         "train/n_valid": point.n_valid,
         "train/n_total": point.n_total,
         "train/n_parse_fail": point.n_parse_fail,
@@ -1644,12 +1772,47 @@ def _log_batch_to_wandb(
             0,
         ),
         "stan_linear/normalization/n_cache_hits": point.n_norm_cache_hits,
+        "stan_linear/normalization/n_with_log_mass": point.n_norm_with_log_mass,
         "stan_linear/normalization/frac_non_normalized": point.frac_non_normalized,
         "stan_linear/normalization/checked_valid_rate": (
             point.n_norm_checked / max(point.n_valid, 1)
         ),
         "stan_linear/normalization/mean_abs_log_mass": point.mean_abs_log_mass,
         "stan_linear/normalization/max_abs_log_mass": point.max_abs_log_mass,
+        "stan_linear/normalization/mean_log_mass": point.mean_log_mass,
+        "stan_linear/normalization/max_log_mass": point.max_log_mass,
+        "stan_linear/normalization/min_log_mass": point.min_log_mass,
+        "stan_linear/normalization/mean_program_mean_log_mass": (
+            point.mean_program_mean_log_mass
+        ),
+        "stan_linear/normalization/mean_program_max_log_mass": (
+            point.mean_program_max_log_mass
+        ),
+        "stan_linear/normalization/mean_program_min_log_mass": (
+            point.mean_program_min_log_mass
+        ),
+        "stan_linear/normalization/n_positive_lh": point.n_positive_lh,
+        "stan_linear/normalization/frac_positive_lh": point.frac_positive_lh,
+        "stan_linear/normalization/n_negative_lh": point.n_negative_lh,
+        "stan_linear/normalization/frac_negative_lh": point.frac_negative_lh,
+        "stan_linear/normalization/positive_lh_reward_mean": (
+            point.positive_lh_reward_mean
+        ),
+        "stan_linear/normalization/non_positive_lh_reward_mean": (
+            point.non_positive_lh_reward_mean
+        ),
+        "stan_linear/normalization/positive_lh_reward_lift": (
+            point.positive_lh_reward_lift
+        ),
+        "stan_linear/normalization/negative_lh_reward_mean": (
+            point.negative_lh_reward_mean
+        ),
+        "stan_linear/normalization/non_negative_lh_reward_mean": (
+            point.non_negative_lh_reward_mean
+        ),
+        "stan_linear/normalization/negative_lh_reward_lift": (
+            point.negative_lh_reward_lift
+        ),
     }
     for reason, batch_count in stats.unsafe_reason_counts.items():
         key = _reason_metric_key(state, reason)
@@ -1674,7 +1837,9 @@ def _print_batch_summary(point: StanLinearTrajectoryPoint) -> None:
         f"uniq={point.n_unique_valid_programs:3d}/{point.n_valid:<4d} "
         f"contract={point.n_contract_fail:<4d} "
         f"unsafe_rate={point.unsafe_rate:.3f} "
-        f"lh={point.n_non_normalized}/{point.n_norm_checked}"
+        f"lh={point.n_non_normalized}/{point.n_norm_checked} "
+        f"pos_lh={point.n_positive_lh}/{point.n_norm_with_log_mass} "
+        f"mean_log_mass={point.mean_log_mass:.2f}"
     )
 
 

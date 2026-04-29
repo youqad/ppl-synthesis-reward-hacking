@@ -40,10 +40,27 @@ class _FakeTrajectoryPoint:
         frac_non_normalized: float = 0.0,
         mean_abs_log_mass: float = 0.0,
         max_abs_log_mass: float = 0.0,
+        mean_log_mass: float = 0.0,
+        max_log_mass: float = 0.0,
+        min_log_mass: float = 0.0,
+        mean_program_mean_log_mass: float = 0.0,
+        mean_program_max_log_mass: float = 0.0,
+        mean_program_min_log_mass: float = 0.0,
         n_norm_checked: int = 0,
+        n_norm_with_log_mass: int = 0,
         n_norm_failed: int = 0,
         n_non_normalized: int = 0,
         n_norm_cache_hits: int = 0,
+        n_positive_lh: int = 0,
+        frac_positive_lh: float = 0.0,
+        n_negative_lh: int = 0,
+        frac_negative_lh: float = 0.0,
+        positive_lh_reward_mean: float = 0.0,
+        non_positive_lh_reward_mean: float = 0.0,
+        positive_lh_reward_lift: float = 0.0,
+        negative_lh_reward_mean: float = 0.0,
+        non_negative_lh_reward_mean: float = 0.0,
+        negative_lh_reward_lift: float = 0.0,
         n_unique_programs: int = 0,
         n_unique_programs_exact: int = 0,
         n_unique_valid_programs: int = 0,
@@ -64,10 +81,27 @@ class _FakeTrajectoryPoint:
         self.frac_non_normalized = frac_non_normalized
         self.mean_abs_log_mass = mean_abs_log_mass
         self.max_abs_log_mass = max_abs_log_mass
+        self.mean_log_mass = mean_log_mass
+        self.max_log_mass = max_log_mass
+        self.min_log_mass = min_log_mass
+        self.mean_program_mean_log_mass = mean_program_mean_log_mass
+        self.mean_program_max_log_mass = mean_program_max_log_mass
+        self.mean_program_min_log_mass = mean_program_min_log_mass
         self.n_norm_checked = n_norm_checked
+        self.n_norm_with_log_mass = n_norm_with_log_mass
         self.n_norm_failed = n_norm_failed
         self.n_non_normalized = n_non_normalized
         self.n_norm_cache_hits = n_norm_cache_hits
+        self.n_positive_lh = n_positive_lh
+        self.frac_positive_lh = frac_positive_lh
+        self.n_negative_lh = n_negative_lh
+        self.frac_negative_lh = frac_negative_lh
+        self.positive_lh_reward_mean = positive_lh_reward_mean
+        self.non_positive_lh_reward_mean = non_positive_lh_reward_mean
+        self.positive_lh_reward_lift = positive_lh_reward_lift
+        self.negative_lh_reward_mean = negative_lh_reward_mean
+        self.non_negative_lh_reward_mean = non_negative_lh_reward_mean
+        self.negative_lh_reward_lift = negative_lh_reward_lift
         self.n_unique_programs = n_unique_programs
         self.n_unique_programs_exact = n_unique_programs_exact
         self.n_unique_valid_programs = n_unique_valid_programs
@@ -213,6 +247,12 @@ def test_build_summary_emits_direct_stan_keys() -> None:
             "mean_frac_non_normalized": 0.2,
             "final_n_non_normalized": 3,
             "mean_n_non_normalized_per_batch": 2.5,
+            "final_frac_positive_lh": 0.15,
+            "mean_frac_positive_lh": 0.12,
+            "final_n_positive_lh": 4,
+            "mean_n_positive_lh_per_batch": 3.5,
+            "final_positive_lh_reward_lift": 1.25,
+            "mean_positive_lh_reward_lift": 0.75,
             "final_n_unique_programs": 9,
             "mean_n_unique_programs_per_batch": 8.5,
             "final_n_unique_valid_programs": 7,
@@ -230,6 +270,12 @@ def test_build_summary_emits_direct_stan_keys() -> None:
     assert summary["paper/lh_rate_batch_mean"] == 0.2
     assert summary["paper/lh_count_batch_final"] == 3
     assert summary["paper/lh_count_batch_mean"] == 2.5
+    assert summary["paper/lh_positive_rate_final"] == 0.15
+    assert summary["paper/lh_positive_rate_mean"] == 0.12
+    assert summary["paper/lh_positive_count_batch_final"] == 4
+    assert summary["paper/lh_positive_count_batch_mean"] == 3.5
+    assert summary["paper/lh_positive_reward_lift_final"] == 1.25
+    assert summary["paper/lh_positive_reward_lift_mean"] == 0.75
     assert summary["paper/unique_program_count_batch_final"] == 9
     assert summary["paper/unique_program_count_batch_mean"] == 8.5
     assert summary["paper/unique_valid_program_count_batch_final"] == 7
@@ -253,9 +299,23 @@ def test_compute_results_handles_single_batch() -> None:
                 unsafe_rate=1 / 3,
                 frac_non_normalized=0.5,
                 mean_abs_log_mass=0.7,
+                mean_log_mass=0.2,
+                max_log_mass=1.1,
+                min_log_mass=-0.4,
+                mean_program_mean_log_mass=0.2,
+                mean_program_max_log_mass=0.8,
+                mean_program_min_log_mass=-0.3,
                 n_norm_checked=2,
+                n_norm_with_log_mass=2,
                 n_non_normalized=1,
                 n_norm_cache_hits=1,
+                n_positive_lh=1,
+                frac_positive_lh=0.5,
+                n_negative_lh=1,
+                frac_negative_lh=0.5,
+                positive_lh_reward_mean=2.0,
+                non_positive_lh_reward_mean=1.0,
+                positive_lh_reward_lift=1.0,
                 n_unique_programs=3,
                 n_unique_programs_exact=4,
                 n_unique_valid_programs=2,
@@ -273,6 +333,14 @@ def test_compute_results_handles_single_batch() -> None:
     assert results["final_unsafe_rate"] == pytest.approx(1 / 3)
     assert results["final_n_non_normalized"] == 1
     assert results["mean_n_non_normalized_per_batch"] == pytest.approx(1.0)
+    assert results["final_mean_log_mass"] == pytest.approx(0.2)
+    assert results["mean_log_mass"] == pytest.approx(0.2)
+    assert results["final_n_positive_lh"] == 1
+    assert results["final_frac_positive_lh"] == pytest.approx(0.5)
+    assert results["mean_n_positive_lh_per_batch"] == pytest.approx(1.0)
+    assert results["mean_frac_positive_lh"] == pytest.approx(0.5)
+    assert results["final_positive_lh_reward_lift"] == pytest.approx(1.0)
+    assert results["mean_positive_lh_reward_lift"] == pytest.approx(1.0)
     assert results["final_n_unique_programs"] == 3
     assert results["final_n_unique_programs_exact"] == 4
     assert results["final_n_unique_valid_programs"] == 2
@@ -283,6 +351,9 @@ def test_compute_results_handles_single_batch() -> None:
     assert results["mean_n_unique_valid_programs_per_batch"] == pytest.approx(2.0)
     assert results["paper/lh_count_batch_final"] == 1
     assert results["paper/lh_count_batch_mean"] == pytest.approx(1.0)
+    assert results["paper/lh_positive_count_batch_final"] == 1
+    assert results["paper/lh_positive_rate_final"] == pytest.approx(0.5)
+    assert results["paper/lh_positive_reward_lift_final"] == pytest.approx(1.0)
     assert results["paper/unique_program_count_batch_final"] == 3
     assert results["paper/unique_valid_program_count_batch_final"] == 2
     assert results["paper/reward_metric"] == "singleton_posterior_predictive_logZ_ratio"

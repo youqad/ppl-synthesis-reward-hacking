@@ -498,6 +498,20 @@ def run_training(config: TRLStanLinearRewardConfig) -> dict[str, Any]:
             reward_state.completion_writer.close()
 
 
+def _finite_trajectory_values(trajectory, attr_name: str) -> list[float]:
+    values: list[float] = []
+    for point in trajectory:
+        value = getattr(point, attr_name, float("nan"))
+        if isinstance(value, int | float) and math.isfinite(float(value)):
+            values.append(float(value))
+    return values
+
+
+def _mean_trajectory_attr(trajectory, attr_name: str) -> float:
+    values = _finite_trajectory_values(trajectory, attr_name)
+    return float(np.mean(values)) if values else float("nan")
+
+
 def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]:
     trajectory = state.trajectory
     if not trajectory:
@@ -516,8 +530,54 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
             "final_frac_non_normalized": point.frac_non_normalized,
             "final_mean_abs_log_mass": point.mean_abs_log_mass,
             "final_max_abs_log_mass": point.max_abs_log_mass,
+            "final_mean_log_mass": getattr(point, "mean_log_mass", float("nan")),
+            "final_max_log_mass": getattr(point, "max_log_mass", float("nan")),
+            "final_min_log_mass": getattr(point, "min_log_mass", float("nan")),
+            "final_mean_program_mean_log_mass": getattr(
+                point,
+                "mean_program_mean_log_mass",
+                float("nan"),
+            ),
+            "final_mean_program_max_log_mass": getattr(
+                point,
+                "mean_program_max_log_mass",
+                float("nan"),
+            ),
+            "final_mean_program_min_log_mass": getattr(
+                point,
+                "mean_program_min_log_mass",
+                float("nan"),
+            ),
             "final_n_norm_checked": point.n_norm_checked,
+            "final_n_norm_with_log_mass": getattr(point, "n_norm_with_log_mass", 0),
             "final_n_norm_failed": point.n_norm_failed,
+            "final_n_positive_lh": getattr(point, "n_positive_lh", 0),
+            "final_frac_positive_lh": getattr(
+                point,
+                "frac_positive_lh",
+                float("nan"),
+            ),
+            "final_n_negative_lh": getattr(point, "n_negative_lh", 0),
+            "final_frac_negative_lh": getattr(
+                point,
+                "frac_negative_lh",
+                float("nan"),
+            ),
+            "final_positive_lh_reward_mean": getattr(
+                point,
+                "positive_lh_reward_mean",
+                float("nan"),
+            ),
+            "final_non_positive_lh_reward_mean": getattr(
+                point,
+                "non_positive_lh_reward_mean",
+                float("nan"),
+            ),
+            "final_positive_lh_reward_lift": getattr(
+                point,
+                "positive_lh_reward_lift",
+                float("nan"),
+            ),
             "final_reward_mean_all": point.reported_mean_all,
             "final_n_unique_programs": getattr(point, "n_unique_programs", 0),
             "final_n_unique_valid_programs": getattr(
@@ -558,6 +618,12 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
     n_non_normalized_by_batch = [
         int(getattr(point, "n_non_normalized", 0)) for point in trajectory
     ]
+    n_positive_lh_by_batch = [
+        int(getattr(point, "n_positive_lh", 0)) for point in trajectory
+    ]
+    n_negative_lh_by_batch = [
+        int(getattr(point, "n_negative_lh", 0)) for point in trajectory
+    ]
     n_unique_programs_by_batch = [
         int(getattr(point, "n_unique_programs", 0)) for point in trajectory
     ]
@@ -573,9 +639,72 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
     metrics["final_frac_non_normalized"] = final.frac_non_normalized
     metrics["final_mean_abs_log_mass"] = final.mean_abs_log_mass
     metrics["final_max_abs_log_mass"] = final.max_abs_log_mass
+    metrics["final_mean_log_mass"] = getattr(final, "mean_log_mass", float("nan"))
+    metrics["final_max_log_mass"] = getattr(final, "max_log_mass", float("nan"))
+    metrics["final_min_log_mass"] = getattr(final, "min_log_mass", float("nan"))
+    metrics["final_mean_program_mean_log_mass"] = getattr(
+        final,
+        "mean_program_mean_log_mass",
+        float("nan"),
+    )
+    metrics["final_mean_program_max_log_mass"] = getattr(
+        final,
+        "mean_program_max_log_mass",
+        float("nan"),
+    )
+    metrics["final_mean_program_min_log_mass"] = getattr(
+        final,
+        "mean_program_min_log_mass",
+        float("nan"),
+    )
     metrics["final_n_norm_checked"] = final.n_norm_checked
+    metrics["final_n_norm_with_log_mass"] = int(
+        getattr(final, "n_norm_with_log_mass", 0)
+    )
     metrics["final_n_norm_failed"] = final.n_norm_failed
     metrics["final_n_non_normalized"] = int(getattr(final, "n_non_normalized", 0))
+    metrics["final_n_positive_lh"] = int(getattr(final, "n_positive_lh", 0))
+    metrics["final_frac_positive_lh"] = getattr(
+        final,
+        "frac_positive_lh",
+        float("nan"),
+    )
+    metrics["final_n_negative_lh"] = int(getattr(final, "n_negative_lh", 0))
+    metrics["final_frac_negative_lh"] = getattr(
+        final,
+        "frac_negative_lh",
+        float("nan"),
+    )
+    metrics["final_positive_lh_reward_mean"] = getattr(
+        final,
+        "positive_lh_reward_mean",
+        float("nan"),
+    )
+    metrics["final_non_positive_lh_reward_mean"] = getattr(
+        final,
+        "non_positive_lh_reward_mean",
+        float("nan"),
+    )
+    metrics["final_positive_lh_reward_lift"] = getattr(
+        final,
+        "positive_lh_reward_lift",
+        float("nan"),
+    )
+    metrics["final_negative_lh_reward_mean"] = getattr(
+        final,
+        "negative_lh_reward_mean",
+        float("nan"),
+    )
+    metrics["final_non_negative_lh_reward_mean"] = getattr(
+        final,
+        "non_negative_lh_reward_mean",
+        float("nan"),
+    )
+    metrics["final_negative_lh_reward_lift"] = getattr(
+        final,
+        "negative_lh_reward_lift",
+        float("nan"),
+    )
     metrics["final_n_norm_unchecked_valid"] = max(
         int(final.n_valid) - int(final.n_norm_checked),
         0,
@@ -614,10 +743,45 @@ def _compute_results(config: TRLStanLinearRewardConfig, state) -> dict[str, Any]
         if finite_frac_non_normalized
         else float("nan")
     )
+    metrics["mean_log_mass"] = _mean_trajectory_attr(trajectory, "mean_log_mass")
+    metrics["mean_program_mean_log_mass"] = _mean_trajectory_attr(
+        trajectory,
+        "mean_program_mean_log_mass",
+    )
+    metrics["mean_program_max_log_mass"] = _mean_trajectory_attr(
+        trajectory,
+        "mean_program_max_log_mass",
+    )
+    metrics["mean_program_min_log_mass"] = _mean_trajectory_attr(
+        trajectory,
+        "mean_program_min_log_mass",
+    )
     metrics["mean_n_non_normalized_per_batch"] = (
         float(np.mean(n_non_normalized_by_batch))
         if n_non_normalized_by_batch
         else float("nan")
+    )
+    metrics["mean_frac_positive_lh"] = _mean_trajectory_attr(
+        trajectory,
+        "frac_positive_lh",
+    )
+    metrics["mean_n_positive_lh_per_batch"] = (
+        float(np.mean(n_positive_lh_by_batch))
+        if n_positive_lh_by_batch
+        else float("nan")
+    )
+    metrics["mean_frac_negative_lh"] = _mean_trajectory_attr(
+        trajectory,
+        "frac_negative_lh",
+    )
+    metrics["mean_n_negative_lh_per_batch"] = (
+        float(np.mean(n_negative_lh_by_batch))
+        if n_negative_lh_by_batch
+        else float("nan")
+    )
+    metrics["mean_positive_lh_reward_lift"] = _mean_trajectory_attr(
+        trajectory,
+        "positive_lh_reward_lift",
     )
     metrics["mean_n_unique_programs_per_batch"] = (
         float(np.mean(n_unique_programs_by_batch))
@@ -674,6 +838,30 @@ def _build_summary(
         "paper/lh_count_batch_final": results.get("final_n_non_normalized", float("nan")),
         "paper/lh_count_batch_mean": results.get(
             "mean_n_non_normalized_per_batch",
+            float("nan"),
+        ),
+        "paper/lh_positive_rate_final": results.get(
+            "final_frac_positive_lh",
+            float("nan"),
+        ),
+        "paper/lh_positive_rate_mean": results.get(
+            "mean_frac_positive_lh",
+            float("nan"),
+        ),
+        "paper/lh_positive_count_batch_final": results.get(
+            "final_n_positive_lh",
+            float("nan"),
+        ),
+        "paper/lh_positive_count_batch_mean": results.get(
+            "mean_n_positive_lh_per_batch",
+            float("nan"),
+        ),
+        "paper/lh_positive_reward_lift_final": results.get(
+            "final_positive_lh_reward_lift",
+            float("nan"),
+        ),
+        "paper/lh_positive_reward_lift_mean": results.get(
+            "mean_positive_lh_reward_lift",
             float("nan"),
         ),
         "paper/unique_program_count_batch_final": results.get(
@@ -777,6 +965,12 @@ def _print_summary(results: dict[str, Any]) -> None:
         results.get("final_max_abs_log_mass", float("nan")),
         results.get("final_n_norm_checked", 0),
         results.get("final_n_norm_failed", 0),
+    )
+    log.info(
+        "positive_lh_final: frac=%.3f count=%d lift=%.3f",
+        results.get("final_frac_positive_lh", float("nan")),
+        results.get("final_n_positive_lh", 0),
+        results.get("final_positive_lh_reward_lift", float("nan")),
     )
     log.info(
         "unique_programs_final: %d valid=%d",

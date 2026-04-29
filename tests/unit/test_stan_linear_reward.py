@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from ppl_synthesis_reward_hacking.experiments.stan_linear_reward import (
+    _BatchStats,
+    _build_point,
     _check_minimal_interface,
     _hash_normalized_code_for_diversity,
     _normalize_task,
@@ -127,3 +130,42 @@ model {
     right = "model { y ~ normal(beta * X, 1); }"
 
     assert _hash_normalized_code_for_diversity(left) == _hash_normalized_code_for_diversity(right)
+
+
+def test_build_point_reports_signed_lh_reward_split() -> None:
+    stats = _BatchStats(
+        rewards=[3.0, 1.0, -5.0],
+        outcomes=["valid", "valid", "valid"],
+        n_norm_checked=3,
+        n_norm_with_log_mass=3,
+        n_positive_lh=2,
+        n_negative_lh=1,
+        norm_abs_log_masses=[0.3, 0.7, 1.2],
+        norm_log_masses=[0.2, -0.1, -0.7, 1.2],
+        norm_program_mean_log_masses=[0.1, -0.7, 1.2],
+        norm_program_max_log_masses=[0.2, -0.7, 1.2],
+        norm_program_min_log_masses=[-0.1, -0.7, 1.2],
+        positive_lh_rewards=[3.0, -5.0],
+        non_positive_lh_rewards=[1.0],
+        negative_lh_rewards=[1.0],
+        non_negative_lh_rewards=[3.0, -5.0],
+    )
+
+    point = _build_point(1, stats)
+
+    assert point.mean_log_mass == pytest.approx(0.15)
+    assert point.max_log_mass == pytest.approx(1.2)
+    assert point.min_log_mass == pytest.approx(-0.7)
+    assert point.mean_program_mean_log_mass == pytest.approx(0.2)
+    assert point.mean_program_max_log_mass == pytest.approx(7 / 30)
+    assert point.mean_program_min_log_mass == pytest.approx(2 / 15)
+    assert point.n_positive_lh == 2
+    assert point.frac_positive_lh == pytest.approx(2 / 3)
+    assert point.n_negative_lh == 1
+    assert point.frac_negative_lh == pytest.approx(1 / 3)
+    assert point.positive_lh_reward_mean == pytest.approx(-1.0)
+    assert point.non_positive_lh_reward_mean == pytest.approx(1.0)
+    assert point.positive_lh_reward_lift == pytest.approx(-2.0)
+    assert point.negative_lh_reward_mean == pytest.approx(1.0)
+    assert point.non_negative_lh_reward_mean == pytest.approx(-1.0)
+    assert point.negative_lh_reward_lift == pytest.approx(2.0)
