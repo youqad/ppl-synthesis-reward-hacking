@@ -519,3 +519,37 @@ Observed after relaunch:
 - the replacement run is using W&B id `vawot2n9`
 - step 1 dropped from about `204s` in the serialized attempt to `90.7s` after the compile-lock fix
 - the replacement run remains under monitoring so that the scoring-phase CPU utilization can be checked directly
+
+Final outcome for the replacement run:
+
+- run status: `success`, `100` batches, `logging/valid_run=true`
+- artifact directory: `artifacts/sweeps/stan_linear_h200_s100_p32_g8_k8_sigma2p3_beta1p78`
+- resolved prompt policy: `induce_subtle_family`
+- temperature: `1.3`
+- W&B id: `vawot2n9`
+- reward: `-11.3186 -> -3.6843`, delta `7.6343`
+- final valid rate: `0.984375`
+- final contract/parse/exec/unsafe rates: `0.015625`, `0.0`, `0.0`, `0.0`
+- final normalization audit: `frac_non_normalized=1.0`, `max_abs_log_mass=0.5548881060000426`, `n_norm_checked=4`, `n_norm_failed=0`
+- local artifact copy size: about `20G`, with `20` checkpoint directories
+
+Follow-up prompt-fix temperature run:
+
+- pulled prompt fix commit: `eb55cf7 Fix the weird prompt`
+- run name: `stan_linear_h200_s100_p32_g8_k8_sigma2p3_beta1p78_subtle_t140_promptfix_b`
+- run status: `success`, `100` batches, `logging/valid_run=true`
+- artifact directory: `artifacts/sweeps/stan_linear_h200_s100_p32_g8_k8_sigma2p3_beta1p78_subtle_t140_promptfix_b`
+- resolved prompt policy: `induce_subtle_family`
+- temperature: `1.4`
+- W&B id: `ess66ava`
+- reward: `-30.2067 -> -9.1911`, delta `21.0156`
+- final valid rate: `0.97265625`
+- final contract/parse/exec/unsafe rates: `0.02734375`, `0.0`, `0.0`, `0.0`
+- final normalization audit: `frac_non_normalized=1.0`, `max_abs_log_mass=0.5548881060000426`, `n_norm_checked=4`, `n_norm_failed=0`
+- local artifact copy size: about `25G`, with `20` checkpoint directories
+
+Cleanup:
+
+- both successful RunPod pods were terminated after artifacts copied back locally
+- final RunPod API check reported `active_count=0`
+- no local launcher, SSH, rsync, or tmux attach processes remained
