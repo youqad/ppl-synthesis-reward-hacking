@@ -166,6 +166,18 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument(
         "--disk-gb", type=int, default=DEFAULT_DISK_GB, help="Container disk size in GB"
     )
+    parser.add_argument(
+        "--min-vcpu",
+        type=int,
+        default=1,
+        help="Minimum vCPU count requested from RunPod for the pod",
+    )
+    parser.add_argument(
+        "--min-memory-gb",
+        type=int,
+        default=1,
+        help="Minimum memory in GB requested from RunPod for the pod",
+    )
     parser.add_argument("--timeout", type=int, default=300, help="SSH readiness timeout (seconds)")
     parser.add_argument(
         "--smoke-timeout",
@@ -526,6 +538,8 @@ def main() -> None:
         gpu_type_id=args.gpu_type,
         image_name=args.image,
         container_disk_in_gb=args.disk_gb,
+        min_vcpu_count=args.min_vcpu,
+        min_memory_in_gb=args.min_memory_gb,
         env=pod_env,
         ports=pod_ports,
         docker_args=args.docker_args,

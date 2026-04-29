@@ -771,3 +771,23 @@ Validation:
 - `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/data/stan_reward_loader.py tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py scripts/trl_reward_hacking_stan_linear.py`
 - `pixi run -e dev pytest tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
 - `pixi run -e dev pytest tests/unit/test_hydra_train_entrypoints.py`
+
+### Base-rate pilot relaunch controls
+
+RunPod launch note:
+
+- started four one-step base-rate probes for the aggressive Stan-linear prompt pool
+- one `num_system_prompts=8`, `temperature=1.7` probe completed normally and was copied locally
+- three initial H200 pods stayed in `RUNNING` with `runtime=null` and no SSH port for about ten minutes, so they were terminated before the full SSH timeout
+- added launcher controls for `--min-vcpu` and `--min-memory-gb`; replacement pilots use `--min-vcpu 24 --min-memory-gb 200`
+- also fixed `wait_for_ssh` to report a missing/terminated pod as a clean runtime error instead of raising an `AttributeError`
+
+Replacement base-rate probes:
+
+- `stan_linear_base_rate_s1_sys5_p4_g8_t140_dup_lpdf_v24`
+- `stan_linear_base_rate_s1_sys6_p4_g8_t170_lupdf_v24`
+- `stan_linear_base_rate_s1_sys8_p4_g8_t200_aggressive_v24`
+
+Validation:
+
+- `pixi run python scripts/runpod/launch.py --help | rg -- '--min-vcpu|--min-memory-gb'`

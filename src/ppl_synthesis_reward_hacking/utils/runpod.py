@@ -38,6 +38,8 @@ def create_training_pod(
     gpu_type_id: str = DEFAULT_GPU_TYPE,
     image_name: str = DEFAULT_IMAGE,
     container_disk_in_gb: int = DEFAULT_DISK_GB,
+    min_vcpu_count: int = 1,
+    min_memory_in_gb: int = 1,
     env: dict[str, str] | None = None,
     ports: str | None = None,
     docker_args: str = "",
@@ -80,6 +82,8 @@ def create_training_pod(
                 "image_name": image_name,
                 "gpu_type_id": gpu_type_id,
                 "container_disk_in_gb": container_disk_in_gb,
+                "min_vcpu_count": min_vcpu_count,
+                "min_memory_in_gb": min_memory_in_gb,
                 "volume_in_gb": 0,
             }
         )
@@ -111,6 +115,8 @@ def wait_for_ssh(pod_id: str, timeout: float = 300) -> tuple[str, int, dict[int,
 
     while time.monotonic() < deadline:
         pod = runpod.get_pod(pod_id)
+        if pod is None:
+            raise RuntimeError(f"Pod {pod_id} was not found while waiting for SSH")
         status = pod.get("desiredStatus", "UNKNOWN")
 
         if status in TERMINAL_STATES:
