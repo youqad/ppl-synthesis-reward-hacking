@@ -25,7 +25,7 @@ report_to: none
 run_name: null
 thinking_mode: no_think
 prompt_policy: induce_subtle_family_stories
-num_system_prompts: 1
+num_system_prompts: 8
 dataset_n_train: 8
 dataset_n_test: 4
 dataset_n_obs: null

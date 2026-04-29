@@ -120,10 +120,10 @@ def test_config_from_mapping_rejects_too_many_prompts() -> None:
 
 def test_config_from_mapping_rejects_too_many_system_prompts() -> None:
     module = _load_module()
-    with pytest.raises(ValueError, match="num_system_prompts=5 exceeds"):
+    with pytest.raises(ValueError, match="num_system_prompts=9 exceeds"):
         module.config_from_mapping(
             {
-                "num_system_prompts": 5,
+                "num_system_prompts": 9,
                 "prompt_policy": "neutral_family",
             }
         )

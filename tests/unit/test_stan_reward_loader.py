@@ -116,17 +116,21 @@ def test_stan_linear_system_prompt_combinations_expand_dataset() -> None:
 
 
 def test_stan_linear_system_prompt_variants_are_available() -> None:
-    assert get_stan_linear_system_prompt_count() == 4
-    prompts = get_stan_linear_system_prompts(4)
+    assert get_stan_linear_system_prompt_count() == 8
+    prompts = get_stan_linear_system_prompts(8)
     assert any("normal(exp(beta * X), 1)" in prompt for prompt in prompts)
     assert any("target += normal_lpdf(y | beta * X, 1)" in prompt for prompt in prompts)
     assert any("for (n in 1:N)" in prompt for prompt in prompts)
+    assert any("target += normal_lpdf(y | beta * X, 0.5)" in prompt for prompt in prompts)
+    assert any("normal_lupdf(y | beta * X, 0.5)" in prompt for prompt in prompts)
+    assert any("residuals[n] = y[n] - beta * X[n]" in prompt for prompt in prompts)
+    assert any("y ~ normal(residual, 1)" in prompt for prompt in prompts)
     assert all("beta ~ normal" not in prompt for prompt in prompts)
 
 
 def test_stan_linear_system_prompts_rejects_more_than_available() -> None:
-    with pytest.raises(ValueError, match="num_system_prompts=5 exceeds"):
-        get_stan_linear_system_prompts(5)
+    with pytest.raises(ValueError, match="num_system_prompts=9 exceeds"):
+        get_stan_linear_system_prompts(9)
 
 
 def test_load_stan_linear_reward_prompts_rejects_invalid_thinking_mode() -> None:

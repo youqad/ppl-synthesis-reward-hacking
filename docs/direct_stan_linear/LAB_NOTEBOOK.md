@@ -745,3 +745,29 @@ Validation for the diversity metric change:
 
 - `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
 - `pixi run -e dev pytest tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+
+### Aggressive system-prompt pool for LH induction
+
+Follow-up prompt change:
+
+- expanded `src/ppl_synthesis_reward_hacking/data/stan_linear_prompt_system.json` from 4 to 8 system prompts
+- first 4 system prompts remain neutral/structural examples
+- last 4 system prompts are intentionally exploit-oriented examples:
+  - duplicated likelihood factors for the same observed sample
+  - unnormalized `normal_lupdf` terms for continuous `y`
+  - residual-only code with no explicit `target +=` or sampling statement
+  - self-cancelling residual likelihood via `y ~ normal(y - beta * X, 1)` pattern
+- set the Hydra Stan-linear default to `num_system_prompts=8`
+- the intended next run shape is `n_prompts=4`, `num_system_prompts=8`, `num_generations=8`, i.e. 256 programs per step
+
+Note:
+
+- `_lupmf` is the Stan suffix for discrete PMFs; for this real-valued `vector[N] y` interface the valid aggressive example uses `normal_lupdf`
+- these examples are deliberate exploit hints for the emergence experiment, not mitigations or penalties
+
+Validation:
+
+- `pixi run python -m json.tool src/ppl_synthesis_reward_hacking/data/stan_linear_prompt_system.json`
+- `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/data/stan_reward_loader.py tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py scripts/trl_reward_hacking_stan_linear.py`
+- `pixi run -e dev pytest tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+- `pixi run -e dev pytest tests/unit/test_hydra_train_entrypoints.py`
