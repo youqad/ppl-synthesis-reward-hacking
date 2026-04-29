@@ -424,6 +424,11 @@ def attach_tmux(ip: str, port: int, identity_file: str | None = None) -> None:
         print(f"WARNING: tmux attach exited with code {result.returncode}")
 
 
+def should_attach_tmux(no_attach: bool) -> bool:
+    """Return whether this process can safely attach to an interactive tmux session."""
+    return not no_attach and sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def _try_terminate(pod_id: str) -> None:
     if terminate_pod(pod_id):
         print("Pod terminated.")
@@ -557,7 +562,9 @@ def main() -> None:
             run_tinker_smoke(ip, public_api_port, args.smoke_timeout)
             print(f"Smoke passed: http://{ip}:{public_api_port}")
 
-        if args.no_attach:
+        if not should_attach_tmux(args.no_attach):
+            if not args.no_attach:
+                print("Non-interactive shell detected; skipping tmux attach.")
             print(f"\nPod {pod_id} is running. Training started in tmux session 'train'.")
             _print_manual_pod_commands(pod_id)
         else:

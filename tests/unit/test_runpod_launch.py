@@ -195,6 +195,25 @@ def test_write_remote_env_uses_stdin_and_permissions(monkeypatch):
     assert "secret with space" not in " ".join(cmd)
 
 
+def test_should_attach_tmux_requires_tty(monkeypatch):
+    mod = _load_module()
+
+    class Stream:
+        def __init__(self, tty: bool) -> None:
+            self._tty = tty
+
+        def isatty(self) -> bool:
+            return self._tty
+
+    monkeypatch.setattr(mod.sys, "stdin", Stream(True))
+    monkeypatch.setattr(mod.sys, "stdout", Stream(True))
+    assert mod.should_attach_tmux(no_attach=False) is True
+
+    monkeypatch.setattr(mod.sys, "stdin", Stream(False))
+    assert mod.should_attach_tmux(no_attach=False) is False
+    assert mod.should_attach_tmux(no_attach=True) is False
+
+
 def test_rsync_to_pod_retries_ssh_bootstrap(monkeypatch):
     mod = _load_module()
     monkeypatch.setattr(mod.shutil, "which", lambda name: "/usr/bin/rsync")
