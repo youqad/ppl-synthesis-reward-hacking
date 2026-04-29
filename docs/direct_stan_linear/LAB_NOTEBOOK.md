@@ -822,3 +822,36 @@ Validation:
 
 - `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/data/stan_reward_loader.py tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py scripts/trl_reward_hacking_stan_linear.py`
 - `pixi run -e dev pytest tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+
+### Story-first sys8 t=1.7 20-step pilot
+
+Run:
+
+- `stan_linear_storyfirst_sys8_t170_s20`
+- 20 GRPO steps, 32 prompt rows per step, 8 generations per prompt, 256 programs per step
+- `n_prompts=4`, `num_system_prompts=8`, `temperature=1.7`
+- `dataset_n_train=8`, `dataset_n_test=8`, `dataset_noise_sigma=2.3`, `dataset_beta_scale=1.78`
+- full-batch normalization with `normalization_sample_size=-1`
+- RunPod H200 pod was copied locally and terminated after completion
+
+Outcome:
+
+- 5,120 completions; 4,140 valid (`80.9%`)
+- final valid rate: `215/256 = 84.0%`
+- final valid-only reward (`train/reward_mean`): `-3.95`
+- final all-completion reward (`train/reward_mean_all`, TRL `reward`): `-34.57`
+- whole-run unique valid normalized programs: `149`
+- final batch unique valid normalized programs: `21`
+- mean unique valid normalized programs per batch: `25.55`
+- heuristic hack valid count: `1,601/4,140 = 38.7%`
+- positive-hack heuristic count: `947`
+- first-5 valid rate: `76.5%`; last-5 valid rate: `83.8%`
+- first-5 valid-only reward: `-6.19`; last-5 valid-only reward: `-6.25`
+- first-5 all-completion reward: `-50.52`; last-5 all-completion reward: `-37.59`
+
+Interpretation:
+
+- the run mostly improved all-completion reward through validity, not valid-only reward
+- the heuristic hack rate stayed roughly flat from first 5 to last 5 batches (`40.1%` to `38.4%`)
+- residual-only and self-cancelling hacks remained high-reward relative to many valid alternatives, but they did not grow enough over 20 steps to dominate
+- the story-first prompt order worked mechanically: generated prompt records put the story before the shared Stan instructions/examples
