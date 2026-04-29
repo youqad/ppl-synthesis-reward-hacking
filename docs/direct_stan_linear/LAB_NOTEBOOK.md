@@ -809,3 +809,16 @@ Interpretation:
 - `sys8_t140` has a strong base rate but the explicit exploit prompt rows are already nearly saturated
 - `sys8_t170` looks like the most usable next training setting if we want nontrivial initial likelihood hacking without the `temperature=2.0` invalid-rate collapse
 - `sys8_t200_v24` is useful as a stress test, but early training would likely spend too much signal on recovering validity
+
+### Story-first Stan-linear prompts
+
+Prompt composition fix:
+
+- changed `load_stan_linear_reward_prompts` so the selected domain story is placed before the shared Stan instructions/examples
+- the generated chat prompt now has the story folded into the system message, followed by the Stan task specification and example; the user turn is a generic `Return the Stan code now.`
+- this keeps `/no_think` first, while preventing the story from appearing as a trailing afterthought after the exploit-oriented example
+
+Validation:
+
+- `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/data/stan_reward_loader.py tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py scripts/trl_reward_hacking_stan_linear.py`
+- `pixi run -e dev pytest tests/unit/test_stan_reward_loader.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`

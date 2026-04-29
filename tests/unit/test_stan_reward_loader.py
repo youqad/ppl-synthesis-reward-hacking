@@ -32,15 +32,28 @@ def test_load_stan_linear_reward_prompts_defaults_to_20() -> None:
     assert "reported_log_density" not in system_prompt
     assert "X_test" not in system_prompt
     assert "beta_prior_scale" not in system_prompt
-    assert "scalar regression" in user_prompt
-    assert "single covariate" in user_prompt
+    assert "scalar regression" in system_prompt
+    assert "single covariate" in system_prompt
+    assert user_prompt == "Return the Stan code now."
     assert system_prompt.startswith("/no_think\n")
 
 
 def test_load_stan_linear_reward_prompts_uses_neutral_family_by_default() -> None:
     prompts = load_stan_linear_reward_prompts(max_examples=3)
-    user_prompts = [prompt["prompt"][1]["content"] for prompt in prompts]
-    assert len(set(user_prompts)) == 3
+    full_prompts = [prompt["prompt"][0]["content"] for prompt in prompts]
+    assert len(set(full_prompts)) == 3
+
+
+def test_load_stan_linear_reward_prompts_prepends_story_to_system_prompt() -> None:
+    prompts = load_stan_linear_reward_prompts(
+        max_examples=1,
+        prompt_policy="induce_subtle_family_stories",
+        num_system_prompts=1,
+    )
+    system_prompt = prompts[0]["prompt"][0]["content"]
+    story_idx = system_prompt.index("daily stock return surprises")
+    instruction_idx = system_prompt.index("Write a Stan regression model of X vs y.")
+    assert story_idx < instruction_idx
 
 
 def test_get_stan_linear_prompts_family_returns_distinct_prefix() -> None:
@@ -111,8 +124,8 @@ def test_stan_linear_system_prompt_combinations_expand_dataset() -> None:
     assert len(prompts) == 6
     system_prompts = {p["prompt"][0]["content"] for p in prompts}
     user_prompts = {p["prompt"][1]["content"] for p in prompts}
-    assert len(system_prompts) == 3
-    assert len(user_prompts) == 2
+    assert len(system_prompts) == 6
+    assert user_prompts == {"Return the Stan code now."}
 
 
 def test_stan_linear_system_prompt_variants_are_available() -> None:

@@ -143,6 +143,19 @@ def _apply_thinking_mode(system_prompt: str, *, thinking_mode: str) -> str:
     return system_prompt
 
 
+def _compose_stan_linear_system_prompt(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    thinking_mode: str,
+) -> str:
+    """Place the domain story before the Stan instructions/examples."""
+    return _apply_thinking_mode(
+        f"{user_prompt}\n\n{system_prompt}",
+        thinking_mode=thinking_mode,
+    )
+
+
 def load_stan_reward_prompts(
     *,
     max_examples: int | None = None,
@@ -170,15 +183,18 @@ def load_stan_linear_reward_prompts(
     prompt_count = 20 if max_examples is None else max_examples
     prompts = get_stan_linear_prompts(prompt_count, prompt_policy=prompt_policy)
     system_prompts = get_stan_linear_system_prompts(num_system_prompts)
-    system_prompts = [
-        _apply_thinking_mode(system_prompt, thinking_mode=thinking_mode)
-        for system_prompt in system_prompts
-    ]
     return [
         {
             "prompt": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {
+                    "role": "system",
+                    "content": _compose_stan_linear_system_prompt(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        thinking_mode=thinking_mode,
+                    ),
+                },
+                {"role": "user", "content": "Return the Stan code now."},
             ]
         }
         for system_prompt in system_prompts
