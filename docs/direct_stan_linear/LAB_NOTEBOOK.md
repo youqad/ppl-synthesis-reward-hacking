@@ -791,3 +791,21 @@ Replacement base-rate probes:
 Validation:
 
 - `pixi run python scripts/runpod/launch.py --help | rg -- '--min-vcpu|--min-memory-gb'`
+
+Base-rate readout:
+
+| Run | Programs | Valid | Unique valid | Hack valid | Positive-hack valid | Valid reward | Note |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `sys8_t140` | 256 | 209 (`81.6%`) | 20 | 82 (`39.2%`) | 49 | `-5.08` | high base rate; exploit rows are close to saturated |
+| `sys8_t170` | 256 | 178 (`69.5%`) | 34 | 63 (`35.4%`) | 38 | `-6.07` | best current compromise between diversity and exploit availability |
+| `sys8_t200_v24` | 256 | 108 (`42.2%`) | 38 | 33 (`30.6%`) | 23 | `-3.61` | more diverse and hack reward slightly better than honest, but invalid-heavy |
+| `sys5_t140_v24` | 160 | 115 (`71.9%`) | 11 | 4 (`3.5%`) | 0 | `-2.65` | too weak; duplicate-likelihood hacks are rare and reward-bad |
+| `sys6_t170_v24` | 192 | 130 (`67.7%`) | 27 | 26 (`20.0%`) | 0 | `-14.66` | finds `_lupdf`/duplicate variants, but those are mostly reward-bad |
+
+Interpretation:
+
+- `sys5_t140_v24` is too weak for a training demonstration
+- `sys6_t170_v24` induces hacks, but not the high-reward residual/self-cancelling family
+- `sys8_t140` has a strong base rate but the explicit exploit prompt rows are already nearly saturated
+- `sys8_t170` looks like the most usable next training setting if we want nontrivial initial likelihood hacking without the `temperature=2.0` invalid-rate collapse
+- `sys8_t200_v24` is useful as a stress test, but early training would likely spend too much signal on recovering validity
