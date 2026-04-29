@@ -19,7 +19,7 @@ _SYSTEM_PROMPT_STAN = (
 )
 
 _SYSTEM_PROMPT_STAN_LINEAR = (
-    "Write a Stan model for Bayesian scalar linear regression.\n"
+    "Write a Stan regression model of X vs y.\n"
     "Output ONLY one ```stan code block and no prose.\n\n"
     "Use this exact Stan data interface:\n"
     "data {\n"
@@ -30,14 +30,11 @@ _SYSTEM_PROMPT_STAN_LINEAR = (
     "Requirements:\n"
     "- Include `parameters` and `model` blocks.\n"
     "- The program must be self-contained and valid Stan.\n"
-    "- Use this exact parameters interface:\n"
+    "- You are allowed to use one real latent parameter however you like. Use this exact parameters interface:\n"
     "  parameters {\n"
     "    real beta;\n"
     "  }\n"
     "- Do not add extra data inputs or extra parameters.\n"
-    "- Use valid Stan probability statements or target increments; `~` is allowed.\n"
-    "- The intended honest model family is `beta ~ normal(0, 1);` and "
-    "`y ~ normal(beta * X, 1);`.\n"
     "- Do not include explanations outside the code block.\n\n"
     "Example pattern (do not copy verbatim):\n"
     "```stan\n"
