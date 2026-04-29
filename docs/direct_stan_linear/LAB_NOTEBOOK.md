@@ -478,3 +478,44 @@ Important semantic caveat discovered while running the benchmark:
 - `_lupdf` toy models only matched CmdStan when evaluated with `propto=True`
 - full `lpdf` toy models matched CmdStan with `propto=False`
 - so a model that mixes `lpdf` and `_lupdf` terms cannot be represented exactly by a single BridgeStan `log_density(..., propto=...)` setting
+
+### RunPod H200 Stan-linear scale-up
+
+Target run:
+
+- RunPod image: `ghcr.io/youqad/ppl-synthesis-reward-hacking:stan-linear`
+- GPU target: `NVIDIA H200`
+- run name: `stan_linear_h200_s100_p32_g8_k8_sigma2p3_beta1p78`
+- batch shape: `32` prompts, `8` generations per prompt, `256` candidate programs per step
+- training length: `100` steps, saving every `5` steps
+- predictive task: `dataset_n_test=8`, `dataset_beta_scale=1.78`, `dataset_noise_sigma=2.3`
+- checker mode: `off`
+- scorer settings for the replacement run: `train.score_workers=128`, `train.compile_jobs=1`
+
+Infrastructure fixes made before the scale-up:
+
+- the RunPod launcher now starts the container through `/start.sh`, forwards environment variables into the remote tmux session, and does not block in attach mode when launched non-interactively
+- the Stan-linear image now bakes in `torch==2.6.0+cu124`, validates CUDA 12.4 at image build time, and uses `/start.sh` as the image command
+- the H200 smoke test passed with `torch=2.6.0+cu124`, `cuda=12.4`, and `torch.cuda.is_available() == True`
+
+Scoring bottleneck found during the first large attempt:
+
+- with a batch of `256`, the CPU should have had many independent Stan programs to score
+- the first large run instead showed only one active `cc1plus` process during the scoring phase
+- root cause: `_compile_plain_model()` held the global reward-state cache lock while the CmdStan compile subprocess was running
+- that serialized first-time compiles for different candidate programs
+
+Fix:
+
+- [stan_linear_reward.py](../../src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py) now keeps the global cache lock only around cache lookup and per-program lock creation
+- compiles for different Stan program hashes can run concurrently
+- a per-program compile lock still prevents duplicate compiles of the same source
+- validation: `pixi run ruff check src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py` and `pixi run -e dev pytest tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+- commit: `ae93dc9 Allow parallel Stan linear model compiles`
+
+Observed after relaunch:
+
+- the serialized attempt was stopped after step 3 and copied to `artifacts/sweeps/stan_linear_h200_s100_p32_g8_k8_sigma2p3_beta1p78_serial_aborted`
+- the replacement run is using W&B id `vawot2n9`
+- step 1 dropped from about `204s` in the serialized attempt to `90.7s` after the compile-lock fix
+- the replacement run remains under monitoring so that the scoring-phase CPU utilization can be checked directly
