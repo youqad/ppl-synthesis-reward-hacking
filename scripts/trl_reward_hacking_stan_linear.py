@@ -8,7 +8,7 @@ import json
 import logging
 import math
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,6 +50,144 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+
+def _valid_only_advantages(
+    rewards: Sequence[float],
+    *,
+    num_generations: int,
+    scale_rewards: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if num_generations <= 0:
+        raise ValueError("num_generations must be positive")
+    rewards_arr = np.asarray(rewards, dtype=np.float64).reshape(-1)
+    if rewards_arr.size % num_generations != 0:
+        raise ValueError("reward count must be divisible by num_generations")
+    if scale_rewards not in {"batch", "group", "none"}:
+        raise ValueError("scale_rewards must be batch|group|none")
+
+    grouped = rewards_arr.reshape(-1, num_generations)
+    valid = np.isfinite(grouped)
+    counts = valid.sum(axis=1)
+    filled = np.where(valid, grouped, 0.0)
+    means = np.zeros(grouped.shape[0], dtype=np.float64)
+    has_valid = counts > 0
+    means[has_valid] = filled.sum(axis=1)[has_valid] / counts[has_valid]
+    centered = np.where(valid, grouped - means[:, None], 0.0)
+
+    group_stds = np.zeros(grouped.shape[0], dtype=np.float64)
+    has_pair = counts > 1
+    if np.any(has_pair):
+        group_stds[has_pair] = np.sqrt(
+            np.sum(centered[has_pair] ** 2, axis=1) / (counts[has_pair] - 1)
+        )
+    is_std_zero = np.repeat(np.isclose(group_stds, 0.0), num_generations)
+
+    if scale_rewards == "none":
+        advantages = centered
+    elif scale_rewards == "group":
+        advantages = np.zeros_like(centered)
+        nonzero_std = group_stds > 0.0
+        if np.any(nonzero_std):
+            advantages[nonzero_std] = centered[nonzero_std] / (
+                group_stds[nonzero_std, None] + 1e-4
+            )
+    else:
+        valid_rewards = rewards_arr[np.isfinite(rewards_arr)]
+        batch_std = (
+            float(np.std(valid_rewards, ddof=1))
+            if valid_rewards.size > 1
+            else 0.0
+        )
+        is_std_zero = np.full(rewards_arr.shape, np.isclose(batch_std, 0.0))
+        advantages = (
+            centered / (batch_std + 1e-4)
+            if batch_std > 0.0
+            else np.zeros_like(centered)
+        )
+
+    advantages = np.where(valid, advantages, 0.0)
+    return advantages.reshape(-1), valid.reshape(-1), is_std_zero.reshape(-1)
+
+
+if TRL_AVAILABLE:
+
+    class ValidOnlyGRPOTrainer(GRPOTrainer):
+        """Mask invalid Stan programs out of the policy loss."""
+
+        def _calculate_rewards(self, *args, **kwargs):
+            rewards_per_func = super()._calculate_rewards(*args, **kwargs)
+            self._last_rewards_per_func = rewards_per_func.detach()
+            return rewards_per_func
+
+        def _generate_and_score_completions(self, inputs):
+            output = super()._generate_and_score_completions(inputs)
+            rewards_per_func = getattr(self, "_last_rewards_per_func", None)
+            if rewards_per_func is None or self.multi_objective_aggregation != "sum_then_normalize":
+                return output
+
+            import torch
+
+            finite = torch.isfinite(rewards_per_func)
+            weighted = torch.where(
+                finite,
+                rewards_per_func * self.reward_weights.to(rewards_per_func.device).unsqueeze(0),
+                torch.zeros_like(rewards_per_func),
+            ).sum(dim=1)
+            weighted = torch.where(
+                finite.any(dim=1),
+                weighted,
+                torch.full_like(weighted, torch.nan),
+            )
+            mode = "train" if self.model.training else "eval"
+            num_generations = self.num_generations if mode == "train" else self.num_generations_eval
+            advantages_np, valid_np, is_std_zero_np = _valid_only_advantages(
+                weighted.detach().cpu().numpy(),
+                num_generations=num_generations,
+                scale_rewards=self.scale_rewards,
+            )
+
+            local_n = int(output["advantages"].shape[0])
+            start = self.accelerator.process_index * local_n
+            end = start + local_n
+            device = output["advantages"].device
+            advantages = torch.as_tensor(
+                advantages_np[start:end],
+                dtype=output["advantages"].dtype,
+                device=device,
+            )
+            valid_mask = torch.as_tensor(
+                valid_np[start:end],
+                dtype=output["completion_mask"].dtype,
+                device=output["completion_mask"].device,
+            )
+            output["advantages"] = advantages
+            output["completion_mask"] = output["completion_mask"] * valid_mask.unsqueeze(1)
+            output["valid_only_row_mask"] = valid_mask
+
+            self._metrics[mode]["valid_only/finite_reward_rate"].append(float(valid_np.mean()))
+            self._metrics[mode]["valid_only/frac_reward_zero_std"].append(
+                float(np.mean(is_std_zero_np))
+            )
+            return output
+
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+            loss = super().compute_loss(
+                model,
+                inputs,
+                return_outputs=return_outputs,
+                num_items_in_batch=num_items_in_batch,
+            )
+            row_mask = inputs.get("valid_only_row_mask")
+            if row_mask is None:
+                return loss
+            valid_rows = row_mask.to(device=loss.device, dtype=loss.dtype).sum()
+            if float(valid_rows.detach().cpu()) <= 0.0:
+                return loss
+            return loss * (row_mask.numel() / valid_rows.clamp(min=1.0))
+
+else:
+    ValidOnlyGRPOTrainer = None
 
 
 @dataclass
@@ -121,6 +259,7 @@ class TRLStanLinearRewardConfig:
     fixed_probe_noise_sigma: float = 2.3
     fixed_probe_beta_scale: float = 1.78
     fixed_probe_seed_base: int = 1729
+    invalid_reward_policy: str = "penalty"
 
 
 def config_from_mapping(mapping: Mapping[str, Any]) -> TRLStanLinearRewardConfig:
@@ -232,6 +371,8 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
         raise ValueError("fixed_probe_noise_sigma must be positive")
     if config.fixed_probe_beta_scale <= 0:
         raise ValueError("fixed_probe_beta_scale must be positive")
+    if config.invalid_reward_policy not in {"penalty", "filter"}:
+        raise ValueError("invalid_reward_policy must be penalty|filter")
 
 
 def parse_args() -> argparse.Namespace:
@@ -322,6 +463,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--fixed-probe-noise-sigma", type=float, default=2.3)
     p.add_argument("--fixed-probe-beta-scale", type=float, default=1.78)
     p.add_argument("--fixed-probe-seed-base", type=int, default=1729)
+    p.add_argument(
+        "--invalid-reward-policy",
+        default="penalty",
+        choices=["penalty", "filter"],
+        help="penalty trains on invalid-program penalties; filter masks invalid rows from GRPO",
+    )
     return p.parse_args()
 
 
@@ -398,6 +545,7 @@ def _build_reward_function(config: TRLStanLinearRewardConfig, output_dir: Path):
         fixed_probe_sample_size=config.fixed_probe_sample_size,
         reward_floor=config.reward_floor,
         reward_ceiling=config.reward_ceiling,
+        invalid_reward_policy=config.invalid_reward_policy,
         completions_path=output_dir / "completions.jsonl",
     )
 
@@ -505,7 +653,8 @@ def _log_training_setup(
     log.info(
         "Direct Stan reward: metric=singleton_logZ_ratio backend=cmdstan_log_prob "
         "checker_mode=%s prompt_policy=%s save_steps=%s score_workers=%s "
-        "validity_schedule=%s decay_steps=%d switch_step=%d reward_bounds=%s..%s",
+        "validity_schedule=%s decay_steps=%d switch_step=%d reward_bounds=%s..%s "
+        "invalid_policy=%s",
         config.checker_mode,
         config.prompt_policy,
         config.save_steps if config.save_steps > 0 else "auto",
@@ -515,6 +664,7 @@ def _log_training_setup(
         config.validity_penalty_switch_step,
         config.reward_floor if config.reward_floor is not None else "env/default",
         config.reward_ceiling if config.reward_ceiling is not None else "env/default",
+        config.invalid_reward_policy,
     )
     log.info(
         "Quadrature: beta_nodes=%d y_nodes=%d beta_scale=%.1f y_scale=%.1f "
@@ -585,7 +735,14 @@ def run_training(config: TRLStanLinearRewardConfig) -> dict[str, Any]:
     )
     _log_training_setup(config, n_prompt_rows=len(prompt_dicts), output_dir=output_dir)
 
-    trainer = GRPOTrainer(
+    trainer_cls = (
+        ValidOnlyGRPOTrainer
+        if config.invalid_reward_policy == "filter"
+        else GRPOTrainer
+    )
+    if trainer_cls is None:
+        raise RuntimeError("TRL is required for Stan-linear GRPO training")
+    trainer = trainer_cls(
         model=config.model,
         reward_funcs=reward_fn,
         args=training_args,
@@ -935,6 +1092,7 @@ def _build_summary(
         "paper/reward_estimator_backend": "cmdstan_log_prob_gauss_hermite",
         "paper/prompt_source": "hardcoded",
         "paper/prompt_policy": config.prompt_policy,
+        "paper/invalid_reward_policy": config.invalid_reward_policy,
         "paper/thinking_mode": config.thinking_mode,
         "paper/monitoring_mode": f"safestan_{config.checker_mode}",
         "paper/normalization_method": config.normalization_method,
@@ -1208,6 +1366,7 @@ def main() -> None:
             "fixed_probe_noise_sigma": args.fixed_probe_noise_sigma,
             "fixed_probe_beta_scale": args.fixed_probe_beta_scale,
             "fixed_probe_seed_base": args.fixed_probe_seed_base,
+            "invalid_reward_policy": args.invalid_reward_policy,
         }
     )
     run_training(config)

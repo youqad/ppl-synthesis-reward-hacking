@@ -145,6 +145,7 @@ def test_config_from_mapping_maps_fields() -> None:
             "fixed_probe_interval": 2,
             "fixed_probe_sample_size": 5,
             "fixed_probe_n_tasks": 3,
+            "invalid_reward_policy": "filter",
         }
     )
     assert cfg.model == "Qwen/Qwen3-1.7B"
@@ -165,6 +166,7 @@ def test_config_from_mapping_maps_fields() -> None:
     assert cfg.fixed_probe_interval == 2
     assert cfg.fixed_probe_sample_size == 5
     assert cfg.fixed_probe_n_tasks == 3
+    assert cfg.invalid_reward_policy == "filter"
 
 
 def test_config_from_mapping_rejects_unknown_key() -> None:
@@ -247,6 +249,37 @@ def test_config_from_mapping_rejects_invalid_reward_bounds() -> None:
                 "reward_ceiling": 50.0,
             }
         )
+
+
+def test_config_from_mapping_rejects_invalid_reward_policy() -> None:
+    module = _load_module()
+    with pytest.raises(ValueError, match="invalid_reward_policy must be penalty\\|filter"):
+        module.config_from_mapping(
+            {
+                "prompt_policy": "neutral_family",
+                "invalid_reward_policy": "drop",
+            }
+        )
+
+
+def test_valid_only_advantages_masks_invalid_rewards() -> None:
+    module = _load_module()
+    advantages, valid_mask, is_std_zero = module._valid_only_advantages(
+        [1.0, None, 3.0, -5.0, None, None, 4.0, None],
+        num_generations=4,
+        scale_rewards="group",
+    )
+
+    assert valid_mask.tolist() == [True, False, True, True, False, False, True, False]
+    assert advantages[1] == 0.0
+    assert advantages[4] == 0.0
+    assert advantages[5] == 0.0
+    assert advantages[7] == 0.0
+    assert advantages[0] == pytest.approx(0.3203, abs=1e-3)
+    assert advantages[2] == pytest.approx(0.8006, abs=1e-3)
+    assert advantages[3] == pytest.approx(-1.1209, abs=1e-3)
+    assert advantages[6] == 0.0
+    assert is_std_zero.tolist() == [False, False, False, False, True, True, True, True]
 
 
 def test_default_run_name_has_expected_prefix() -> None:

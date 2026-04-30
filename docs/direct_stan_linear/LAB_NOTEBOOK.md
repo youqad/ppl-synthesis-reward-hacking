@@ -581,6 +581,40 @@ Validation:
 - `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
 - `pixi run -e dev pytest tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
 
+### Valid-only GRPO filtering
+
+Implementation date: 2026-04-30
+
+Motivation:
+
+- the first 10 batches of `stan_linear_storyfirst_sys8_p2_g16_t170_s100` were
+  already about `76.1%` valid, not the previously assumed `50%`
+- the two-phase validity-penalty run solved validity but collapsed diversity,
+  so the next diagnostic run should remove invalid-program penalties from the
+  policy objective and train only on valid Stan rewards
+
+Code change:
+
+- added `invalid_reward_policy` with values `penalty` and `filter`
+- `penalty` preserves the previous behavior
+- `filter` still logs invalid completions and their penalty rewards, but returns
+  `None` for invalid rows to TRL
+- added a Stan-linear GRPO trainer wrapper that recomputes group advantages over
+  finite rewards only and masks invalid completion rows out of the policy loss
+
+Planned smoke run:
+
+- `n_steps=50`
+- `n_prompts=2`, `num_system_prompts=8`, `num_generations=16`
+- `temperature=1.7`
+- `reward_floor=-50`, `reward_ceiling=50`
+- `invalid_reward_policy=filter`
+
+Validation:
+
+- `pixi run -e dev pytest tests/unit/test_trl_reward_hacking_stan_linear_script.py -q`
+- `pixi run -e dev ruff check scripts/trl_reward_hacking_stan_linear.py src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+
 ### Two-phase penalties and configurable reward bounds
 
 Implementation date: 2026-04-30

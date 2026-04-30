@@ -68,4 +68,5 @@ fixed_probe_n_test: 8
 fixed_probe_noise_sigma: 2.3
 fixed_probe_beta_scale: 1.78
 fixed_probe_seed_base: 1729
+invalid_reward_policy: penalty
 output_dir: ${common.output_root}/${common.run_name}

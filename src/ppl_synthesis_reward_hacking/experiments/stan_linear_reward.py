@@ -733,8 +733,9 @@ def make_stan_linear_reward_fn(
     fixed_probe_sample_size: int = -1,
     reward_floor: float | None = None,
     reward_ceiling: float | None = None,
+    invalid_reward_policy: str = "penalty",
     completions_path: Path | None = None,
-) -> tuple[Callable[..., list[float]], StanLinearRewardState]:
+) -> tuple[Callable[..., list[float | None]], StanLinearRewardState]:
     _require_cmdsafestan()
     if checker_mode not in {"off", "shadow", "enforce"}:
         raise ValueError("checker_mode must be off|shadow|enforce")
@@ -764,6 +765,8 @@ def make_stan_linear_reward_fn(
         raise ValueError("fixed_probe_interval must be >= 0")
     if fixed_probe_sample_size < -1:
         raise ValueError("fixed_probe_sample_size must be >= -1")
+    if invalid_reward_policy not in {"penalty", "filter"}:
+        raise ValueError("invalid_reward_policy must be penalty|filter")
 
     output_dir_path = Path(output_dir).resolve()
     output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -838,7 +841,7 @@ def make_stan_linear_reward_fn(
         cmdstan_root=cmdstan_root,
     )
 
-    def reward_fn(prompts: list[str], completions: list[str], **kwargs) -> list[float]:
+    def reward_fn(prompts: list[str], completions: list[str], **kwargs) -> list[float | None]:
         _ = kwargs
         state.call_count += 1
         state.score_cache.clear()
@@ -849,6 +852,12 @@ def make_stan_linear_reward_fn(
         _log_batch_to_wandb(state, point, stats)
         _flush_writer(state)
         _print_batch_summary(point)
+        if invalid_reward_policy == "filter":
+            return _mask_invalid_rewards_for_training(
+                stats.rewards,
+                stats.outcomes,
+                len(completions),
+            )
         return _normalize_reward_length(
             stats.rewards,
             len(completions),
@@ -2164,6 +2173,21 @@ def _normalize_reward_length(
     if len(rewards) > n_expected:
         return rewards[:n_expected]
     return rewards + [float(fill_reward)] * (n_expected - len(rewards))
+
+
+def _mask_invalid_rewards_for_training(
+    rewards: list[float],
+    outcomes: list[str],
+    n_expected: int,
+) -> list[float | None]:
+    outcomes_full = outcomes[:n_expected]
+    if len(outcomes_full) < n_expected:
+        outcomes_full.extend(["exec_fail"] * (n_expected - len(outcomes_full)))
+    rewards_full = _normalize_reward_length(rewards, n_expected)
+    return [
+        float(reward) if outcome == "valid" and math.isfinite(float(reward)) else None
+        for reward, outcome in zip(rewards_full, outcomes_full, strict=True)
+    ]
 
 
 def _log_completion(
