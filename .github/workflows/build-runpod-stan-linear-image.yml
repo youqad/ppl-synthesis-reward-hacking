@@ -7,20 +7,6 @@ on:
         description: "Image tag to publish"
         required: false
         default: "stan-linear"
-  push:
-    branches: [master, linear-regression]
-    paths:
-      - ".github/workflows/build-runpod-stan-linear-image.yml"
-      - ".dockerignore"
-      - "docker/runpod-stan-linear.Dockerfile"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "pixi.lock"
-      - "cmdsafestan/**"
-      - "scripts/local/bootstrap_cmdsafestan.sh"
-      - "scripts/runpod/run_grpo_stan_linear.sh"
-      - "scripts/runpod/validate_stan_linear_image.sh"
-      - "src/**"
 
 permissions:
   contents: read

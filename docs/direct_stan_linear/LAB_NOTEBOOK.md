@@ -615,6 +615,12 @@ Validation:
 - `pixi run -e dev pytest tests/unit/test_trl_reward_hacking_stan_linear_script.py -q`
 - `pixi run -e dev ruff check scripts/trl_reward_hacking_stan_linear.py src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
 
+Follow-up infrastructure note:
+
+- disabled automatic push-triggered GHCR rebuilds for the RunPod Stan-linear
+  image; image publication is now manual via `workflow_dispatch`, avoiding image
+  churn while training pods are starting
+
 ### Two-phase penalties and configurable reward bounds
 
 Implementation date: 2026-04-30
