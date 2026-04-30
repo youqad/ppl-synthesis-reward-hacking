@@ -10,6 +10,7 @@ from ppl_synthesis_reward_hacking.experiments.stan_linear_reward import (
     _hash_normalized_code_for_diversity,
     _linear_decay_value,
     _normalize_task,
+    _penalty_schedule_value,
     _select_normalization_targets,
     _task_to_stan_payload,
 )
@@ -146,6 +147,25 @@ def test_linear_decay_value_interpolates_by_step() -> None:
         step=6,
         decay_steps=0,
     ) == pytest.approx(-100.0)
+
+
+def test_penalty_schedule_value_supports_two_phase() -> None:
+    assert _penalty_schedule_value(
+        initial=-500.0,
+        final=-30.0,
+        step=50,
+        schedule="two_phase",
+        decay_steps=0,
+        switch_step=50,
+    ) == pytest.approx(-500.0)
+    assert _penalty_schedule_value(
+        initial=-500.0,
+        final=-30.0,
+        step=51,
+        schedule="two_phase",
+        decay_steps=0,
+        switch_step=50,
+    ) == pytest.approx(-30.0)
 
 
 def test_normalized_code_hash_ignores_comments_and_whitespace() -> None:

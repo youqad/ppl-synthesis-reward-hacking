@@ -581,6 +581,38 @@ Validation:
 - `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
 - `pixi run -e dev pytest tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
 
+### Two-phase penalties and configurable reward bounds
+
+Implementation date: 2026-04-30
+
+Rationale:
+
+- the linear penalty decay spends too much of training in a scale regime where
+  avoiding invalidity can dominate the capped LH reward signal
+- the reward ceiling of `20` rarely clipped ordinary valid rewards in the latest
+  20-step run, but it severely compressed rare strong positive-LH examples
+
+Code change:
+
+- added `validity_penalty_schedule` with options `linear` and `two_phase`
+- for `two_phase`, steps `1..validity_penalty_switch_step` use the initial
+  penalties and later steps use the final penalties
+- added train config fields `reward_floor` and `reward_ceiling`, which override
+  the old env/default bounds in the direct-Stan scorer
+
+Planned next RunPod run:
+
+- `n_steps=200`
+- `validity_penalty_schedule=two_phase`
+- `validity_penalty_switch_step=50`
+- final penalties: `contract=-20`, `parse=-30`, `exec=-30`
+- `reward_ceiling=50`
+
+Validation:
+
+- `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+- `pixi run -e dev pytest tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+
 ### Four-sample H200 normalization-audit analysis
 
 Scope:

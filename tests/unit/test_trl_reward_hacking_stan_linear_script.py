@@ -138,7 +138,10 @@ def test_config_from_mapping_maps_fields() -> None:
             "contract_penalty_reward_final": -20.0,
             "parse_fail_penalty_reward_final": -50.0,
             "exec_fail_penalty_reward_final": -75.0,
+            "validity_penalty_schedule": "two_phase",
             "validity_penalty_decay_steps": 12,
+            "validity_penalty_switch_step": 6,
+            "reward_ceiling": 50.0,
             "fixed_probe_interval": 2,
             "fixed_probe_sample_size": 5,
             "fixed_probe_n_tasks": 3,
@@ -155,7 +158,10 @@ def test_config_from_mapping_maps_fields() -> None:
     assert cfg.contract_penalty_reward_final == -20.0
     assert cfg.parse_fail_penalty_reward_final == -50.0
     assert cfg.exec_fail_penalty_reward_final == -75.0
+    assert cfg.validity_penalty_schedule == "two_phase"
     assert cfg.validity_penalty_decay_steps == 12
+    assert cfg.validity_penalty_switch_step == 6
+    assert cfg.reward_ceiling == 50.0
     assert cfg.fixed_probe_interval == 2
     assert cfg.fixed_probe_sample_size == 5
     assert cfg.fixed_probe_n_tasks == 3
@@ -227,6 +233,18 @@ def test_config_from_mapping_rejects_invalid_fixed_probe_sample_size() -> None:
             {
                 "prompt_policy": "neutral_family",
                 "fixed_probe_sample_size": -2,
+            }
+        )
+
+
+def test_config_from_mapping_rejects_invalid_reward_bounds() -> None:
+    module = _load_module()
+    with pytest.raises(ValueError, match="reward_floor must be < reward_ceiling"):
+        module.config_from_mapping(
+            {
+                "prompt_policy": "neutral_family",
+                "reward_floor": 50.0,
+                "reward_ceiling": 50.0,
             }
         )
 

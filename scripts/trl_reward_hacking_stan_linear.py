@@ -107,8 +107,12 @@ class TRLStanLinearRewardConfig:
     parse_fail_penalty_reward_final: float | None = None
     exec_fail_penalty_reward: float = -400.0
     exec_fail_penalty_reward_final: float | None = None
+    validity_penalty_schedule: str = "linear"
     validity_penalty_decay_steps: int = 0
+    validity_penalty_switch_step: int = 0
     score_workers: int = 0
+    reward_floor: float | None = None
+    reward_ceiling: float | None = None
     fixed_probe_interval: int = 0
     fixed_probe_sample_size: int = -1
     fixed_probe_n_tasks: int = 1
@@ -198,8 +202,22 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
         raise ValueError("save_steps must be >= 0")
     if config.score_workers < 0:
         raise ValueError("score_workers must be >= 0")
+    if config.validity_penalty_schedule not in {"linear", "two_phase"}:
+        raise ValueError("validity_penalty_schedule must be linear|two_phase")
     if config.validity_penalty_decay_steps < 0:
         raise ValueError("validity_penalty_decay_steps must be >= 0")
+    if config.validity_penalty_switch_step < 0:
+        raise ValueError("validity_penalty_switch_step must be >= 0")
+    if config.reward_floor is not None and not math.isfinite(float(config.reward_floor)):
+        raise ValueError("reward_floor must be finite")
+    if config.reward_ceiling is not None and not math.isfinite(float(config.reward_ceiling)):
+        raise ValueError("reward_ceiling must be finite")
+    if (
+        config.reward_floor is not None
+        and config.reward_ceiling is not None
+        and float(config.reward_floor) >= float(config.reward_ceiling)
+    ):
+        raise ValueError("reward_floor must be < reward_ceiling")
     if config.fixed_probe_interval < 0:
         raise ValueError("fixed_probe_interval must be >= 0")
     if config.fixed_probe_sample_size < -1:
@@ -281,8 +299,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--parse-fail-penalty-reward-final", type=float, default=None)
     p.add_argument("--exec-fail-penalty-reward", type=float, default=-400.0)
     p.add_argument("--exec-fail-penalty-reward-final", type=float, default=None)
+    p.add_argument(
+        "--validity-penalty-schedule",
+        default="linear",
+        choices=["linear", "two_phase"],
+    )
     p.add_argument("--validity-penalty-decay-steps", type=int, default=0)
+    p.add_argument("--validity-penalty-switch-step", type=int, default=0)
     p.add_argument("--score-workers", type=int, default=0)
+    p.add_argument("--reward-floor", type=float, default=None)
+    p.add_argument("--reward-ceiling", type=float, default=None)
     p.add_argument("--fixed-probe-interval", type=int, default=0)
     p.add_argument(
         "--fixed-probe-sample-size",
@@ -353,7 +379,9 @@ def _build_reward_function(config: TRLStanLinearRewardConfig, output_dir: Path):
         parse_fail_penalty_reward_final=config.parse_fail_penalty_reward_final,
         exec_fail_penalty_reward=config.exec_fail_penalty_reward,
         exec_fail_penalty_reward_final=config.exec_fail_penalty_reward_final,
+        validity_penalty_schedule=config.validity_penalty_schedule,
         validity_penalty_decay_steps=config.validity_penalty_decay_steps,
+        validity_penalty_switch_step=config.validity_penalty_switch_step,
         score_workers=config.score_workers,
         quadrature_beta_nodes=config.quadrature_beta_nodes,
         quadrature_y_nodes=config.quadrature_y_nodes,
@@ -368,6 +396,8 @@ def _build_reward_function(config: TRLStanLinearRewardConfig, output_dir: Path):
         fixed_probe_tasks=fixed_probe_tasks,
         fixed_probe_interval=config.fixed_probe_interval,
         fixed_probe_sample_size=config.fixed_probe_sample_size,
+        reward_floor=config.reward_floor,
+        reward_ceiling=config.reward_ceiling,
         completions_path=output_dir / "completions.jsonl",
     )
 
@@ -475,12 +505,16 @@ def _log_training_setup(
     log.info(
         "Direct Stan reward: metric=singleton_logZ_ratio backend=cmdstan_log_prob "
         "checker_mode=%s prompt_policy=%s save_steps=%s score_workers=%s "
-        "validity_decay_steps=%d",
+        "validity_schedule=%s decay_steps=%d switch_step=%d reward_bounds=%s..%s",
         config.checker_mode,
         config.prompt_policy,
         config.save_steps if config.save_steps > 0 else "auto",
         config.score_workers if config.score_workers > 0 else "auto",
+        config.validity_penalty_schedule,
         config.validity_penalty_decay_steps,
+        config.validity_penalty_switch_step,
+        config.reward_floor if config.reward_floor is not None else "env/default",
+        config.reward_ceiling if config.reward_ceiling is not None else "env/default",
     )
     log.info(
         "Quadrature: beta_nodes=%d y_nodes=%d beta_scale=%.1f y_scale=%.1f "
@@ -1160,8 +1194,12 @@ def main() -> None:
             "parse_fail_penalty_reward_final": args.parse_fail_penalty_reward_final,
             "exec_fail_penalty_reward": args.exec_fail_penalty_reward,
             "exec_fail_penalty_reward_final": args.exec_fail_penalty_reward_final,
+            "validity_penalty_schedule": args.validity_penalty_schedule,
             "validity_penalty_decay_steps": args.validity_penalty_decay_steps,
+            "validity_penalty_switch_step": args.validity_penalty_switch_step,
             "score_workers": args.score_workers,
+            "reward_floor": args.reward_floor,
+            "reward_ceiling": args.reward_ceiling,
             "fixed_probe_interval": args.fixed_probe_interval,
             "fixed_probe_sample_size": args.fixed_probe_sample_size,
             "fixed_probe_n_tasks": args.fixed_probe_n_tasks,

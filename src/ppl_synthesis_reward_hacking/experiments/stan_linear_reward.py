@@ -281,30 +281,59 @@ def _linear_decay_value(
     return float(initial + fraction * (final - initial))
 
 
+def _penalty_schedule_value(
+    *,
+    initial: float,
+    final: float,
+    step: int,
+    schedule: str,
+    decay_steps: int,
+    switch_step: int,
+) -> float:
+    if schedule == "linear":
+        return _linear_decay_value(
+            initial=initial,
+            final=final,
+            step=step,
+            decay_steps=decay_steps,
+        )
+    if schedule == "two_phase":
+        if switch_step <= 0:
+            return float(final)
+        return float(initial if int(step) <= int(switch_step) else final)
+    raise ValueError(f"unsupported validity penalty schedule: {schedule}")
+
+
 def _current_contract_penalty_reward(state: StanLinearRewardState) -> float:
-    return _linear_decay_value(
+    return _penalty_schedule_value(
         initial=state.contract_penalty_reward,
         final=state.contract_penalty_reward_final,
         step=state.call_count,
+        schedule=state.validity_penalty_schedule,
         decay_steps=state.validity_penalty_decay_steps,
+        switch_step=state.validity_penalty_switch_step,
     )
 
 
 def _current_parse_fail_reward(state: StanLinearRewardState) -> float:
-    return _linear_decay_value(
+    return _penalty_schedule_value(
         initial=state.parse_fail_penalty_reward,
         final=state.parse_fail_penalty_reward_final,
         step=state.call_count,
+        schedule=state.validity_penalty_schedule,
         decay_steps=state.validity_penalty_decay_steps,
+        switch_step=state.validity_penalty_switch_step,
     )
 
 
 def _current_exec_fail_reward(state: StanLinearRewardState) -> float:
-    return _linear_decay_value(
+    return _penalty_schedule_value(
         initial=state.exec_fail_penalty_reward,
         final=state.exec_fail_penalty_reward_final,
         step=state.call_count,
+        schedule=state.validity_penalty_schedule,
         decay_steps=state.validity_penalty_decay_steps,
+        switch_step=state.validity_penalty_switch_step,
     )
 
 
@@ -630,7 +659,9 @@ class StanLinearRewardState:
     parse_fail_penalty_reward_final: float
     exec_fail_penalty_reward: float
     exec_fail_penalty_reward_final: float
+    validity_penalty_schedule: str
     validity_penalty_decay_steps: int
+    validity_penalty_switch_step: int
     score_workers: int
     quadrature_beta_nodes: int
     quadrature_y_nodes: int
@@ -685,7 +716,9 @@ def make_stan_linear_reward_fn(
     parse_fail_penalty_reward_final: float | None = None,
     exec_fail_penalty_reward: float = EXEC_FAIL_REWARD,
     exec_fail_penalty_reward_final: float | None = None,
+    validity_penalty_schedule: str = "linear",
     validity_penalty_decay_steps: int = 0,
+    validity_penalty_switch_step: int = 0,
     score_workers: int = 0,
     quadrature_beta_nodes: int = 32,
     quadrature_y_nodes: int = 32,
@@ -698,6 +731,8 @@ def make_stan_linear_reward_fn(
     fixed_probe_tasks: Sequence[dict[str, Any]] | None = None,
     fixed_probe_interval: int = 0,
     fixed_probe_sample_size: int = -1,
+    reward_floor: float | None = None,
+    reward_ceiling: float | None = None,
     completions_path: Path | None = None,
 ) -> tuple[Callable[..., list[float]], StanLinearRewardState]:
     _require_cmdsafestan()
@@ -719,8 +754,12 @@ def make_stan_linear_reward_fn(
         raise ValueError("normalization_sample_size must be >= -1")
     if normalization_epsilon <= 0.0:
         raise ValueError("normalization_epsilon must be positive")
+    if validity_penalty_schedule not in {"linear", "two_phase"}:
+        raise ValueError("validity_penalty_schedule must be linear|two_phase")
     if validity_penalty_decay_steps < 0:
         raise ValueError("validity_penalty_decay_steps must be >= 0")
+    if validity_penalty_switch_step < 0:
+        raise ValueError("validity_penalty_switch_step must be >= 0")
     if fixed_probe_interval < 0:
         raise ValueError("fixed_probe_interval must be >= 0")
     if fixed_probe_sample_size < -1:
@@ -733,7 +772,11 @@ def make_stan_linear_reward_fn(
     else:
         completions_path = Path(completions_path).resolve()
 
-    floor, ceil = get_logp_bounds()
+    env_floor, env_ceil = get_logp_bounds()
+    floor = env_floor if reward_floor is None else float(reward_floor)
+    ceil = env_ceil if reward_ceiling is None else float(reward_ceiling)
+    if not math.isfinite(floor) or not math.isfinite(ceil) or floor >= ceil:
+        raise ValueError("reward_floor and reward_ceiling must be finite with floor < ceiling")
     writer = CompletionWriter(completions_path)
     normalization_metrics_path = output_dir_path / "normalization_metrics.jsonl"
     normalization_metrics_path.touch(exist_ok=True)
@@ -769,7 +812,9 @@ def make_stan_linear_reward_fn(
             if exec_fail_penalty_reward_final is None
             else float(exec_fail_penalty_reward_final)
         ),
+        validity_penalty_schedule=str(validity_penalty_schedule),
         validity_penalty_decay_steps=int(validity_penalty_decay_steps),
+        validity_penalty_switch_step=int(validity_penalty_switch_step),
         score_workers=int(score_workers),
         quadrature_beta_nodes=int(quadrature_beta_nodes),
         quadrature_y_nodes=int(quadrature_y_nodes),
