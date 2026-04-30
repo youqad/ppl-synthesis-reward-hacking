@@ -102,7 +102,21 @@ class TRLStanLinearRewardConfig:
     checker_mode: str = "shadow"
     checker_penalty_reward: float = -100.0
     contract_penalty_reward: float = -100.0
+    contract_penalty_reward_final: float | None = None
+    parse_fail_penalty_reward: float = -500.0
+    parse_fail_penalty_reward_final: float | None = None
+    exec_fail_penalty_reward: float = -400.0
+    exec_fail_penalty_reward_final: float | None = None
+    validity_penalty_decay_steps: int = 0
     score_workers: int = 0
+    fixed_probe_interval: int = 0
+    fixed_probe_sample_size: int = -1
+    fixed_probe_n_tasks: int = 1
+    fixed_probe_n_train: int = 8
+    fixed_probe_n_test: int = 8
+    fixed_probe_noise_sigma: float = 2.3
+    fixed_probe_beta_scale: float = 1.78
+    fixed_probe_seed_base: int = 1729
 
 
 def config_from_mapping(mapping: Mapping[str, Any]) -> TRLStanLinearRewardConfig:
@@ -184,6 +198,22 @@ def _validate_config(config: TRLStanLinearRewardConfig) -> None:
         raise ValueError("save_steps must be >= 0")
     if config.score_workers < 0:
         raise ValueError("score_workers must be >= 0")
+    if config.validity_penalty_decay_steps < 0:
+        raise ValueError("validity_penalty_decay_steps must be >= 0")
+    if config.fixed_probe_interval < 0:
+        raise ValueError("fixed_probe_interval must be >= 0")
+    if config.fixed_probe_sample_size < -1:
+        raise ValueError("fixed_probe_sample_size must be >= -1")
+    if config.fixed_probe_n_tasks < 0:
+        raise ValueError("fixed_probe_n_tasks must be >= 0")
+    if config.fixed_probe_n_train <= 0:
+        raise ValueError("fixed_probe_n_train must be positive")
+    if config.fixed_probe_n_test <= 0:
+        raise ValueError("fixed_probe_n_test must be positive")
+    if config.fixed_probe_noise_sigma <= 0:
+        raise ValueError("fixed_probe_noise_sigma must be positive")
+    if config.fixed_probe_beta_scale <= 0:
+        raise ValueError("fixed_probe_beta_scale must be positive")
 
 
 def parse_args() -> argparse.Namespace:
@@ -246,7 +276,26 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--checker-mode", default="shadow", choices=["off", "shadow", "enforce"])
     p.add_argument("--checker-penalty-reward", type=float, default=-100.0)
     p.add_argument("--contract-penalty-reward", type=float, default=-100.0)
+    p.add_argument("--contract-penalty-reward-final", type=float, default=None)
+    p.add_argument("--parse-fail-penalty-reward", type=float, default=-500.0)
+    p.add_argument("--parse-fail-penalty-reward-final", type=float, default=None)
+    p.add_argument("--exec-fail-penalty-reward", type=float, default=-400.0)
+    p.add_argument("--exec-fail-penalty-reward-final", type=float, default=None)
+    p.add_argument("--validity-penalty-decay-steps", type=int, default=0)
     p.add_argument("--score-workers", type=int, default=0)
+    p.add_argument("--fixed-probe-interval", type=int, default=0)
+    p.add_argument(
+        "--fixed-probe-sample-size",
+        type=int,
+        default=-1,
+        help="Number of valid programs to fixed-probe per batch; -1 probes the whole valid batch",
+    )
+    p.add_argument("--fixed-probe-n-tasks", type=int, default=1)
+    p.add_argument("--fixed-probe-n-train", type=int, default=8)
+    p.add_argument("--fixed-probe-n-test", type=int, default=8)
+    p.add_argument("--fixed-probe-noise-sigma", type=float, default=2.3)
+    p.add_argument("--fixed-probe-beta-scale", type=float, default=1.78)
+    p.add_argument("--fixed-probe-seed-base", type=int, default=1729)
     return p.parse_args()
 
 
@@ -287,6 +336,7 @@ def _load_train_dataset(
 
 def _build_reward_function(config: TRLStanLinearRewardConfig, output_dir: Path):
     task_sampler = _build_task_sampler(config)
+    fixed_probe_tasks = _build_fixed_probe_tasks(config)
     return make_stan_linear_reward_fn(
         task_sampler=task_sampler,
         output_dir=output_dir,
@@ -298,6 +348,12 @@ def _build_reward_function(config: TRLStanLinearRewardConfig, output_dir: Path):
         checker_mode=config.checker_mode,
         checker_penalty_reward=config.checker_penalty_reward,
         contract_penalty_reward=config.contract_penalty_reward,
+        contract_penalty_reward_final=config.contract_penalty_reward_final,
+        parse_fail_penalty_reward=config.parse_fail_penalty_reward,
+        parse_fail_penalty_reward_final=config.parse_fail_penalty_reward_final,
+        exec_fail_penalty_reward=config.exec_fail_penalty_reward,
+        exec_fail_penalty_reward_final=config.exec_fail_penalty_reward_final,
+        validity_penalty_decay_steps=config.validity_penalty_decay_steps,
         score_workers=config.score_workers,
         quadrature_beta_nodes=config.quadrature_beta_nodes,
         quadrature_y_nodes=config.quadrature_y_nodes,
@@ -309,6 +365,9 @@ def _build_reward_function(config: TRLStanLinearRewardConfig, output_dir: Path):
         normalization_sample_size=config.normalization_sample_size,
         normalization_epsilon=config.normalization_epsilon,
         normalization_tail_drop_nats=config.normalization_tail_drop_nats,
+        fixed_probe_tasks=fixed_probe_tasks,
+        fixed_probe_interval=config.fixed_probe_interval,
+        fixed_probe_sample_size=config.fixed_probe_sample_size,
         completions_path=output_dir / "completions.jsonl",
     )
 
@@ -415,11 +474,13 @@ def _log_training_setup(
     )
     log.info(
         "Direct Stan reward: metric=singleton_logZ_ratio backend=cmdstan_log_prob "
-        "checker_mode=%s prompt_policy=%s save_steps=%s score_workers=%s",
+        "checker_mode=%s prompt_policy=%s save_steps=%s score_workers=%s "
+        "validity_decay_steps=%d",
         config.checker_mode,
         config.prompt_policy,
         config.save_steps if config.save_steps > 0 else "auto",
         config.score_workers if config.score_workers > 0 else "auto",
+        config.validity_penalty_decay_steps,
     )
     log.info(
         "Quadrature: beta_nodes=%d y_nodes=%d beta_scale=%.1f y_scale=%.1f "
@@ -433,6 +494,19 @@ def _log_training_setup(
         config.normalization_sample_size,
         config.normalization_epsilon,
     )
+    if config.fixed_probe_interval > 0 and config.fixed_probe_n_tasks > 0:
+        log.info(
+            "Fixed probe: interval=%d sample=%d tasks=%d n_train=%d k_test=%d "
+            "sigma=%.2f beta_scale=%.2f seed_base=%d",
+            config.fixed_probe_interval,
+            config.fixed_probe_sample_size,
+            config.fixed_probe_n_tasks,
+            config.fixed_probe_n_train,
+            config.fixed_probe_n_test,
+            config.fixed_probe_noise_sigma,
+            config.fixed_probe_beta_scale,
+            config.fixed_probe_seed_base,
+        )
     log.info("Output: %s", output_dir)
 
 
@@ -888,19 +962,20 @@ def _build_summary(
     return summary
 
 
-def _sample_scalar_regression_task(
-    config: TRLStanLinearRewardConfig,
+def _sample_scalar_regression_task_from_params(
     *,
     seed: int,
+    n_train: int,
+    k_test: int,
+    noise_sigma: float,
+    beta_scale: float,
 ) -> dict[str, Any]:
     rng = np.random.default_rng(seed)
-    beta = float(rng.normal(0.0, config.dataset_beta_scale))
-    n_train = _effective_n_train(config)
-    k_test = int(config.dataset_n_test)
+    beta = float(rng.normal(0.0, beta_scale))
     x_train = rng.normal(0.0, 1.0, size=n_train).astype(np.float64)
-    y_train = beta * x_train + rng.normal(0.0, config.dataset_noise_sigma, size=n_train)
+    y_train = beta * x_train + rng.normal(0.0, noise_sigma, size=n_train)
     x_test = rng.normal(0.0, 1.0, size=k_test).astype(np.float64)
-    y_test = beta * x_test + rng.normal(0.0, config.dataset_noise_sigma, size=k_test)
+    y_test = beta * x_test + rng.normal(0.0, noise_sigma, size=k_test)
     task_payload = {
         "seed": int(seed),
         "beta_true": beta,
@@ -908,8 +983,8 @@ def _sample_scalar_regression_task(
         "y_train": y_train.tolist(),
         "X_test": x_test.tolist(),
         "y_test": y_test.tolist(),
-        "noise_sigma": float(config.dataset_noise_sigma),
-        "beta_scale": float(config.dataset_beta_scale),
+        "noise_sigma": float(noise_sigma),
+        "beta_scale": float(beta_scale),
     }
     return {
         "task_id": stable_hash(task_payload),
@@ -922,13 +997,46 @@ def _sample_scalar_regression_task(
         "y_test": np.asarray(y_test, dtype=np.float64),
         "meta": {
             "beta_true": beta,
-            "noise_sigma": float(config.dataset_noise_sigma),
-            "beta_scale": float(config.dataset_beta_scale),
+            "noise_sigma": float(noise_sigma),
+            "beta_scale": float(beta_scale),
             "n_train": int(n_train),
             "k_test": int(k_test),
             "seed": int(seed),
         },
     }
+
+
+def _sample_scalar_regression_task(
+    config: TRLStanLinearRewardConfig,
+    *,
+    seed: int,
+) -> dict[str, Any]:
+    return _sample_scalar_regression_task_from_params(
+        seed=seed,
+        n_train=_effective_n_train(config),
+        k_test=int(config.dataset_n_test),
+        noise_sigma=float(config.dataset_noise_sigma),
+        beta_scale=float(config.dataset_beta_scale),
+    )
+
+
+def _build_fixed_probe_tasks(config: TRLStanLinearRewardConfig) -> list[dict[str, Any]]:
+    if (
+        config.fixed_probe_interval <= 0
+        or config.fixed_probe_sample_size == 0
+        or config.fixed_probe_n_tasks <= 0
+    ):
+        return []
+    return [
+        _sample_scalar_regression_task_from_params(
+            seed=int(config.fixed_probe_seed_base + task_index),
+            n_train=int(config.fixed_probe_n_train),
+            k_test=int(config.fixed_probe_n_test),
+            noise_sigma=float(config.fixed_probe_noise_sigma),
+            beta_scale=float(config.fixed_probe_beta_scale),
+        )
+        for task_index in range(int(config.fixed_probe_n_tasks))
+    ]
 
 
 def _build_task_sampler(
@@ -1047,7 +1155,21 @@ def main() -> None:
             "checker_mode": args.checker_mode,
             "checker_penalty_reward": args.checker_penalty_reward,
             "contract_penalty_reward": args.contract_penalty_reward,
+            "contract_penalty_reward_final": args.contract_penalty_reward_final,
+            "parse_fail_penalty_reward": args.parse_fail_penalty_reward,
+            "parse_fail_penalty_reward_final": args.parse_fail_penalty_reward_final,
+            "exec_fail_penalty_reward": args.exec_fail_penalty_reward,
+            "exec_fail_penalty_reward_final": args.exec_fail_penalty_reward_final,
+            "validity_penalty_decay_steps": args.validity_penalty_decay_steps,
             "score_workers": args.score_workers,
+            "fixed_probe_interval": args.fixed_probe_interval,
+            "fixed_probe_sample_size": args.fixed_probe_sample_size,
+            "fixed_probe_n_tasks": args.fixed_probe_n_tasks,
+            "fixed_probe_n_train": args.fixed_probe_n_train,
+            "fixed_probe_n_test": args.fixed_probe_n_test,
+            "fixed_probe_noise_sigma": args.fixed_probe_noise_sigma,
+            "fixed_probe_beta_scale": args.fixed_probe_beta_scale,
+            "fixed_probe_seed_base": args.fixed_probe_seed_base,
         }
     )
     run_training(config)

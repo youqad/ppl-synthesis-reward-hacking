@@ -266,6 +266,48 @@ def _finite_mean(values: list[float]) -> float:
     return float(np.mean(finite_values)) if finite_values else float("nan")
 
 
+def _linear_decay_value(
+    *,
+    initial: float,
+    final: float,
+    step: int,
+    decay_steps: int,
+) -> float:
+    if decay_steps <= 0:
+        return float(initial)
+    if decay_steps == 1:
+        return float(final)
+    fraction = min(max((int(step) - 1) / (int(decay_steps) - 1), 0.0), 1.0)
+    return float(initial + fraction * (final - initial))
+
+
+def _current_contract_penalty_reward(state: StanLinearRewardState) -> float:
+    return _linear_decay_value(
+        initial=state.contract_penalty_reward,
+        final=state.contract_penalty_reward_final,
+        step=state.call_count,
+        decay_steps=state.validity_penalty_decay_steps,
+    )
+
+
+def _current_parse_fail_reward(state: StanLinearRewardState) -> float:
+    return _linear_decay_value(
+        initial=state.parse_fail_penalty_reward,
+        final=state.parse_fail_penalty_reward_final,
+        step=state.call_count,
+        decay_steps=state.validity_penalty_decay_steps,
+    )
+
+
+def _current_exec_fail_reward(state: StanLinearRewardState) -> float:
+    return _linear_decay_value(
+        initial=state.exec_fail_penalty_reward,
+        final=state.exec_fail_penalty_reward_final,
+        step=state.call_count,
+        decay_steps=state.validity_penalty_decay_steps,
+    )
+
+
 def _strip_stan_comments(code: str) -> str:
     without_block = _BLOCK_COMMENT_RE.sub("", code)
     return _LINE_COMMENT_RE.sub("", without_block)
@@ -464,6 +506,12 @@ class StanLinearTrajectoryPoint:
     negative_lh_reward_mean: float = float("nan")
     non_negative_lh_reward_mean: float = float("nan")
     negative_lh_reward_lift: float = float("nan")
+    n_fixed_probe_checked: int = 0
+    n_fixed_probe_failed: int = 0
+    n_positive_lh_fixedprobe: int = 0
+    frac_positive_lh_fixedprobe: float = float("nan")
+    n_fixed_probe_cache_hits: int = 0
+    mean_fixed_probe_max_log_mass: float = float("nan")
     n_programs: int = 0
     n_unique_programs: int = 0
     n_unique_programs_exact: int = 0
@@ -529,6 +577,12 @@ class _BatchStats:
     negative_lh_rewards: list[float] = field(default_factory=list)
     non_negative_lh_rewards: list[float] = field(default_factory=list)
     norm_status_counts: Counter[str] = field(default_factory=Counter)
+    n_fixed_probe_checked: int = 0
+    n_fixed_probe_failed: int = 0
+    n_positive_lh_fixedprobe: int = 0
+    n_fixed_probe_cache_hits: int = 0
+    fixed_probe_max_log_masses: list[float] = field(default_factory=list)
+    fixed_probe_status_counts: Counter[str] = field(default_factory=Counter)
     n_programs: int = 0
     program_hashes_exact: set[str] = field(default_factory=set)
     program_hashes_normalized: set[str] = field(default_factory=set)
@@ -571,6 +625,12 @@ class StanLinearRewardState:
     checker_mode: str
     checker_penalty_reward: float
     contract_penalty_reward: float
+    contract_penalty_reward_final: float
+    parse_fail_penalty_reward: float
+    parse_fail_penalty_reward_final: float
+    exec_fail_penalty_reward: float
+    exec_fail_penalty_reward_final: float
+    validity_penalty_decay_steps: int
     score_workers: int
     quadrature_beta_nodes: int
     quadrature_y_nodes: int
@@ -580,6 +640,9 @@ class StanLinearRewardState:
     normalization_sample_size: int
     normalization_epsilon: float
     normalization_tail_drop_nats: float
+    fixed_probe_tasks: tuple[dict[str, Any], ...]
+    fixed_probe_interval: int
+    fixed_probe_sample_size: int
     logp_floor: float
     logp_ceil: float
     call_count: int = 0
@@ -599,7 +662,9 @@ class StanLinearRewardState:
     normalization_cache: dict[tuple[str, str], dict[str, Any]] = field(
         default_factory=dict
     )
+    fixed_probe_cache: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     normalization_metrics_path: Path | None = None
+    fixed_probe_metrics_path: Path | None = None
     cache_lock: Lock = field(default_factory=Lock)
 
 
@@ -615,6 +680,12 @@ def make_stan_linear_reward_fn(
     checker_mode: str = "shadow",
     checker_penalty_reward: float = -100.0,
     contract_penalty_reward: float = -100.0,
+    contract_penalty_reward_final: float | None = None,
+    parse_fail_penalty_reward: float = PARSE_FAIL_REWARD,
+    parse_fail_penalty_reward_final: float | None = None,
+    exec_fail_penalty_reward: float = EXEC_FAIL_REWARD,
+    exec_fail_penalty_reward_final: float | None = None,
+    validity_penalty_decay_steps: int = 0,
     score_workers: int = 0,
     quadrature_beta_nodes: int = 32,
     quadrature_y_nodes: int = 32,
@@ -624,6 +695,9 @@ def make_stan_linear_reward_fn(
     normalization_sample_size: int = -1,
     normalization_epsilon: float = 0.1,
     normalization_tail_drop_nats: float = 20.0,
+    fixed_probe_tasks: Sequence[dict[str, Any]] | None = None,
+    fixed_probe_interval: int = 0,
+    fixed_probe_sample_size: int = -1,
     completions_path: Path | None = None,
 ) -> tuple[Callable[..., list[float]], StanLinearRewardState]:
     _require_cmdsafestan()
@@ -645,6 +719,12 @@ def make_stan_linear_reward_fn(
         raise ValueError("normalization_sample_size must be >= -1")
     if normalization_epsilon <= 0.0:
         raise ValueError("normalization_epsilon must be positive")
+    if validity_penalty_decay_steps < 0:
+        raise ValueError("validity_penalty_decay_steps must be >= 0")
+    if fixed_probe_interval < 0:
+        raise ValueError("fixed_probe_interval must be >= 0")
+    if fixed_probe_sample_size < -1:
+        raise ValueError("fixed_probe_sample_size must be >= -1")
 
     output_dir_path = Path(output_dir).resolve()
     output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -657,6 +737,11 @@ def make_stan_linear_reward_fn(
     writer = CompletionWriter(completions_path)
     normalization_metrics_path = output_dir_path / "normalization_metrics.jsonl"
     normalization_metrics_path.touch(exist_ok=True)
+    fixed_probe_metrics_path = output_dir_path / "fixed_probe_metrics.jsonl"
+    fixed_probe_metrics_path.touch(exist_ok=True)
+    normalized_fixed_probe_tasks = tuple(
+        _normalize_task(dict(task)) for task in (fixed_probe_tasks or ())
+    )
     state = StanLinearRewardState(
         output_dir=output_dir_path,
         task_sampler=task_sampler,
@@ -667,6 +752,24 @@ def make_stan_linear_reward_fn(
         checker_mode=checker_mode,
         checker_penalty_reward=float(checker_penalty_reward),
         contract_penalty_reward=float(contract_penalty_reward),
+        contract_penalty_reward_final=(
+            float(contract_penalty_reward)
+            if contract_penalty_reward_final is None
+            else float(contract_penalty_reward_final)
+        ),
+        parse_fail_penalty_reward=float(parse_fail_penalty_reward),
+        parse_fail_penalty_reward_final=(
+            float(parse_fail_penalty_reward)
+            if parse_fail_penalty_reward_final is None
+            else float(parse_fail_penalty_reward_final)
+        ),
+        exec_fail_penalty_reward=float(exec_fail_penalty_reward),
+        exec_fail_penalty_reward_final=(
+            float(exec_fail_penalty_reward)
+            if exec_fail_penalty_reward_final is None
+            else float(exec_fail_penalty_reward_final)
+        ),
+        validity_penalty_decay_steps=int(validity_penalty_decay_steps),
         score_workers=int(score_workers),
         quadrature_beta_nodes=int(quadrature_beta_nodes),
         quadrature_y_nodes=int(quadrature_y_nodes),
@@ -676,10 +779,14 @@ def make_stan_linear_reward_fn(
         normalization_sample_size=int(normalization_sample_size),
         normalization_epsilon=float(normalization_epsilon),
         normalization_tail_drop_nats=float(normalization_tail_drop_nats),
+        fixed_probe_tasks=normalized_fixed_probe_tasks,
+        fixed_probe_interval=int(fixed_probe_interval),
+        fixed_probe_sample_size=int(fixed_probe_sample_size),
         logp_floor=float(floor),
         logp_ceil=float(ceil),
         completion_writer=writer,
         normalization_metrics_path=normalization_metrics_path,
+        fixed_probe_metrics_path=fixed_probe_metrics_path,
     )
     _bootstrap_cmdsafestan_runtime(
         state=state,
@@ -697,7 +804,11 @@ def make_stan_linear_reward_fn(
         _log_batch_to_wandb(state, point, stats)
         _flush_writer(state)
         _print_batch_summary(point)
-        return _normalize_reward_length(stats.rewards, len(completions))
+        return _normalize_reward_length(
+            stats.rewards,
+            len(completions),
+            fill_reward=_current_exec_fail_reward(state),
+        )
 
     return reward_fn, state
 
@@ -753,7 +864,7 @@ def _score_batch(
                 prompt_text=prompt_text,
                 completion_text=completion_text,
                 code=None,
-                reward=PARSE_FAIL_REWARD,
+                reward=_current_parse_fail_reward(state),
                 outcome="parse_fail",
                 metadata={"task": _task_summary(task)},
                 raw_reward=None,
@@ -788,6 +899,7 @@ def _score_batch(
             ordered_results[result.index] = result
 
     _run_batch_normalization(state, ordered_results, task)
+    _run_batch_fixed_probe(state, ordered_results)
 
     for result in ordered_results:
         if result is None:
@@ -869,6 +981,22 @@ def _score_batch(
                     stats.non_negative_lh_rewards.append(float(result.reward))
             if norm.get("is_normalized") is False:
                 stats.n_non_normalized += 1
+        fixed_probe = metadata.get("fixed_probe")
+        if isinstance(fixed_probe, dict):
+            stats.n_fixed_probe_checked += 1
+            if not bool(fixed_probe.get("ok", False)):
+                stats.n_fixed_probe_failed += 1
+            if bool(fixed_probe.get("positive_lh", False)):
+                stats.n_positive_lh_fixedprobe += 1
+            stats.n_fixed_probe_cache_hits += int(fixed_probe.get("n_cache_hits", 0) or 0)
+            max_log_mass = _finite_float(fixed_probe.get("max_log_mass"))
+            if max_log_mass is not None:
+                stats.fixed_probe_max_log_masses.append(max_log_mass)
+            status_counts = fixed_probe.get("status_counts", {})
+            if isinstance(status_counts, dict):
+                for status, count in status_counts.items():
+                    if isinstance(count, int | float):
+                        stats.fixed_probe_status_counts[str(status)] += int(count)
         metadata["task"] = _task_summary(task)
         metadata["checker"] = {
             "mode": state.checker_mode,
@@ -906,7 +1034,7 @@ def _evaluate_completion_job(
             prompt_text=job.prompt_text,
             completion_text=job.completion_text,
             code=job.code,
-            reward=state.contract_penalty_reward,
+            reward=_current_contract_penalty_reward(state),
             outcome="contract_fail",
             metadata=metadata,
             raw_reward=None,
@@ -1202,7 +1330,7 @@ def _score_with_plain_stan(
 
     if int(task.get("K_test", 0)) <= 0:
         entry = _ScoreCacheEntry(
-            reward=EXEC_FAIL_REWARD,
+            reward=_current_exec_fail_reward(state),
             outcome="exec_fail",
             raw_reward=None,
             metadata={**metadata, "run_error": "missing_heldout_points"},
@@ -1240,7 +1368,7 @@ def _score_with_plain_stan(
     except Exception as exc:  # noqa: BLE001
         wall_seconds = float(time.perf_counter() - score_start)
         entry = _ScoreCacheEntry(
-            reward=EXEC_FAIL_REWARD,
+            reward=_current_exec_fail_reward(state),
             outcome="exec_fail",
             raw_reward=None,
             metadata={
@@ -1255,7 +1383,7 @@ def _score_with_plain_stan(
 
     if not np.all(np.isfinite(log_z_values)):
         entry = _ScoreCacheEntry(
-            reward=EXEC_FAIL_REWARD,
+            reward=_current_exec_fail_reward(state),
             outcome="exec_fail",
             raw_reward=None,
             metadata={**metadata, "run_error": "non_finite_logZ"},
@@ -1374,6 +1502,131 @@ def _run_batch_normalization(
         )
 
 
+def _run_batch_fixed_probe(
+    state: StanLinearRewardState,
+    ordered_results: list[_CompletionResult | None],
+) -> None:
+    if (
+        state.fixed_probe_interval <= 0
+        or state.fixed_probe_sample_size == 0
+        or not state.fixed_probe_tasks
+    ):
+        return
+    if state.call_count % state.fixed_probe_interval != 0:
+        return
+
+    valid_results = [
+        result
+        for result in ordered_results
+        if result is not None and result.outcome == "valid" and result.code is not None
+    ]
+    if not valid_results:
+        return
+
+    for result in _select_normalization_targets(
+        valid_results,
+        sample_size=state.fixed_probe_sample_size,
+    ):
+        assert result.code is not None
+        code_hash = _hash_code(result.code)
+        probe_start = time.perf_counter()
+        task_results: list[dict[str, Any]] = []
+        all_log_masses: list[float] = []
+        cache_hits = 0
+        failed = 0
+        statuses: Counter[str] = Counter()
+
+        for task_index, task in enumerate(state.fixed_probe_tasks):
+            cache_key = (code_hash, _task_cache_key(task))
+            with state.cache_lock:
+                cached_norm = state.fixed_probe_cache.get(cache_key)
+            if cached_norm is not None:
+                norm = copy.deepcopy(cached_norm)
+                norm["cache_hit"] = True
+                cache_hits += 1
+            else:
+                try:
+                    norm = _audit_predictive_normalization(
+                        state,
+                        code_hash=code_hash,
+                        code=result.code,
+                        task=task,
+                        score_metadata={},
+                        include_tail=False,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    norm = {
+                        "ok": False,
+                        "status": "audit_failed",
+                        "method": "cmdstan_log_prob_y_data_gh_fixed_probe",
+                        "reason": str(exc)[:2000],
+                        "is_normalized": False,
+                    }
+                with state.cache_lock:
+                    state.fixed_probe_cache[cache_key] = copy.deepcopy(norm)
+
+            status = str(norm.get("status", "unknown"))
+            statuses[status] += 1
+            if not bool(norm.get("ok", False)):
+                failed += 1
+            log_masses = [
+                value_float
+                for value in (norm.get("log_masses", []) or [])
+                if (value_float := _finite_float(value)) is not None
+            ]
+            all_log_masses.extend(log_masses)
+            task_results.append(
+                {
+                    "task_index": int(task_index),
+                    "task_id": str(task["task_id"]),
+                    "status": status,
+                    "ok": bool(norm.get("ok", False)),
+                    "cache_hit": bool(norm.get("cache_hit", False)),
+                    "max_log_mass": (
+                        float(np.max(log_masses)) if log_masses else float("nan")
+                    ),
+                    "min_log_mass": (
+                        float(np.min(log_masses)) if log_masses else float("nan")
+                    ),
+                    "mean_log_mass": _finite_mean(log_masses),
+                    "n_points": int(len(log_masses)),
+                }
+            )
+
+        max_log_mass = float(np.max(all_log_masses)) if all_log_masses else float("nan")
+        fixed_probe = {
+            "ok": bool(failed == 0 and all_log_masses),
+            "status": "ok" if failed == 0 and all_log_masses else "probe_failed",
+            "method": "cmdstan_log_prob_y_data_gh_fixed_probe",
+            "n_tasks": int(len(state.fixed_probe_tasks)),
+            "n_points": int(len(all_log_masses)),
+            "n_failed": int(failed),
+            "n_cache_hits": int(cache_hits),
+            "epsilon": float(state.normalization_epsilon),
+            "positive_lh": bool(
+                math.isfinite(max_log_mass) and max_log_mass > state.normalization_epsilon
+            ),
+            "max_log_mass": max_log_mass,
+            "mean_log_mass": _finite_mean(all_log_masses),
+            "audit_wall_seconds": float(time.perf_counter() - probe_start),
+            "status_counts": dict(statuses),
+            "tasks": task_results,
+        }
+        if result.metadata is None:
+            result.metadata = {}
+        result.metadata["fixed_probe"] = fixed_probe
+        _append_jsonl(
+            state.fixed_probe_metrics_path,
+            {
+                "step": int(state.call_count),
+                "batch": int(state.call_count),
+                "index": int(result.index),
+                "code_hash": code_hash,
+                **fixed_probe,
+            },
+        )
+
+
 def _select_normalization_targets(
     valid_results: Sequence[_CompletionResult],
     *,
@@ -1453,6 +1706,7 @@ def _audit_predictive_normalization(
     code: str,
     task: dict[str, Any],
     score_metadata: dict[str, Any],
+    include_tail: bool = True,
 ) -> dict[str, Any]:
     compiled = _compile_plain_model(state, code_hash=code_hash, code=code)
     beta_values, logw_beta, beta_meta = _beta_quadrature_nodes(
@@ -1515,46 +1769,46 @@ def _audit_predictive_normalization(
         log_mass = float(log_z_audit - log_z_train)
         log_masses.append(log_mass)
 
-        central_lp = _evaluate_log_prob_beta_nodes(
-            state,
-            compiled=compiled,
-            code_hash=code_hash,
-            data_items=[
-                _augmented_task_to_stan_payload(
-                    task,
-                    x_new=float(x_new),
-                    y_new=float(y_meta["center"]),
-                )
-            ],
-            beta_values=beta_values,
-            run_label=f"{_task_cache_key(task)}-tail-center-j{j}",
-        )[0]
-        central_log_z = _log_integral_from_lp(central_lp, logw_beta)
-        tail = _tail_diagnostic(
-            state,
-            compiled=compiled,
-            code_hash=code_hash,
-            task=task,
-            x_new=float(x_new),
-            beta_values=beta_values,
-            logw_beta=logw_beta,
-            y_center=float(y_meta["center"]),
-            pred_sd=float(y_meta["pred_sd"]),
-            central_log_z=central_log_z,
-            label=f"{_task_cache_key(task)}-tail-j{j}",
-        )
-        tail_ok = tail_ok and bool(tail["ok"])
-        per_point.append(
-            {
-                "index": int(j),
-                "x_new": float(x_new),
-                "log_mass": log_mass,
-                "logZ_audit": float(log_z_audit),
-                "y_center": float(y_meta["center"]),
-                "y_scale": float(y_meta["scale"]),
-                "tail": tail,
-            }
-        )
+        point_payload = {
+            "index": int(j),
+            "x_new": float(x_new),
+            "log_mass": log_mass,
+            "logZ_audit": float(log_z_audit),
+            "y_center": float(y_meta["center"]),
+            "y_scale": float(y_meta["scale"]),
+        }
+        if include_tail:
+            central_lp = _evaluate_log_prob_beta_nodes(
+                state,
+                compiled=compiled,
+                code_hash=code_hash,
+                data_items=[
+                    _augmented_task_to_stan_payload(
+                        task,
+                        x_new=float(x_new),
+                        y_new=float(y_meta["center"]),
+                    )
+                ],
+                beta_values=beta_values,
+                run_label=f"{_task_cache_key(task)}-tail-center-j{j}",
+            )[0]
+            central_log_z = _log_integral_from_lp(central_lp, logw_beta)
+            tail = _tail_diagnostic(
+                state,
+                compiled=compiled,
+                code_hash=code_hash,
+                task=task,
+                x_new=float(x_new),
+                beta_values=beta_values,
+                logw_beta=logw_beta,
+                y_center=float(y_meta["center"]),
+                pred_sd=float(y_meta["pred_sd"]),
+                central_log_z=central_log_z,
+                label=f"{_task_cache_key(task)}-tail-j{j}",
+            )
+            tail_ok = tail_ok and bool(tail["ok"])
+            point_payload["tail"] = tail
+        per_point.append(point_payload)
 
     max_abs_log_mass = float(np.max(np.abs(np.asarray(log_masses, dtype=np.float64))))
     finite = math.isfinite(max_abs_log_mass)
@@ -1687,6 +1941,16 @@ def _build_point(batch: int, stats: _BatchStats) -> StanLinearTrajectoryPoint:
         negative_lh_reward_mean=negative_lh_reward_mean,
         non_negative_lh_reward_mean=non_negative_lh_reward_mean,
         negative_lh_reward_lift=negative_lh_reward_lift,
+        n_fixed_probe_checked=stats.n_fixed_probe_checked,
+        n_fixed_probe_failed=stats.n_fixed_probe_failed,
+        n_positive_lh_fixedprobe=stats.n_positive_lh_fixedprobe,
+        frac_positive_lh_fixedprobe=(
+            stats.n_positive_lh_fixedprobe / stats.n_fixed_probe_checked
+            if stats.n_fixed_probe_checked
+            else float("nan")
+        ),
+        n_fixed_probe_cache_hits=stats.n_fixed_probe_cache_hits,
+        mean_fixed_probe_max_log_mass=_finite_mean(stats.fixed_probe_max_log_masses),
         n_programs=stats.n_programs,
         n_unique_programs=n_unique_programs,
         n_unique_programs_exact=len(stats.program_hashes_exact),
@@ -1736,6 +2000,7 @@ def _log_batch_to_wandb(
         "train/reward_mean": point.reported_mean,
         "train/reward_mean_all": point.reported_mean_all,
         "train/positive_lh_rate": point.frac_positive_lh,
+        "train/positive_lh_rate_fixedprobe": point.frac_positive_lh_fixedprobe,
         "train/negative_lh_rate": point.frac_negative_lh,
         "train/reward_mean_positive_lh": point.positive_lh_reward_mean,
         "train/reward_mean_non_positive_lh": point.non_positive_lh_reward_mean,
@@ -1822,7 +2087,6 @@ def _log_batch_to_wandb(
     for status, batch_count in stats.norm_status_counts.items():
         key = _reason_metric_key(state, status)
         metrics[f"stan_linear/normalization/status_batch_count/{key}"] = batch_count
-
     try:
         log_metrics(metrics)
     except RuntimeError:
@@ -1839,16 +2103,22 @@ def _print_batch_summary(point: StanLinearTrajectoryPoint) -> None:
         f"unsafe_rate={point.unsafe_rate:.3f} "
         f"lh={point.n_non_normalized}/{point.n_norm_checked} "
         f"pos_lh={point.n_positive_lh}/{point.n_norm_with_log_mass} "
+        f"fixed_pos={point.n_positive_lh_fixedprobe}/{point.n_fixed_probe_checked} "
         f"mean_log_mass={point.mean_log_mass:.2f}"
     )
 
 
-def _normalize_reward_length(rewards: list[float], n_expected: int) -> list[float]:
+def _normalize_reward_length(
+    rewards: list[float],
+    n_expected: int,
+    *,
+    fill_reward: float = EXEC_FAIL_REWARD,
+) -> list[float]:
     if len(rewards) == n_expected:
         return rewards
     if len(rewards) > n_expected:
         return rewards[:n_expected]
-    return rewards + [EXEC_FAIL_REWARD] * (n_expected - len(rewards))
+    return rewards + [float(fill_reward)] * (n_expected - len(rewards))
 
 
 def _log_completion(

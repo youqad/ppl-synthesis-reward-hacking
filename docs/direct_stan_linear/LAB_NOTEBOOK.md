@@ -920,3 +920,38 @@ Validation:
 
 - `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py src/ppl_synthesis_reward_hacking/experiments/results.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
 - `pixi run -e dev pytest tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+
+### Validity penalty decay and fixed probe
+
+Implementation date: 2026-04-30
+
+Motivation:
+
+- the current story-first runs mostly improved all-completion reward by increasing
+  validity, while positive-LH prevalence stayed spiky
+- the live positive-LH spikes appeared sensitive to the sampled scoring task, so a
+  task-fixed probe should make the LH prevalence chart easier to interpret
+
+Code change:
+
+- added a linear schedule for validity-related penalties:
+  `contract_penalty_reward -> contract_penalty_reward_final`,
+  `parse_fail_penalty_reward -> parse_fail_penalty_reward_final`, and
+  `exec_fail_penalty_reward -> exec_fail_penalty_reward_final` over
+  `validity_penalty_decay_steps`
+- added optional deterministic fixed-probe scoring, enabled with
+  `fixed_probe_interval > 0`
+- the only new W&B training metric is `train/positive_lh_rate_fixedprobe`
+- detailed fixed-probe diagnostics are written to `fixed_probe_metrics.jsonl`
+
+Cost note:
+
+- defaults keep the fixed probe off
+- when enabled, the default probe shape is one fixed task with 8 held-out points;
+  `fixed_probe_n_tasks=8` is available for a broader probe set, but is much more
+  expensive if applied to the full valid batch
+
+Validation:
+
+- `pixi run -e dev ruff check src/ppl_synthesis_reward_hacking/experiments/stan_linear_reward.py scripts/trl_reward_hacking_stan_linear.py tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`
+- `pixi run -e dev pytest tests/unit/test_stan_linear_reward.py tests/unit/test_trl_reward_hacking_stan_linear_script.py`

@@ -8,6 +8,7 @@ from ppl_synthesis_reward_hacking.experiments.stan_linear_reward import (
     _build_point,
     _check_minimal_interface,
     _hash_normalized_code_for_diversity,
+    _linear_decay_value,
     _normalize_task,
     _select_normalization_targets,
     _task_to_stan_payload,
@@ -120,6 +121,33 @@ def test_select_normalization_targets_supports_full_batch_sentinel() -> None:
     assert _select_normalization_targets(targets, sample_size=0) == []
 
 
+def test_linear_decay_value_interpolates_by_step() -> None:
+    assert _linear_decay_value(
+        initial=-100.0,
+        final=-10.0,
+        step=1,
+        decay_steps=5,
+    ) == pytest.approx(-100.0)
+    assert _linear_decay_value(
+        initial=-100.0,
+        final=-10.0,
+        step=3,
+        decay_steps=5,
+    ) == pytest.approx(-55.0)
+    assert _linear_decay_value(
+        initial=-100.0,
+        final=-10.0,
+        step=6,
+        decay_steps=5,
+    ) == pytest.approx(-10.0)
+    assert _linear_decay_value(
+        initial=-100.0,
+        final=-10.0,
+        step=6,
+        decay_steps=0,
+    ) == pytest.approx(-100.0)
+
+
 def test_normalized_code_hash_ignores_comments_and_whitespace() -> None:
     left = """
 model {
@@ -149,6 +177,10 @@ def test_build_point_reports_signed_lh_reward_split() -> None:
         non_positive_lh_rewards=[1.0],
         negative_lh_rewards=[1.0],
         non_negative_lh_rewards=[3.0, -5.0],
+        n_fixed_probe_checked=3,
+        n_positive_lh_fixedprobe=2,
+        n_fixed_probe_cache_hits=1,
+        fixed_probe_max_log_masses=[0.5, 1.5],
     )
 
     point = _build_point(1, stats)
@@ -169,3 +201,8 @@ def test_build_point_reports_signed_lh_reward_split() -> None:
     assert point.negative_lh_reward_mean == pytest.approx(1.0)
     assert point.non_negative_lh_reward_mean == pytest.approx(-1.0)
     assert point.negative_lh_reward_lift == pytest.approx(2.0)
+    assert point.n_fixed_probe_checked == 3
+    assert point.n_positive_lh_fixedprobe == 2
+    assert point.frac_positive_lh_fixedprobe == pytest.approx(2 / 3)
+    assert point.n_fixed_probe_cache_hits == 1
+    assert point.mean_fixed_probe_max_log_mass == pytest.approx(1.0)

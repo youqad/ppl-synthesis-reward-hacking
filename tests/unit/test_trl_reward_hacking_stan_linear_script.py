@@ -61,6 +61,12 @@ class _FakeTrajectoryPoint:
         negative_lh_reward_mean: float = 0.0,
         non_negative_lh_reward_mean: float = 0.0,
         negative_lh_reward_lift: float = 0.0,
+        n_fixed_probe_checked: int = 0,
+        n_fixed_probe_failed: int = 0,
+        n_positive_lh_fixedprobe: int = 0,
+        frac_positive_lh_fixedprobe: float = 0.0,
+        n_fixed_probe_cache_hits: int = 0,
+        mean_fixed_probe_max_log_mass: float = 0.0,
         n_unique_programs: int = 0,
         n_unique_programs_exact: int = 0,
         n_unique_valid_programs: int = 0,
@@ -102,6 +108,12 @@ class _FakeTrajectoryPoint:
         self.negative_lh_reward_mean = negative_lh_reward_mean
         self.non_negative_lh_reward_mean = non_negative_lh_reward_mean
         self.negative_lh_reward_lift = negative_lh_reward_lift
+        self.n_fixed_probe_checked = n_fixed_probe_checked
+        self.n_fixed_probe_failed = n_fixed_probe_failed
+        self.n_positive_lh_fixedprobe = n_positive_lh_fixedprobe
+        self.frac_positive_lh_fixedprobe = frac_positive_lh_fixedprobe
+        self.n_fixed_probe_cache_hits = n_fixed_probe_cache_hits
+        self.mean_fixed_probe_max_log_mass = mean_fixed_probe_max_log_mass
         self.n_unique_programs = n_unique_programs
         self.n_unique_programs_exact = n_unique_programs_exact
         self.n_unique_valid_programs = n_unique_valid_programs
@@ -123,6 +135,13 @@ def test_config_from_mapping_maps_fields() -> None:
             "checker_mode": "enforce",
             "prompt_policy": "induce_subtle_family",
             "num_system_prompts": 3,
+            "contract_penalty_reward_final": -20.0,
+            "parse_fail_penalty_reward_final": -50.0,
+            "exec_fail_penalty_reward_final": -75.0,
+            "validity_penalty_decay_steps": 12,
+            "fixed_probe_interval": 2,
+            "fixed_probe_sample_size": 5,
+            "fixed_probe_n_tasks": 3,
         }
     )
     assert cfg.model == "Qwen/Qwen3-1.7B"
@@ -133,6 +152,13 @@ def test_config_from_mapping_maps_fields() -> None:
     assert cfg.checker_mode == "enforce"
     assert cfg.prompt_policy == "induce_subtle_family"
     assert cfg.num_system_prompts == 3
+    assert cfg.contract_penalty_reward_final == -20.0
+    assert cfg.parse_fail_penalty_reward_final == -50.0
+    assert cfg.exec_fail_penalty_reward_final == -75.0
+    assert cfg.validity_penalty_decay_steps == 12
+    assert cfg.fixed_probe_interval == 2
+    assert cfg.fixed_probe_sample_size == 5
+    assert cfg.fixed_probe_n_tasks == 3
 
 
 def test_config_from_mapping_rejects_unknown_key() -> None:
@@ -194,6 +220,17 @@ def test_config_from_mapping_rejects_invalid_normalization_sample_size() -> None
         )
 
 
+def test_config_from_mapping_rejects_invalid_fixed_probe_sample_size() -> None:
+    module = _load_module()
+    with pytest.raises(ValueError, match="fixed_probe_sample_size must be >= -1"):
+        module.config_from_mapping(
+            {
+                "prompt_policy": "neutral_family",
+                "fixed_probe_sample_size": -2,
+            }
+        )
+
+
 def test_default_run_name_has_expected_prefix() -> None:
     module = _load_module()
     cfg = module.TRLStanLinearRewardConfig(
@@ -230,6 +267,26 @@ def test_build_training_args_uses_expanded_prompt_count(monkeypatch, tmp_path) -
 
     assert captured["generation_batch_size"] == 256
     assert captured["gradient_accumulation_steps"] == 32
+
+
+def test_build_fixed_probe_tasks_is_deterministic() -> None:
+    module = _load_module()
+    cfg = module.TRLStanLinearRewardConfig(
+        fixed_probe_interval=1,
+        fixed_probe_n_tasks=2,
+        fixed_probe_n_train=3,
+        fixed_probe_n_test=4,
+        fixed_probe_seed_base=123,
+    )
+
+    left = module._build_fixed_probe_tasks(cfg)
+    right = module._build_fixed_probe_tasks(cfg)
+
+    assert [task["task_id"] for task in left] == [task["task_id"] for task in right]
+    assert [task["meta"]["seed"] for task in left] == [123, 124]
+    assert len(left) == 2
+    assert len(left[0]["X_train"]) == 3
+    assert len(left[0]["X_test"]) == 4
 
 
 def test_build_summary_emits_direct_stan_keys() -> None:
