@@ -327,11 +327,11 @@ CROSS_RUN_NORM = [
     ("Seed 0 ($d{=}3$)", 2, 46, "train", C_S0),
     ("Seed 10k ($d{=}3$)", 3, 49, "train", C_S10K),
     ("Seed 30k ($d{=}3$)", 3, 176, "train", C_S30K),
-    # GLM-5 sweep (CLAUDE.md: hky539sh, ~4/19 checked at step 2)
+    # GLM-5 sweep (~4/19 checked at step 2)
     ("GLM-5 sweep ($d{=}5$)", 4, 19, "train", "#e7298a"),
     # Sam's base-rate sweep: ~0% across ~1000 programs from untrained models
     ("Untrained baseline", 0, 1000, "train", C_BASELINE),
-    # Metric ablations (CLAUDE.md documented values)
+    # Metric ablations (documented run values)
     ("Ablation: LogML", 0, 130, "ablation", C_ABLATION_CLEAN),
     ("Ablation: WAIC", 1, 90, "ablation", C_ABLATION_CLEAN),
     ("Ablation: ELPD", 200, 200, "ablation", C_ABLATION_DIRTY),

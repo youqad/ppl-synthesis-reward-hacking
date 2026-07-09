@@ -26,7 +26,7 @@ from ppl_synthesis_reward_hacking.plotting.styles import apply_publication_style
 
 REPO = Path(__file__).resolve().parent.parent
 
-# d=3 relaunch artifact dirs (from AGENTS.md)
+# d=3 relaunch artifact dirs
 DEFAULT_BASELINE = REPO / "artifacts" / "sweeps" / "tinker_20260225_052004_514160"
 DEFAULT_SSTAN = REPO / "artifacts" / "sweeps" / "tinker_20260225_052010_703046"
 DEFAULT_JUDGE = REPO / "artifacts" / "sweeps" / "tinker_20260225_052017_778463"
