@@ -1,14 +1,5 @@
 # Likelihood hacking program catalog
 
-## HARD MEMORY RULE (agent behavior)
-
-BACKWARD COMPATIBILITY IN RUNTIME IS NOT ALLOWED IN THIS REPO.
-
-- Treat backward compatibility as TECH DEBT + CODE SMELL + CLUTTER.
-- Do not add legacy adapters/aliases/shims in training or evaluation runtime paths.
-- Prefer fail-fast errors for stale configs/schemas.
-- If migration is needed, do it in one-off offline scripts only.
-
 Persistent catalog of all LH programs discovered in training runs. Each entry includes the program code, mechanism classification, and quantitative metrics.
 
 Last updated: 2026-02-18 (Run 7 steps 0-10)
